@@ -9,7 +9,6 @@ pub const PhysicalAddress = mm.Sv39PhysicalAddress;
 
 pub const enableInterrupts = trap.enableInterrupts;
 pub const disableInterrupts = trap.disableInterrupts;
-pub const initInterrupts = trap.init;
 
 pub const clock_source = timer.riscv_clock_source;
 

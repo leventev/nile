@@ -1,13 +1,13 @@
-const std = @import("std");
-const builtin = @import("builtin");
-const kio = @import("kio.zig");
-const devicetree = @import("devicetree.zig");
-const mm = @import("mem/mm.zig");
-const phys = @import("mem/phys.zig");
-const arch = @import("arch/arch.zig");
-const time = @import("time.zig");
-
-const config = @import("config.zig");
+pub const std = @import("std");
+pub const builtin = @import("builtin");
+pub const kio = @import("kio.zig");
+pub const devicetree = @import("devicetree.zig");
+pub const mm = @import("mem/mm.zig");
+pub const phys = @import("mem/phys.zig");
+pub const arch = @import("arch/arch.zig");
+pub const time = @import("time.zig");
+pub const interrupt = @import("interrupt.zig");
+pub const config = @import("config.zig");
 
 export var device_tree_pointer: *void = undefined;
 
@@ -61,8 +61,10 @@ fn init() void {
 
     static_mem_allocator.free(frame_regions);
 
-    arch.initInterrupts();
+    //arch.initInterrupts();
 
+    // find interrupt controllers first
+    devicetree.initDriversFromDeviceTreeEarly(&dt);
     devicetree.initDriversFromDeviceTree(&dt);
 
     time.init(&dt) catch @panic("Failed to initialize timer");

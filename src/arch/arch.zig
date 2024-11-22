@@ -10,10 +10,6 @@ pub const init = switch (target) {
     Arch.riscv64 => riscv64.init,
 };
 
-pub const initInterrupts = switch (target) {
-    Arch.riscv64 => riscv64.initInterrupts,
-};
-
 pub const enableInterrupts = switch (target) {
     Arch.riscv64 => riscv64.enableInterrupts,
 };

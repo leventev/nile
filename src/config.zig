@@ -25,4 +25,24 @@ pub const modules: []const Module = &.{
             },
         },
     },
+    .{
+        .name = "riscv-cpu-intc",
+        .module = @import("arch/riscv64/trap.zig"),
+        .enabled = true,
+        .init_type = Module.ModuleType{
+            .driver = .{
+                .compatible = &.{"riscv,cpu-intc"},
+            },
+        },
+    },
+    .{
+        .name = "riscv-plic",
+        .module = @import("arch/riscv64/plic.zig"),
+        .enabled = true,
+        .init_type = Module.ModuleType{
+            .driver = .{
+                .compatible = &.{ "sifive,plic-1.0.0", "riscv,plic0" },
+            },
+        },
+    },
 };

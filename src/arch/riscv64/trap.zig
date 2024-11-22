@@ -3,6 +3,7 @@ const kio = @import("../../kio.zig");
 const csr = @import("csr.zig").CSR;
 const sbi = @import("sbi.zig");
 const timer = @import("timer.zig");
+const devicetree = @import("root").devicetree;
 
 extern fn trapHandlerSupervisor() void;
 
@@ -373,7 +374,9 @@ export fn handleTrap(
     }
 }
 
-pub fn init() void {
+pub fn initDriver(dt: *const devicetree.DeviceTree, handle: usize) !void {
+    _ = dt;
+    _ = handle;
     const stvec = TrapVectorBaseAddr.make(
         @intFromPtr(&trapHandlerSupervisor),
         TrapVectorBaseAddr.Mode.direct,

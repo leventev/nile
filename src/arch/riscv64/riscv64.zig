@@ -24,7 +24,7 @@ pub fn init() linksection(".init") void {
         .writeBytes = sbiWriteBytes,
     }) catch unreachable;
 
-    kio.info("Starting kara(riscv64)...", .{});
+    kio.info("Starting nile(riscv64)...", .{});
     const sbi_version = sbi.getSpecificationVersion();
     const sbi_version_major = sbi_version >> 24;
     const sbi_version_minor = sbi_version & 0x00FFFFFF;

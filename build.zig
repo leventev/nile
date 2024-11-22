@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const exe = b.addExecutable(.{
-        .name = "kara",
+        .name = "nile",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
@@ -30,7 +30,7 @@ pub fn build(b: *std.Build) void {
     qemu.addArgs(&.{
         "-machine", "virt",
         "-bios",    "opensbi/build/platform/generic/firmware/fw_dynamic.bin",
-        "-kernel",  "zig-out/bin/kara",
+        "-kernel",  "zig-out/bin/nile",
         "-serial",  "stdio",
         "-m",       "128M",
     });

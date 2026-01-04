@@ -69,7 +69,7 @@ fn init() void {
 
     time.init(&dt) catch @panic("Failed to initialize timer");
 
-    arch.enableInterrupts();
+    // arch.enableInterrupts();
 
     while (true) {
         asm volatile ("wfi");

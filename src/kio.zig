@@ -14,8 +14,14 @@ const max_backends = 8;
 var backends: [max_backends]IOBackend = undefined;
 var backend_count: usize = 0;
 
-pub const KernelWriterType = std.io.GenericWriter(void, error{}, writeBytes);
-pub const kernel_writer = KernelWriterType{ .context = {} };
+// pub const KernelWriterType = std.io.GenericWriter(void, error{}, writeBytes);
+const kernel_writer_vtable = std.io.Writer.VTable{
+    .drain = drain,
+};
+pub var kernel_writer = std.io.Writer{
+    .vtable = &kernel_writer_vtable,
+    .buffer = &.{},
+};
 
 const kio_cfg: std.io.tty.Config = .escape_codes;
 
@@ -35,15 +41,27 @@ fn printTimeAndLogLevel(level: LogLevel) !void {
     const rem = ns % time.ns_per_second;
     const qs = rem / (10 * time.ns_per_microseconds);
 
-    try std.fmt.format(kernel_writer, "{}.{:0>5} ", .{ sec, qs });
+    try kernel_writer.print("{}.{:0>5} ", .{ sec, qs });
 
-    try kio_cfg.setColor(kernel_writer, std.io.tty.Color.bold);
-    try kio_cfg.setColor(kernel_writer, level.color());
+    try kio_cfg.setColor(&kernel_writer, std.io.tty.Color.bold);
+    try kio_cfg.setColor(&kernel_writer, level.color());
     _ = try kernel_writer.write(@tagName(level) ++ " ");
-    try kio_cfg.setColor(kernel_writer, std.io.tty.Color.reset);
+    try kio_cfg.setColor(&kernel_writer, std.io.tty.Color.reset);
 }
 
-fn writeBytes(_: void, bytes: []const u8) error{}!usize {
+fn drain(writer: *std.io.Writer, buffers: []const []const u8, splat: usize) std.io.Writer.Error!usize {
+    _ = writer;
+    // TODO: implement expected drain behavior
+    _ = splat;
+    var written: usize = 0;
+    for (buffers) |bytes| {
+        written += try writeBytes(bytes);
+    }
+
+    return written;
+}
+
+fn writeBytes(bytes: []const u8) error{}!usize {
     // TODO: locking
     if (backend_count == 0) return 0;
 
@@ -77,7 +95,7 @@ pub const LogLevel = enum(comptime_int) {
 
 pub fn print(level: LogLevel, comptime format: []const u8, args: anytype) void {
     printTimeAndLogLevel(level) catch unreachable;
-    std.fmt.format(kernel_writer, format, args) catch unreachable;
+    kernel_writer.print(format, args) catch unreachable;
     kernel_writer.writeByte('\n') catch unreachable;
 }
 

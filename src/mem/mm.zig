@@ -139,6 +139,7 @@ fn parseReservedMemoryRegions(
 const minimum_region_size = 8 * 4096;
 
 fn processRegion(
+    allocator: std.mem.Allocator,
     regs: *std.ArrayList(MemoryRegion),
     region: PhysicalMemoryRegion,
     reserved_regions: []const ReservedMemoryRegion,
@@ -188,11 +189,11 @@ fn processRegion(
             },
         };
 
-        try processRegion(regs, other_region, reserved_regions);
+        try processRegion(allocator, regs, other_region, reserved_regions);
     }
 
     if (range.size >= minimum_region_size)
-        try regs.append(range);
+        try regs.append(allocator, range);
 }
 
 fn getUsableRegions(
@@ -200,10 +201,10 @@ fn getUsableRegions(
     physical_regions: []const PhysicalMemoryRegion,
     reserved_regions: []const ReservedMemoryRegion,
 ) !std.ArrayList(MemoryRegion) {
-    var regions = std.ArrayList(MemoryRegion).init(allocator);
+    var regions = std.ArrayList(MemoryRegion){};
 
     for (physical_regions) |phys| {
-        try processRegion(&regions, phys, reserved_regions);
+        try processRegion(allocator, &regions, phys, reserved_regions);
     }
 
     return regions;
@@ -352,7 +353,7 @@ pub fn getFrameRegions(allocator: std.mem.Allocator, dt: *const devicetree.Devic
 
     printUsableRegions(usable_regions.items);
 
-    return usable_regions.toOwnedSlice();
+    return usable_regions.toOwnedSlice(allocator);
 }
 
 const hhdm_start = 0xffffffc000000000;

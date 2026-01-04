@@ -14,10 +14,12 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "nile",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-        .code_model = .medium,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .code_model = .medium,
+        }),
     });
 
     exe.addAssemblyFile(b.path("src/arch/riscv64/start.s"));
@@ -33,6 +35,7 @@ pub fn build(b: *std.Build) void {
         "-kernel",  "zig-out/bin/nile",
         "-serial",  "stdio",
         "-m",       "128M",
+        "-d",       "int",
     });
     qemu.step.dependOn(b.getInstallStep());
 

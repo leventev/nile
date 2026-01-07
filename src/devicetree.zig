@@ -94,7 +94,7 @@ pub const DeviceTreeNode = struct {
         dma_ranges: []const u8, // TODO
         dma_coherent: void,
         dma_noncoherent: void,
-        interrupts: []const u8, // TODO
+        interrupts: []const u8,
         interrupt_parent: u32,
         interrupts_extended: InterruptsExtended,
         interrupt_cells: u32,
@@ -325,12 +325,17 @@ pub const DeviceTreeNode = struct {
                     _ = try writer.write("virtual_reg = ");
                     try self.reg.print(writer, address_cells, size_cells);
                 },
+                .interrupts => |val| {
+                    _ = try std.fmt.format(writer, "interrupts = {any}", .{val});
+                },
                 .interrupts_extended => {
                     _ = try writer.write("interrupts_extended = ");
                     try self.interrupts_extended.print(dt, writer);
                 },
                 .interrupt_parent => |val| {
-                    try std.fmt.format(writer, "interrupt_parent = <&{s}>", .{dt.getNodeName(val)});
+                    const parent_handle = dt.phandle_table.get(val) orelse
+                        return error.InvalidDeviceTree;
+                    try std.fmt.format(writer, "interrupt_parent = <&{s}>", .{dt.getNodeName(parent_handle)});
                 },
                 .interrupt_cells => |val| {
                     try std.fmt.format(writer, "interrupt_cells = {}", .{val});
@@ -591,7 +596,7 @@ pub fn printDeviceTree(
         space_buf[i] = ' ';
     }
 
-    kio.info("{s}{s}:", .{ space_buf[0..space_count], path });
+    std.log.info("{s}{s}:", .{ space_buf[0..space_count], path });
 
     // TODO: determine a good buffer size
     var prop_buff: [4096]u8 = undefined;
@@ -601,7 +606,7 @@ pub fn printDeviceTree(
         stream.reset();
         prop.print(handle, dt_root, writer) catch @panic("buffer too small");
         const str = stream.getWritten();
-        kio.info("{s}{s}", .{ space_buf[0..space_count], str });
+        std.log.info("{s}{s}", .{ space_buf[0..space_count], str });
     }
 
     for (node.children.items) |child| {
@@ -630,9 +635,9 @@ fn initDriverFromDeviceTree(
                 if (!std.mem.eql(u8, driver_comp, node_comp)) continue;
 
                 mod.module.initDriver(dt, handle) catch |err| {
-                    kio.err("failed to initialize {s}: {s}", .{ mod.name, @errorName(err) });
+                    std.log.err("failed to initialize {s}: {s}", .{ mod.name, @errorName(err) });
                 };
-                kio.info("Module '{s}'({s}) initialized", .{ mod.name, node_name });
+                std.log.info("Module '{s}'({s}) initialized", .{ mod.name, node_name });
 
                 return;
             }
@@ -645,7 +650,7 @@ fn initDriverFromDeviceTree(
     compatible.print(writer) catch @panic("compatible string too long");
     const allCompString = stream.getWritten();
 
-    kio.warn(
+    std.log.warn(
         "Compatible driver not found for '{s}' compatible: '{s}'",
         .{ node_name, allCompString },
     );

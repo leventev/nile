@@ -1,5 +1,4 @@
 const std = @import("std");
-const kio = @import("../kio.zig");
 const devicetree = @import("../devicetree.zig");
 const arch = @import("../arch/arch.zig");
 
@@ -240,7 +239,7 @@ fn addKernelReservedMemory(
     const kernel_end = std.mem.alignForward(usize, @intFromPtr(&__kernel_end), 4096);
     const kernel_size = kernel_end - kernel_start;
 
-    kio.info("Kernel code: {} KiB, rodata: {} KiB, data: {} KiB, bss: {} KiB, stack: {} KiB", .{
+    std.log.info("Kernel code: {} KiB, rodata: {} KiB, data: {} KiB, bss: {} KiB, stack: {} KiB", .{
         text_size / 1024,
         rodata_size / 1024,
         data_size / 1024,
@@ -283,11 +282,11 @@ fn addDeviceTreeReservedMemory(
 }
 
 fn printPhysicalRegions(physical_regions: []const PhysicalMemoryRegion) void {
-    kio.info("Physical memory regions:", .{});
+    std.log.info("Physical memory regions:", .{});
     for (physical_regions) |reg| {
         const range = reg.range;
         const sizeInKiB = range.size / 1024;
-        kio.info(
+        std.log.info(
             "    [0x{x:0>16}-0x{x:0>16}] ({} KiB)",
             .{ range.start, range.end() - 1, sizeInKiB },
         );
@@ -295,12 +294,12 @@ fn printPhysicalRegions(physical_regions: []const PhysicalMemoryRegion) void {
 }
 
 fn printReservedRegions(reserved_regions: []const ReservedMemoryRegion) void {
-    kio.info("Reserved memory regions:", .{});
+    std.log.info("Reserved memory regions:", .{});
     for (reserved_regions) |reg| {
         const range = reg.range;
         const size_in_kib = range.size / 1024;
         if (reg.system) {
-            kio.info("    [0x{x:0>16}-0x{x:0>16}] <{s}> ({} KiB) system", .{
+            std.log.info("    [0x{x:0>16}-0x{x:0>16}] <{s}> ({} KiB) system", .{
                 range.start,
                 range.end() - 1,
                 reg.name,
@@ -309,7 +308,7 @@ fn printReservedRegions(reserved_regions: []const ReservedMemoryRegion) void {
         } else {
             const no_map_string = if (reg.no_map) "no-map" else "map";
             const reusable_string = if (reg.reusable) "reusable" else "non-reusable";
-            kio.info("    [0x{x:0>16}-0x{x:0>16}] <{s}> ({} KiB) {s} {s}", .{
+            std.log.info("    [0x{x:0>16}-0x{x:0>16}] <{s}> ({} KiB) {s} {s}", .{
                 range.start,
                 range.end() - 1,
                 reg.name,
@@ -322,10 +321,10 @@ fn printReservedRegions(reserved_regions: []const ReservedMemoryRegion) void {
 }
 
 fn printUsableRegions(regions: []const MemoryRegion) void {
-    kio.info("Usable memory regions:", .{});
+    std.log.info("Usable memory regions:", .{});
     for (regions) |reg| {
         const size_in_kib = reg.size / 1024;
-        kio.info(
+        std.log.info(
             "    [0x{x:0>16}-0x{x:0>16}] ({} KiB)",
             .{ reg.start, reg.end() - 1, size_in_kib },
         );

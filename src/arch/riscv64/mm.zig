@@ -227,13 +227,13 @@ pub fn setupPaging() void {
 
     writeSATP(satp);
 
-    kio.info("Virtual memory map:", .{});
-    kio.info("    Kernel: [0x{x:0>16}-0x{x:0>16}] ({} KiB)", .{
+    std.log.info("Virtual memory map:", .{});
+    std.log.info("    Kernel: [0x{x:0>16}-0x{x:0>16}] ({} KiB)", .{
         kernel_reg_start,
         kernel_reg_end,
         kernel_reg_size / 1024,
     });
-    kio.info("      HHDM: [0x{x:0>16}-0x{x:0>16}] ({} KiB)", .{
+    std.log.info("      HHDM: [0x{x:0>16}-0x{x:0>16}] ({} KiB)", .{
         hhdm_reg_start,
         hhdm_reg_end,
         hhdm_reg_size / 1024,

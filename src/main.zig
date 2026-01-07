@@ -16,16 +16,21 @@ var temp_heap: [temp_heap_size]u8 = undefined;
 var fba = std.heap.FixedBufferAllocator.init(&temp_heap);
 const static_mem_allocator = fba.allocator();
 
+pub const std_options: std.Options = .{
+    .log_level = .info,
+    .logFn = kio.kernel_log,
+};
+
 pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
     _ = ret_addr;
     _ = error_return_trace;
 
-    kio.err("KERNEL PANIC: {s}", .{msg});
-    kio.err("Stack trace:", .{});
+    std.log.err("KERNEL PANIC: {s}", .{msg});
+    std.log.err("Stack trace:", .{});
     const first_trace_addr = @returnAddress();
     var it = std.debug.StackIterator.init(first_trace_addr, null);
     while (it.next()) |addr| {
-        kio.err("    0x{x}", .{addr});
+        std.log.err("    0x{x}", .{addr});
     }
     while (true) {}
 }
@@ -38,20 +43,20 @@ export fn kmain() linksection(".init") void {
 }
 
 fn init() void {
-    kio.info("Device tree address: 0x{x}", .{@intFromPtr(device_tree_pointer)});
+    std.log.info("Device tree address: 0x{x}", .{@intFromPtr(device_tree_pointer)});
     const dt = devicetree.readDeviceTreeBlob(static_mem_allocator, device_tree_pointer) catch
         @panic("Failed to read device tree blob");
 
     inline for (config.modules) |mod| {
         if (!mod.enabled or mod.init_type != .always_run) continue;
         mod.module.init(&dt) catch |err| {
-            kio.err("failed to initialize {s}: {s}", .{ mod.name, @errorName(err) });
+            std.log.err("failed to initialize {s}: {s}", .{ mod.name, @errorName(err) });
         };
-        kio.info("Module '{s}'(always run) initialized", .{mod.name});
+        std.log.info("Module '{s}'(always run) initialized", .{mod.name});
     }
 
     const machine = dt.root().getProperty(.model) orelse @panic("Invalid device tree");
-    kio.info("Machine model: {s}", .{machine});
+    std.log.info("Machine model: {s}", .{machine});
 
     const frame_regions = mm.getFrameRegions(static_mem_allocator, &dt) catch
         @panic("Failed to get physical memory regions");
@@ -61,15 +66,13 @@ fn init() void {
 
     static_mem_allocator.free(frame_regions);
 
-    //arch.initInterrupts();
-
     // find interrupt controllers first
     devicetree.initDriversFromDeviceTreeEarly(&dt);
     devicetree.initDriversFromDeviceTree(&dt);
 
     time.init(&dt) catch @panic("Failed to initialize timer");
 
-    // arch.enableInterrupts();
+    arch.enableInterrupts();
 
     while (true) {
         asm volatile ("wfi");

@@ -32,7 +32,7 @@ const Timer = struct {
         self.start_count = arch.clock_source.readCounter();
         self.initialized = true;
 
-        kio.info("Timer initialized frequency={}Hz, increments every {}ns", .{
+        std.log.info("Timer initialized frequency={}Hz, increments every {}ns", .{
             frequency,
             self.ns_per_increment,
         });

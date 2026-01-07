@@ -1,9 +1,12 @@
 // https://uart16550.readthedocs.io/_/downloads/en/latest/pdf/
+// https://en.wikibooks.org/wiki/Serial_Programming
 
 const std = @import("std");
-const devicetree = @import("../devicetree.zig");
-const mm = @import("../mem/mm.zig");
-const kio = @import("../kio.zig");
+const root = @import("root");
+const devicetree = root.devicetree;
+const mm = root.mm;
+const kio = root.kio;
+const interrupt = root.interrupt;
 
 const receiver_buffer_offset = 0;
 const transmission_holding_register_offset = 0;
@@ -126,8 +129,10 @@ fn writeBytes(buf: []const u8) ?usize {
     return buf.len;
 }
 
-pub fn initDriver(dt: *const devicetree.DeviceTree, handle: usize) !void {
+pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
     const uart = dt.nodes.items[handle];
+
+    devicetree.printDeviceTree("/", dt, handle, 0);
 
     const freq = uart.getProperty(.clock_frequency) orelse
         return error.InvalidDeviceTree;
@@ -147,10 +152,26 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: usize) !void {
     const virtAddr = mm.physicalToHHDMAddress(physAddr);
     base_ptr = @ptrFromInt(virtAddr.asInt());
 
-    writeReg(interrupt_enable_offset, 0);
-    writeReg(interrupt_identification_offset, 0xC1);
-    writeReg(modem_control_offset, 0);
-    writeReg(fifo_control_offset, 0b11000000);
+    const interrupts = uart.getProperty(.interrupts) orelse
+        return error.InvalidDeviceTree;
+    const int_num = std.mem.readInt(u32, interrupts[0..4], .big);
+
+    std.log.debug("{}", .{int_num});
+
+    try interrupt.enableInterrupt(int_num);
+    try interrupt.setPriority(int_num, 1);
+
+    writeReg(interrupt_enable_offset, @bitCast(InterruptEnableRegister{
+        .__reserved = 0,
+        .modem_status_interrupt = false,
+        .received_data_available = true,
+        .receiver_line_status = false,
+        .transmitter_holding_register = false,
+    }));
+    //writeReg(interrupt_identification_offset, 0xC1);
+    //writeReg(modem_control_offset, 0);
+    //writeReg(fifo_control_offset, 0b11000000);
+    writeReg(fifo_control_offset, 1);
 
     // we only care about enabling DLAB
     writeReg(line_control_offset, @bitCast(LineControlRegister{
@@ -183,5 +204,5 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: usize) !void {
         .name = "uart",
         .priority = 1000,
         .writeBytes = writeBytes,
-    }) catch kio.warn("Failed to add uart IO backend", .{});
+    }) catch std.log.warn("Failed to add uart IO backend", .{});
 }

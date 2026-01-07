@@ -1,3 +1,4 @@
+const std = @import("std");
 const sbi = @import("sbi.zig");
 const mm = @import("mm.zig");
 const kio = @import("../../kio.zig");
@@ -24,7 +25,7 @@ pub fn init() linksection(".init") void {
         .writeBytes = sbiWriteBytes,
     }) catch unreachable;
 
-    kio.info("Starting nile(riscv64)...", .{});
+    std.log.info("Starting nile(riscv64)...", .{});
     const sbi_version = sbi.getSpecificationVersion();
     const sbi_version_major = sbi_version >> 24;
     const sbi_version_minor = sbi_version & 0x00FFFFFF;
@@ -35,8 +36,8 @@ pub fn init() linksection(".init") void {
         "Unknown";
     const sbi_implementation_version = sbi.getImplementationVersion();
 
-    kio.info("SBI specification version: {}.{}", .{ sbi_version_major, sbi_version_minor });
-    kio.info("SBI implementation: {s} (ID={x}) version: 0x{x}", .{ sbi_impl_str, sbi_impl_id, sbi_implementation_version });
+    std.log.info("SBI specification version: {}.{}", .{ sbi_version_major, sbi_version_minor });
+    std.log.info("SBI implementation: {s} (ID={x}) version: 0x{x}", .{ sbi_impl_str, sbi_impl_id, sbi_implementation_version });
 
     mm.setupPaging();
 }

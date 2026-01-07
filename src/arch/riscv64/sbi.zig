@@ -59,7 +59,7 @@ pub fn call(extension: u64, function: u64, arg0: u64, arg1: u64, arg2: u64) SBIE
     var val: i64 = undefined;
     var error_code_val: i64 = undefined;
     asm volatile ("ecall"
-        :
+        : [error_code_val] "={a0}" (error_code_val),
         : [extension] "{a7}" (extension),
           [function] "{a6}" (function),
           [arg0] "{a0}" (arg0),
@@ -69,15 +69,12 @@ pub fn call(extension: u64, function: u64, arg0: u64, arg1: u64, arg2: u64) SBIE
 
     // TODO: https://github.com/ziglang/zig/issues/215 :(
     asm volatile (""
-        : [error_code_val] "={a0}" (error_code_val),
-    );
-    asm volatile (""
         : [val] "={a1}" (val),
     );
 
-    const errorCode: SBIErrorCode = @enumFromInt(error_code_val);
+    const error_code: SBIErrorCode = @enumFromInt(error_code_val);
 
-    switch (errorCode) {
+    switch (error_code) {
         .success => return val,
         .err_failed => return error.Failed,
         .err_not_supported => return error.NotSupported,

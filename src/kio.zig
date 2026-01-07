@@ -14,7 +14,6 @@ const max_backends = 8;
 var backends: [max_backends]IOBackend = undefined;
 var backend_count: usize = 0;
 
-// pub const KernelWriterType = std.io.GenericWriter(void, error{}, writeBytes);
 const kernel_writer_vtable = std.io.Writer.VTable{
     .drain = drain,
 };
@@ -30,12 +29,21 @@ pub fn addBackend(backend: IOBackend) !void {
     if (backend_count == max_backends) return error.TooManyBackends;
     backends[backend_count] = backend;
     backend_count += 1;
-    info("New kernel IO backend added: {s} with priority: {}", .{ backend.name, backend.priority });
+    std.log.info("New kernel IO backend added: {s} with priority: {}", .{ backend.name, backend.priority });
 }
 
 // TODO: removeBackend
 
-fn printTimeAndLogLevel(level: LogLevel) !void {
+fn logLevelColor(level: std.log.Level) std.io.tty.Color {
+    return switch (level) {
+        .info => .blue,
+        .debug => .magenta,
+        .warn => .yellow,
+        .err => .red,
+    };
+}
+
+fn printLogPreamble(comptime scope: @Type(.enum_literal), comptime level: std.log.Level) !void {
     const ns = time.nanoseconds() orelse 0;
     const sec = ns / time.ns_per_second;
     const rem = ns % time.ns_per_second;
@@ -44,8 +52,8 @@ fn printTimeAndLogLevel(level: LogLevel) !void {
     try kernel_writer.print("{}.{:0>5} ", .{ sec, qs });
 
     try kio_cfg.setColor(&kernel_writer, std.io.tty.Color.bold);
-    try kio_cfg.setColor(&kernel_writer, level.color());
-    _ = try kernel_writer.write(@tagName(level) ++ " ");
+    try kio_cfg.setColor(&kernel_writer, logLevelColor(level));
+    _ = try kernel_writer.write(@tagName(level) ++ "(" ++ @tagName(scope) ++ ") ");
     try kio_cfg.setColor(&kernel_writer, std.io.tty.Color.reset);
 }
 
@@ -75,42 +83,13 @@ fn writeBytes(bytes: []const u8) error{}!usize {
     return best.writeBytes(bytes) orelse unreachable;
 }
 
-pub const LogLevel = enum(comptime_int) {
-    info,
-    debug,
-    warn,
-    err,
-
-    const Self = @This();
-
-    fn color(self: Self) std.io.tty.Color {
-        return switch (self) {
-            .info => .blue,
-            .debug => .magenta,
-            .warn => .yellow,
-            .err => .red,
-        };
-    }
-};
-
-pub fn print(level: LogLevel, comptime format: []const u8, args: anytype) void {
-    printTimeAndLogLevel(level) catch unreachable;
+pub fn kernel_log(
+    comptime level: std.log.Level,
+    comptime scope: @Type(.enum_literal),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    printLogPreamble(scope, level) catch unreachable;
     kernel_writer.print(format, args) catch unreachable;
     kernel_writer.writeByte('\n') catch unreachable;
-}
-
-pub fn debug(comptime format: []const u8, args: anytype) void {
-    print(.debug, format, args);
-}
-
-pub fn info(comptime format: []const u8, args: anytype) void {
-    print(.info, format, args);
-}
-
-pub fn warn(comptime format: []const u8, args: anytype) void {
-    print(.warn, format, args);
-}
-
-pub fn err(comptime format: []const u8, args: anytype) void {
-    print(.err, format, args);
 }

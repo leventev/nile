@@ -4,8 +4,9 @@ const mm = root.mm;
 const devicetree = root.devicetree;
 const kio = root.kio;
 const interrupt = root.interrupt;
+const riscv_int = @import("trap.zig");
 
-// https://plan9.io/sources/contrib/geoff/riscv/riscv-plic.pdf
+// https://github.com/riscv/riscv-plic-spec
 // https://www.starfivetech.com/uploads/sifive-interrupt-cookbook-v1p2.pdf
 
 /// Priorities are u32 values, interrupt source 0 does not exist
@@ -66,11 +67,112 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
         .base_ptr = virt_addr,
         .max_interrupts = max_interrupts,
     };
+
+    try setThreshold(0, 0);
+
+    try interrupt.registerInterruptController(interrupt.InterruptController{
+        .enableInterrupt = enableInterruptWrapper,
+        .disableInterrupt = disableInterruptWrapper,
+        .setPriority = setPriorityWrapper,
+        .getPriority = getPriorityWrapper,
+        .setHandler = setHandlerWrapper,
+    });
+
+    riscv_int.enableInterrupt(@intCast(@intFromEnum(riscv_int.InterruptCode.machine_external)));
+    riscv_int.enableInterrupt(@intCast(@intFromEnum(riscv_int.InterruptCode.supervisor_external)));
+}
+
+fn enableInterruptWrapper(int_num: usize) interrupt.InterruptController.Error!void {
+    const int: u32 = @intCast(int_num);
+    // TODO: contexts
+    const context = 0;
+    enableInterrupt(context, int) catch |err| {
+        return switch (err) {
+            PLICError.DriverUninitialized => error.ControllerInternalError,
+            PLICError.InvalidInterruptID => error.InvalidInterruptID,
+            PLICError.InvalidPriority => error.InvalidPriority,
+            PLICError.InvalidContext => @panic("invalid context"),
+            PLICError.InvalidThreshold => @panic("invalid threshold"),
+        };
+    };
+
+    enableInterrupt(1, int) catch |err| {
+        return switch (err) {
+            PLICError.DriverUninitialized => error.ControllerInternalError,
+            PLICError.InvalidInterruptID => error.InvalidInterruptID,
+            PLICError.InvalidPriority => error.InvalidPriority,
+            PLICError.InvalidContext => @panic("invalid context"),
+            PLICError.InvalidThreshold => @panic("invalid threshold"),
+        };
+    };
+
+    enableInterrupt(2, int) catch |err| {
+        return switch (err) {
+            PLICError.DriverUninitialized => error.ControllerInternalError,
+            PLICError.InvalidInterruptID => error.InvalidInterruptID,
+            PLICError.InvalidPriority => error.InvalidPriority,
+            PLICError.InvalidContext => @panic("invalid context"),
+            PLICError.InvalidThreshold => @panic("invalid threshold"),
+        };
+    };
+}
+
+fn disableInterruptWrapper(int_num: usize) interrupt.InterruptController.Error!void {
+    const int: u32 = @intCast(int_num);
+    // TODO: contexts
+    const context = 0;
+    disableInterrupt(context, int) catch |err| {
+        return switch (err) {
+            PLICError.DriverUninitialized => interrupt.InterruptController.Error.ControllerInternalError,
+            PLICError.InvalidInterruptID => interrupt.InterruptController.Error.InvalidInterruptID,
+            PLICError.InvalidPriority => interrupt.InterruptController.Error.InvalidPriority,
+            PLICError.InvalidContext => @panic("invalid context"),
+            PLICError.InvalidThreshold => @panic("invalid threshold"),
+        };
+    };
+}
+
+fn setPriorityWrapper(int_num: usize, priority: usize) interrupt.InterruptController.Error!void {
+    // TODO: better cast
+    const int: u32 = @intCast(int_num);
+    const prio: u32 = @intCast(priority);
+
+    setPriority(int, prio) catch |err| {
+        return switch (err) {
+            PLICError.DriverUninitialized => interrupt.InterruptController.Error.ControllerInternalError,
+            PLICError.InvalidInterruptID => interrupt.InterruptController.Error.InvalidInterruptID,
+            PLICError.InvalidPriority => interrupt.InterruptController.Error.InvalidPriority,
+            PLICError.InvalidContext => @panic("invalid context"),
+            PLICError.InvalidThreshold => @panic("invalid threshold"),
+        };
+    };
+}
+
+fn getPriorityWrapper(int_num: usize) interrupt.InterruptController.Error!usize {
+    // TODO: better cast
+    const int: u32 = @intCast(int_num);
+
+    return getPriority(int) catch |err| {
+        return switch (err) {
+            PLICError.DriverUninitialized => interrupt.InterruptController.Error.ControllerInternalError,
+            PLICError.InvalidInterruptID => interrupt.InterruptController.Error.InvalidInterruptID,
+            PLICError.InvalidPriority => interrupt.InterruptController.Error.InvalidPriority,
+            PLICError.InvalidContext => @panic("invalid context"),
+            PLICError.InvalidThreshold => @panic("invalid threshold"),
+        };
+    };
+}
+
+fn setHandlerWrapper(int_num: usize, handler: *const fn () void) interrupt.InterruptController.Error!void {
+    _ = int_num;
+    _ = handler;
 }
 
 fn setPriority(id: u32, priority: u32) PLICError!void {
     const inner = plic orelse return error.DriverUninitialized;
     // TODO: locking
+
+    if (priority > 7) return error.InvalidPriority;
 
     if (id == 0 or id > inner.max_interrupts) return error.InvalidInterruptID;
     const priorities: [*]u32 = @ptrFromInt(inner.base_ptr.asInt() + priorities_base_off);
@@ -139,15 +241,13 @@ fn setThreshold(context: u32, threshold: u32) PLICError!void {
     const inner = plic orelse return error.DriverUninitialized;
     // TODO: locking
 
+    if (threshold > 7) return error.InvalidThreshold;
+
     const base = inner.base_ptr.asInt() + context_base_off;
     const context_off = context * context_size + context_priority_threshold_off;
 
     const context_threshold: *u32 = @ptrFromInt(base + context_off);
     context_threshold.* = threshold;
-
-    // since threshold is a WARL field, we can check whether the threshold was valid
-    // (hopefully there is no need for delay)
-    if (context_threshold.* != threshold) return error.InvalidThreshold;
 }
 
 fn claim(context: u32) PLICError!u32 {

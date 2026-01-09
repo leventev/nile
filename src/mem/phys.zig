@@ -8,58 +8,29 @@ const bitmap_line_full = std.math.maxInt(LineType);
 
 const PageFrameRegion = struct {
     address: mm.PhysicalAddress,
-    total_frame_count: usize,
-    free_frame_count: usize,
-    bitmap: []LineType,
-    first_free_line_idx: usize,
+    bitmap: std.bit_set.DynamicBitSetUnmanaged,
 
-    const Self = @This();
-
-    fn full(self: Self) bool {
-        return self.free_frame_count == 0;
+    fn full(self: PageFrameRegion) bool {
+        return self.bitmap.count() == 0;
     }
 
-    fn alloc(self: *Self) mm.PhysicalAddress {
+    fn alloc(self: *PageFrameRegion) mm.PhysicalAddress {
         if (self.full())
             @panic("Trying to allocate from frame region with no free frames available");
 
-        // NOTE: we could store the frame index instead of just the bitmap index
-        // but that would introduce an extra if statement and i believe it's prettier this way :)
-        for (self.first_free_line_idx..self.bitmap.len) |lineIdx| {
-            const line = self.bitmap[lineIdx];
-            if (line == bitmap_line_full)
-                continue;
+        const frame_idx = self.bitmap.findFirstSet() orelse
+            @panic("Unable to find available page despite not being full");
 
-            for (0..frames_per_line) |bitIdx| {
-                const bit: LineType = std.math.shl(LineType, 1, bitIdx);
-                const allocated = line & bit > 0;
-                if (allocated)
-                    continue;
-
-                self.first_free_line_idx = lineIdx;
-                self.bitmap[lineIdx] |= bit;
-                self.free_frame_count -= 1;
-
-                const address = self.address.asInt() + (lineIdx * frames_per_line + bitIdx) * mm.frame_size;
-                return mm.PhysicalAddress.make(address);
-            }
-        }
-
-        @panic("Can not find a free frame but freeFrameCount != 0");
+        return .make(self.address.asInt() + @as(u64, @intCast(frame_idx)) * mm.page_size);
     }
 
-    fn free(self: *Self, addr: mm.PhysicalAddress) void {
+    fn free(self: *PageFrameRegion, addr: mm.PhysicalAddress) void {
         const address = addr.asInt() - self.address.asInt();
-        const line_idx = address / frames_per_line;
-        const bit_idx = address % frames_per_line;
-
-        const bit = std.math.shl(LineType, 1, bit_idx);
-
-        self.bitmap[line_idx] &= ~bit;
-        self.free_frame_count += 1;
+        const frame_idx = address / mm.frame_size;
+        self.bitmap.unset(frame_idx);
     }
 
-    fn contains(self: Self, addr: mm.PhysicalAddress) bool {
+    fn contains(self: PageFrameRegion, addr: mm.PhysicalAddress) bool {
         const address = addr.asInt();
         const this_address = self.address.asInt();
 
@@ -77,9 +48,7 @@ const PhysicalFrameAllocator = struct {
     total_frame_count: usize,
     free_frame_count: usize,
 
-    const Self = @This();
-
-    fn alloc(self: *Self) !mm.PhysicalAddress {
+    fn alloc(self: *PhysicalFrameAllocator) !mm.PhysicalAddress {
         if (self.full())
             return error.OutOfMemory;
 
@@ -95,7 +64,7 @@ const PhysicalFrameAllocator = struct {
         @panic("Can not find a free frame but freeFrameCount != 0");
     }
 
-    fn free(self: *Self, addr: mm.PhysicalAddress) void {
+    fn free(self: *PhysicalFrameAllocator, addr: mm.PhysicalAddress) void {
         if (!addr.isPageAligned())
             @panic("Address is not page aligned");
 
@@ -111,17 +80,15 @@ const PhysicalFrameAllocator = struct {
         @panic("Invalid address");
     }
 
-    fn full(self: Self) bool {
+    fn full(self: PhysicalFrameAllocator) bool {
         return self.free_frame_count == 0;
     }
 };
 
 var frame_allocator: PhysicalFrameAllocator = undefined;
 
-pub fn init(allocator: std.mem.Allocator, regions: []const mm.MemoryRegion) !void {
-    // TODO: do some kind of magic so we don't depend on the temporary allocator
-
-    var regs = try allocator.alloc(PageFrameRegion, regions.len);
+pub fn init(gpa: std.mem.Allocator, regions: []const mm.MemoryRegion) !void {
+    var regs = try gpa.alloc(PageFrameRegion, regions.len);
 
     var total_frames: usize = 0;
     var total_lines: usize = 0;
@@ -131,7 +98,7 @@ pub fn init(allocator: std.mem.Allocator, regions: []const mm.MemoryRegion) !voi
         const frame_count: usize = physReg.size / mm.frame_size;
         const lines_required = std.math.divCeil(usize, frame_count, frames_per_line) catch unreachable;
 
-        const bitmap = try allocator.alloc(LineType, lines_required);
+        const bitmap = try gpa.alloc(LineType, lines_required);
         @memset(bitmap, 0);
 
         total_frames += frame_count;
@@ -139,10 +106,7 @@ pub fn init(allocator: std.mem.Allocator, regions: []const mm.MemoryRegion) !voi
 
         regs[i] = PageFrameRegion{
             .address = address,
-            .total_frame_count = frame_count,
-            .free_frame_count = frame_count,
-            .bitmap = bitmap,
-            .first_free_line_idx = 0,
+            .bitmap = try .initFull(gpa, frame_count),
         };
     }
 

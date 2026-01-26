@@ -28,10 +28,22 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
+    const tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/test.zig"),
+            .target = b.standardTargetOptions(.{}),
+            .optimize = optimize,
+        }),
+    });
+
+    const test_step = b.step("test", "Run unit tests for the library");
+    const run_unit_tests = b.addRunArtifact(tests);
+    test_step.dependOn(&run_unit_tests.step);
+
     const qemu = b.addSystemCommand(&.{"qemu-system-riscv64"});
     qemu.addArgs(&.{
         "-machine", "virt",
-        "-bios",    "opensbi/build/platform/generic/firmware/fw_dynamic.bin",
+        // "-bios",    "opensbi/build/platform/generic/firmware/fw_dynamic.bin",
         "-kernel",  "zig-out/bin/nile",
         "-serial",  "stdio",
         "-m",

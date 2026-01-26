@@ -2,6 +2,8 @@ const std = @import("std");
 const arch = @import("../../arch/arch.zig");
 const mm = @import("../mm.zig");
 
+const PhysicalAddress = arch.PhysicalAddress;
+
 const order_count = 11;
 const max_order = order_count - 1;
 
@@ -13,14 +15,14 @@ const free_list_allocator = fba.allocator();
 
 const FreeBlock = struct {
     list_node: std.DoublyLinkedList.Node,
-    block_addr: arch.PhysicalAddress,
+    block_addr: PhysicalAddress,
 };
 
 const Order = struct {
     list: std.DoublyLinkedList,
     free_block_count: usize,
 
-    fn orderedAdd(self: *Order, block_addr: arch.PhysicalAddress) void {
+    fn orderedAdd(self: *Order, block_addr: PhysicalAddress) void {
         const new_block = free_list_allocator.create(FreeBlock) catch {
             @panic("Buddy Allocator ran out of heap space");
         };
@@ -90,7 +92,7 @@ fn addBlocksFromRegion(start_page_idx: usize, page_count: usize) void {
 
         for (0..block_count) |i| {
             const block_page_idx = next_aligned_page_idx + i * block_size_in_pages;
-            const block_addr = arch.PhysicalAddress.make(block_page_idx * mm.page_size);
+            const block_addr = PhysicalAddress.make(block_page_idx * mm.page_size);
 
             orders[order].orderedAdd(block_addr);
         }
@@ -124,6 +126,40 @@ fn addBlocksFromRegion(start_page_idx: usize, page_count: usize) void {
     }
 }
 
+const BuddyAllocatorError = error{
+    InvalidOrder,
+    OutOfMemory,
+};
+
+fn allocBlock(desired_order: usize) BuddyAllocatorError!PhysicalAddress {
+    if (desired_order > max_order) return error.InvalidOrder;
+
+    // find the lowest order that has a free block
+    var order = desired_order;
+    while (orders[order].free_block_count == 0) : (order += 1) {}
+    // for simplicity's sake we always try to select the leftmost block
+    // to bias lower addresses hence popFirst() instead pop()
+    if (orders[order].list.popFirst()) |list_node| {
+        const block: *FreeBlock = @fieldParentPtr("list_node", list_node);
+        // when we split an N order block into two N-1 order blocks we always select the
+        // left N-1 block so the address always stays the same
+        const selected_block_addr: PhysicalAddress = block.block_addr;
+        free_list_allocator.destroy(block);
+        orders[order].free_block_count -= 1;
+
+        // keep splitting the blocks until we reach the desired order
+        while (order > desired_order) {
+            order -= 1;
+            const block_size_in_pages = std.math.shl(usize, 1, order);
+            const offset = block_size_in_pages * mm.page_size;
+            const right_block_addr = PhysicalAddress.make(selected_block_addr.asInt() + offset);
+            orders[order].orderedAdd(right_block_addr);
+        }
+
+        return selected_block_addr;
+    } else return error.OutOfMemory;
+}
+
 pub fn init(regions: []const mm.MemoryRegion) void {
     for (regions) |region| {
         // TODO: convert the fields of mm.MemoryRegion to be page indices instead of absolute addresses
@@ -142,7 +178,12 @@ pub fn init(regions: []const mm.MemoryRegion) void {
     }
 }
 
+// we need to reset orders and fba every test because zig retains global state between tests
+
 test "init" {
+    orders = [_]Order{Order{ .free_block_count = 0, .list = .{} }} ** order_count;
+    fba.reset();
+
     const start: usize = 0x3D0_000;
     const end: usize = 0xA0E_000;
     const start_page_idx = start / mm.page_size;
@@ -163,4 +204,33 @@ test "init" {
     try std.testing.expectEqual(0, orders[6].free_block_count);
     try std.testing.expectEqual(0, orders[7].free_block_count);
     try std.testing.expectEqual(0, orders[8].free_block_count);
+}
+
+test "alloc" {
+    orders = [_]Order{Order{ .free_block_count = 0, .list = .{} }} ** order_count;
+    fba.reset();
+
+    try std.testing.expectEqual(0, orders[10].free_block_count);
+    // add 1 block of the highest order
+    const base_address = PhysicalAddress.make(1 * 1024 * mm.page_size);
+    orders[10].orderedAdd(base_address);
+    try std.testing.expectEqual(1, orders[10].free_block_count);
+
+    // they should be equal because of the lower address bias of the allocator
+    const one_page_addr = try allocBlock(0);
+    try std.testing.expectEqual(0, orders[10].free_block_count);
+    try std.testing.expectEqual(1, orders[9].free_block_count);
+    try std.testing.expectEqual(1, orders[8].free_block_count);
+    try std.testing.expectEqual(1, orders[7].free_block_count);
+    try std.testing.expectEqual(1, orders[6].free_block_count);
+    try std.testing.expectEqual(1, orders[5].free_block_count);
+    try std.testing.expectEqual(1, orders[4].free_block_count);
+    try std.testing.expectEqual(1, orders[3].free_block_count);
+    try std.testing.expectEqual(1, orders[2].free_block_count);
+    try std.testing.expectEqual(1, orders[1].free_block_count);
+    try std.testing.expectEqual(1, orders[0].free_block_count);
+    try std.testing.expectEqual(base_address.asInt(), one_page_addr.asInt());
+
+    const one_page_addr_2 = try allocBlock(0);
+    try std.testing.expectEqual(PhysicalAddress.make((1 * 1024 + 1) * mm.page_size), one_page_addr_2);
 }

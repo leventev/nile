@@ -126,12 +126,27 @@ fn addBlocksFromRegion(start_page_idx: usize, page_count: usize) void {
     }
 }
 
-const BuddyAllocatorError = error{
+pub const BuddyAllocatorError = error{
     InvalidOrder,
     OutOfMemory,
 };
 
-fn allocBlock(desired_order: usize) BuddyAllocatorError!PhysicalAddress {
+/// Returns whether the specified block was in the list
+fn removeBlock(order: usize, address: PhysicalAddress) bool {
+    var list_node = orders[order].list.first;
+    while (list_node) |node| : (list_node = node.next) {
+        const block: *FreeBlock = @fieldParentPtr("list_node", node);
+        if (block.block_addr == address) {
+            orders[order].list.remove(node);
+            orders[order].free_block_count -= 1;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+pub fn allocBlock(desired_order: usize) BuddyAllocatorError!PhysicalAddress {
     if (desired_order > max_order) return error.InvalidOrder;
 
     // find the lowest order that has a free block
@@ -160,46 +175,36 @@ fn allocBlock(desired_order: usize) BuddyAllocatorError!PhysicalAddress {
     } else return error.OutOfMemory;
 }
 
-/// Returns whether the specified block was in the list
-fn freeBlock(order: usize, address: PhysicalAddress) bool {
-    var list_node = orders[order].list.first;
-    while (list_node) |node| : (list_node = node.next) {
-        const block: *FreeBlock = @fieldParentPtr("list_node", node);
-        if (block.block_addr == address) {
-            orders[order].list.remove(node);
-            orders[order].free_block_count -= 1;
-            return true;
-        }
-    }
-
-    return false;
-}
-
-fn deallocBlock(address: PhysicalAddress, block_order: usize) void {
+pub fn deallocBlock(block_address: PhysicalAddress, block_order: usize) void {
     std.debug.assert(block_order <= max_order);
     var order = block_order;
-    var block_address = address;
+    var address = block_address;
 
     // we try to coalesce the specified block and its buddy
     while (order <= max_order) : (order += 1) {
         // buddy's address can be calculated by XOR-ing with the size
         const block_size = std.math.shl(usize, 1, order) * mm.page_size;
-        const buddy_address = PhysicalAddress.make(block_address.asInt() ^ block_size);
+        const buddy_address = PhysicalAddress.make(address.asInt() ^ block_size);
 
         // if the buddy is free then we remove it and move on to the next order
-        const buddy_is_free = freeBlock(order, buddy_address);
+        const buddy_is_free = removeBlock(order, buddy_address);
         if (!buddy_is_free) {
             break;
         }
 
-        block_address = .make(@min(block_address.asInt(), buddy_address.asInt()));
+        address = .make(@min(address.asInt(), buddy_address.asInt()));
     }
 
-    orders[order].orderedAdd(block_address);
+    orders[order].orderedAdd(address);
 }
 
 pub fn init(regions: []const mm.MemoryRegion) void {
+    var total_frames: usize = 0;
+
     for (regions) |region| {
+        const frame_count: usize = regions.size / mm.frame_size;
+        total_frames += frame_count;
+
         // TODO: convert the fields of mm.MemoryRegion to be page indices instead of absolute addresses
         const start_page_index: usize = region.start / mm.page_size;
         const page_count: usize = region.size / mm.page_size;
@@ -214,6 +219,11 @@ pub fn init(regions: []const mm.MemoryRegion) void {
             std.log.info("addr: {x}", .{block.block_addr.asInt()});
         }
     }
+
+    std.log.info("Buddy allocator allocator initialized with {} frames ({} KiB) available", .{
+        total_frames,
+        total_frames * 4,
+    });
 }
 
 // we need to reset orders and fba every test because zig retains global state between tests

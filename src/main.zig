@@ -3,7 +3,7 @@ pub const builtin = @import("builtin");
 pub const kio = @import("kio.zig");
 pub const devicetree = @import("devicetree.zig");
 pub const mm = @import("mem/mm.zig");
-pub const phys = @import("mem/phys/phys.zig");
+pub const buddy_allocator = @import("mem/buddy_allocator.zig");
 pub const arch = @import("arch/arch.zig");
 pub const time = @import("time.zig");
 pub const interrupt = @import("interrupt.zig");
@@ -61,8 +61,7 @@ fn init() void {
     const frame_regions = mm.getFrameRegions(static_mem_allocator, &dt) catch
         @panic("Failed to get physical memory regions");
 
-    phys.init(static_mem_allocator, frame_regions) catch
-        @panic("Failed to initialize physical frame allocator");
+    buddy_allocator.init(frame_regions);
 
     static_mem_allocator.free(frame_regions);
 

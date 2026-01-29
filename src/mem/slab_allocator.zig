@@ -1,5 +1,6 @@
 const std = @import("std");
 const buddy_allocator = @import("buddy_allocator.zig");
+const BuddyAlocator = buddy_allocator.BuddyAllocator;
 const mm = @import("mm.zig");
 
 const PhysicalAddress = mm.PhysicalAddress;
@@ -58,13 +59,6 @@ const SlabDescriptor = struct {
         const gap = if (list_end_align_rem > 0) (obj_alignment - list_end_align_rem) else 0;
         const objs_start = list_end + gap;
 
-        std.log.info("next list: {X} list_end: {X} size: {} align: {} objs_start: {X}", .{
-            @intFromPtr(list.ptr),
-            list_end,
-            obj_size,
-            obj_alignment,
-            objs_start,
-        });
         return .make(objs_start + object_id_int * obj_size);
     }
 
@@ -148,7 +142,7 @@ const SlabCache = struct {
     list_node: std.DoublyLinkedList.Node,
 
     /// Allocate a new slab and add it to the unused slabs list
-    fn grow(self: *SlabCache) buddy_allocator.BuddyAllocatorError!void {
+    fn grow(self: *SlabCache) BuddyAlocator.Error!void {
         // TODO: on 32bit we cant map the entire physical address space so we will have to
         // find a different way to do this
         const phys_addr = try buddy_allocator.allocBlock(self.slab_block_order);
@@ -170,7 +164,7 @@ const SlabCache = struct {
 
     /// Allocate a new object. Partially filled slabs are prioritized over unused slabs.
     /// If no unused slabs are available a new slab is allocated with the buddy allocator.
-    fn alloc(self: *SlabCache) buddy_allocator.BuddyAllocatorError!VirtualAddress {
+    fn alloc(self: *SlabCache) BuddyAlocator.Error!VirtualAddress {
         if (self.partial_slabs.first) |first_slab| {
             var slab_descriptor: *SlabDescriptor = @fieldParentPtr("list_node", first_slab);
             const addr = slab_descriptor.alloc(
@@ -277,7 +271,7 @@ pub fn ObjectCache(comptime T: type) type {
         __slab_cache: *SlabCache = undefined,
 
         /// Allocate a single T object
-        pub fn alloc(self: Self) buddy_allocator.BuddyAllocatorError!*T {
+        pub fn alloc(self: Self) BuddyAlocator.Error!*T {
             const addr: VirtualAddress = try self.__slab_cache.alloc();
             return @as(*T, @ptrFromInt(addr.asInt()));
         }

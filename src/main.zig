@@ -68,7 +68,7 @@ fn init() void {
     var cache = slab_allocator.ObjectCache(u128){};
     cache.init();
     const a = cache.alloc() catch unreachable;
-    std.log.info("{x}", .{@intFromPtr(a)});
+    std.log.info("slab allocator: 0x{x}", .{@intFromPtr(a)});
 
     static_mem_allocator.free(frame_regions);
 
@@ -76,9 +76,9 @@ fn init() void {
     devicetree.initDriversFromDeviceTreeEarly(&dt);
     devicetree.initDriversFromDeviceTree(&dt);
 
-    time.init(&dt) catch @panic("Failed to initialize timer");
+    // time.init(&dt) catch @panic("Failed to initialize timer");
 
-    arch.enableInterrupts();
+    // arch.enableInterrupts();
 
     while (true) {
         asm volatile ("wfi");

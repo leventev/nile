@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const devicetree = @import("../devicetree.zig");
 const arch = @import("../arch/arch.zig");
 
@@ -355,8 +356,12 @@ pub fn getFrameRegions(allocator: std.mem.Allocator, dt: *const devicetree.Devic
     return usable_regions.toOwnedSlice(allocator);
 }
 
-const hhdm_start = 0xffffffc000000000;
+const hhdm_start = if (builtin.is_test) 0 else 0xffffffc000000000;
 
 pub fn physicalToHHDMAddress(phys: PhysicalAddress) VirtualAddress {
     return VirtualAddress.make(hhdm_start + phys.asInt());
+}
+
+pub fn virtualToPhysicalAddress(virt: VirtualAddress) PhysicalAddress {
+    return PhysicalAddress.make(virt.asInt() - hhdm_start);
 }

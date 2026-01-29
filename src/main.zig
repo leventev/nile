@@ -9,6 +9,8 @@ pub const time = @import("time.zig");
 pub const interrupt = @import("interrupt.zig");
 pub const config = @import("config.zig");
 
+pub const slab_allocator = @import("mem/slab_allocator.zig");
+
 export var device_tree_pointer: *void = undefined;
 
 const temp_heap_size = 65535;
@@ -62,6 +64,11 @@ fn init() void {
         @panic("Failed to get physical memory regions");
 
     buddy_allocator.init(frame_regions);
+
+    var cache = slab_allocator.ObjectCache(u128){};
+    cache.init();
+    const a = cache.alloc() catch unreachable;
+    std.log.info("{x}", .{@intFromPtr(a)});
 
     static_mem_allocator.free(frame_regions);
 

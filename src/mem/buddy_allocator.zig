@@ -1,6 +1,6 @@
 const std = @import("std");
-const arch = @import("../../arch/arch.zig");
-const mm = @import("../mm.zig");
+const arch = @import("../arch/arch.zig");
+const mm = @import("mm.zig");
 
 const PhysicalAddress = arch.PhysicalAddress;
 
@@ -202,7 +202,7 @@ pub fn init(regions: []const mm.MemoryRegion) void {
     var total_frames: usize = 0;
 
     for (regions) |region| {
-        const frame_count: usize = regions.size / mm.frame_size;
+        const frame_count: usize = region.size / mm.frame_size;
         total_frames += frame_count;
 
         // TODO: convert the fields of mm.MemoryRegion to be page indices instead of absolute addresses

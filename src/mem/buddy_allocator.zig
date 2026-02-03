@@ -6,8 +6,8 @@ const mm = @import("mm.zig");
 
 const PhysicalAddress = arch.PhysicalAddress;
 
-const order_count = 11;
-const max_order = order_count - 1;
+pub const order_count = 11;
+pub const max_order = order_count - 1;
 
 pub const BuddyAllocator = struct {
     orders: [order_count]Order = [_]Order{Order{ .free_block_count = 0, .list = .{} }} ** order_count,
@@ -226,18 +226,26 @@ pub fn init(regions: []const mm.MemoryRegion) void {
     });
 }
 
+pub var testing_buddy_allocator: ?*BuddyAllocator = null;
+
 const global_not_allowed =
-    \\ Global buddy allocator is not allowed in tests.
-    \\ To use a buddy allocator in tests create one with BuddyAllocator{}, with the testing
-    \\ allocator allocate a buffer(s) with (1 << order) * page_size alignment, then
+    \\ Global buddy allocator is not allowed in tests since Zig tests are ran in an unknown order
+    \\ and global variables persist between tests. To use a buddy allocator in tests outside
+    \\ buddy_allocator.zig set testing_buddy_allocator to a local BuddyAllocator{}.
+    \\ With a GPA allocate a buffer(s) with (1 << order) * page_size size and alignment, then
     \\ add to the respective order with BuddyAllocator.orders[order].orderedAdd().
 ;
 
 pub fn allocBlock(
     desired_order: usize,
 ) BuddyAllocator.Error!PhysicalAddress {
-    if (builtin.is_test)
-        @compileError(global_not_allowed);
+    if (builtin.is_test) {
+        if (testing_buddy_allocator) |alloc| {
+            return alloc.allocBlock(desired_order);
+        } else {
+            @panic(global_not_allowed);
+        }
+    }
 
     return global_buddy_allocator.allocBlock(desired_order);
 }
@@ -246,8 +254,13 @@ pub fn deallocBlock(
     block_address: PhysicalAddress,
     block_order: usize,
 ) void {
-    if (builtin.is_test)
-        @compileError(global_not_allowed);
+    if (builtin.is_test) {
+        if (testing_buddy_allocator) |alloc| {
+            return alloc.deallocBlock(block_address, block_order);
+        } else {
+            @panic(global_not_allowed);
+        }
+    }
 
     global_buddy_allocator.deallocBlock(block_address, block_order);
 }

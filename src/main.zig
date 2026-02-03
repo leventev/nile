@@ -64,9 +64,9 @@ fn init() void {
         @panic("Failed to get physical memory regions");
 
     buddy_allocator.init(frame_regions);
+    slab_allocator.global_slab_allocator.init();
 
-    var cache = slab_allocator.ObjectCache(u128){};
-    cache.init();
+    var cache = slab_allocator.global_slab_allocator.createObjectCache(u128);
     const a = cache.alloc() catch unreachable;
     std.log.info("slab allocator: 0x{x}", .{@intFromPtr(a)});
 

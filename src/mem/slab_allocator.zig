@@ -7,12 +7,17 @@ const mm = @import("mm.zig");
 const PhysicalAddress = mm.PhysicalAddress;
 const VirtualAddress = mm.VirtualAddress;
 
+/// Maintans caches for different sized objects for faster allocation.
+/// Should not be used directly, instead use ObjectCache.
 pub const SlabAllocator = struct {
+    /// The list of caches.
     caches: std.DoublyLinkedList = .{},
 
+    /// The number of caches.
     cache_count: usize = 0,
 
-    cache_cache_slab: Cache = blk: {
+    /// acking for the built in ObjectCache
+    meta_cache_backing: Cache = blk: {
         const slab_block_order = 0;
         const object_size = @sizeOf(Cache);
         const object_alignment = std.math.log2_int(u5, @alignOf(Cache));
@@ -32,15 +37,17 @@ pub const SlabAllocator = struct {
         };
     },
 
-    cache_cache: ObjectCache(Cache) = .{
-        .__slab_cache = undefined,
+    /// Built in ObjectCache for allocating caches.
+    meta_cache: ObjectCache(Cache) = .{
+        .__slab_backing = undefined,
     },
 
+    /// Initialize slab allocator.
     pub fn init(self: *SlabAllocator) void {
-        self.cache_cache = .{
-            .__slab_cache = &self.cache_cache_slab,
+        self.meta_cache = .{
+            .__slab_backing = &self.meta_cache_backing,
         };
-        self.caches.append(&self.cache_cache.__slab_cache.list_node);
+        self.caches.append(&self.meta_cache.__slab_backing.list_node);
         self.cache_count += 1;
     }
 
@@ -258,6 +265,8 @@ pub const SlabAllocator = struct {
             return addr;
         }
 
+        /// Frees an object. If the slab was full it becomes a partial slab.
+        /// If there are no allocated objects left it becomes an unused slab.
         fn free(self: *Cache, address: VirtualAddress) void {
             var next_slab = self.full_slabs.first;
             while (next_slab) |slab| : (next_slab = slab.next) {
@@ -343,28 +352,28 @@ pub fn ObjectCache(comptime T: type) type {
         const Self = @This();
         /// Internal slab allocator, this struct is used as a wrapper around it
         /// for nicer interface. Should not be accessed outside.
-        __slab_cache: *SlabAllocator.Cache = undefined,
+        __slab_backing: *SlabAllocator.Cache = undefined,
 
         /// Allocate a single T object
         pub fn alloc(self: Self) BuddyAllocator.Error!*T {
-            const addr: VirtualAddress = try self.__slab_cache.alloc();
+            const addr: VirtualAddress = try self.__slab_backing.alloc();
             return @as(*T, @ptrFromInt(addr.asInt()));
         }
 
         /// Free a single T object
         pub fn free(self: Self, ptr: *T) void {
             const addr: VirtualAddress = .make(@intFromPtr(ptr));
-            self.__slab_cache.free(addr);
+            self.__slab_backing.free(addr);
         }
 
         /// The total number of objects reserved, the sum of free and allocated objects
         pub fn totalCount(self: Self) usize {
-            return self.__slab_cache.total_object_count;
+            return self.__slab_backing.total_object_count;
         }
 
         /// The number of free objects
         pub fn freeCount(self: Self) usize {
-            return self.__slab_cache.free_object_count;
+            return self.__slab_backing.free_object_count;
         }
 
         /// The number of allocated objects
@@ -374,13 +383,13 @@ pub fn ObjectCache(comptime T: type) type {
 
         /// Initializes the cache
         fn init(self: *Self, slab_allocator: *SlabAllocator) void {
-            self.__slab_cache = slab_allocator.cache_cache.alloc() catch @panic("Unable to allocate new cache");
+            self.__slab_backing = slab_allocator.meta_cache.alloc() catch @panic("Unable to allocate new cache");
 
             // TODO: come up with some kind of logic for assigning higher block orders
             const slab_block_order = 0;
             const obj_size = @sizeOf(T);
             const obj_alignment_log = std.math.log2_int(u5, @alignOf(T));
-            self.__slab_cache.* = .{
+            self.__slab_backing.* = .{
                 .name = @typeName(T) ++ "-cache",
                 .slab_block_order = slab_block_order,
                 .unused_slabs = .{},
@@ -398,7 +407,7 @@ pub fn ObjectCache(comptime T: type) type {
                 ),
             };
 
-            slab_allocator.caches.append(&self.__slab_cache.list_node);
+            slab_allocator.caches.append(&self.__slab_backing.list_node);
             slab_allocator.cache_count += 1;
         }
     };

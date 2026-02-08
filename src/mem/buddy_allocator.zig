@@ -9,13 +9,22 @@ const PhysicalAddress = arch.PhysicalAddress;
 pub const order_count = 11;
 pub const max_order = order_count - 1;
 
+/// Allocates contiguous physical blocks with 2^n frames, where n is called the order.
+/// The minimum order is 0 and the maximum is max_order.
 pub const BuddyAllocator = struct {
+    /// The list of all orders.
     orders: [order_count]Order = [_]Order{Order{ .free_block_count = 0, .list = .{} }} ** order_count,
 
+    /// Keeps track of the free blocks in a given order.
     pub const Order = struct {
+        /// List of all free blocks in the order.
         list: std.DoublyLinkedList,
+
+        /// The number of free blocks in the order.
         free_block_count: usize,
 
+        /// Add a block to the free list. The list of block addresses is always ordered
+        /// in ascending order.
         pub fn orderedAdd(self: *Order, block_addr: PhysicalAddress) void {
             const virt_addr = mm.physicalToHHDMAddress(block_addr);
             const node_ptr: *std.DoublyLinkedList.Node = @ptrFromInt(virt_addr.asInt());
@@ -49,6 +58,8 @@ pub const BuddyAllocator = struct {
         }
     };
 
+    /// Used for initializing the buddy allocator from the physical memory regions
+    /// provided by the device tree.
     pub fn addBlocksFromRegion(self: *BuddyAllocator, start_page_idx: usize, page_count: usize) void {
         const end_page_idx = start_page_idx + page_count;
 
@@ -118,7 +129,8 @@ pub const BuddyAllocator = struct {
         OutOfMemory,
     };
 
-    /// Returns whether the specified block was in the list
+    /// Tries to remove a free block from a certain order.
+    /// Returns whether the block was in the free list of the specified order.
     pub fn removeBlock(self: *BuddyAllocator, order: usize, block_address: PhysicalAddress) bool {
         var list_node = self.orders[order].list.first;
         const virt_addr = mm.physicalToHHDMAddress(block_address);
@@ -135,6 +147,7 @@ pub const BuddyAllocator = struct {
         return false;
     }
 
+    /// Allocates a block of a given order.
     pub fn allocBlock(
         self: *BuddyAllocator,
         desired_order: usize,
@@ -169,6 +182,7 @@ pub const BuddyAllocator = struct {
         } else return error.OutOfMemory;
     }
 
+    /// Deallocates a block of a given order.
     pub fn deallocBlock(
         self: *BuddyAllocator,
         block_address: PhysicalAddress,
@@ -199,6 +213,8 @@ pub const BuddyAllocator = struct {
 
 var global_buddy_allocator: BuddyAllocator = .{};
 
+/// Initializes the buddy allocator from the list of physical memory regions provided by
+/// the device tree.
 pub fn init(regions: []const mm.MemoryRegion) void {
     var total_frames: usize = 0;
 
@@ -236,6 +252,7 @@ const global_not_allowed =
     \\ add to the respective order with BuddyAllocator.orders[order].orderedAdd().
 ;
 
+/// Allocates a block of a given order.
 pub fn allocBlock(
     desired_order: usize,
 ) BuddyAllocator.Error!PhysicalAddress {
@@ -250,6 +267,7 @@ pub fn allocBlock(
     return global_buddy_allocator.allocBlock(desired_order);
 }
 
+/// Deallocates a block of a given order.
 pub fn deallocBlock(
     block_address: PhysicalAddress,
     block_order: usize,

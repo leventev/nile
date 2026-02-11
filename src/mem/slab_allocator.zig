@@ -413,7 +413,17 @@ pub fn ObjectCache(comptime T: type) type {
     };
 }
 
-pub var global_slab_allocator: SlabAllocator = .{};
+var global_slab_allocator: SlabAllocator = .{};
+
+pub fn createObjectCache(comptime T: type) ObjectCache(T) {
+    var cache = ObjectCache(T){};
+    cache.init(&global_slab_allocator);
+    return cache;
+}
+
+pub fn init() void {
+    global_slab_allocator.init();
+}
 
 test "objects per slab" {
     // results calculated with the assumption that @sizeOf(SlabDescriptor) = 32

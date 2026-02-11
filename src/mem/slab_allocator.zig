@@ -79,7 +79,7 @@ pub const SlabAllocator = struct {
         ///
         /// The list is similar to a linked list except the array entries contain indices
         /// to the next free object.
-        fn next_list(self: *Descriptor, obj_per_slab: usize) []ObjectIndex {
+        fn nextList(self: *Descriptor, obj_per_slab: usize) []ObjectIndex {
             const addr: [*]ObjectIndex = @ptrCast(@as([*]Descriptor, @ptrCast(self)) + 1);
             return addr[0..obj_per_slab];
         }
@@ -100,7 +100,7 @@ pub const SlabAllocator = struct {
 
             const object_id_int = @intFromEnum(object_id);
             // pop the head of the 'next list'
-            const list = self.next_list(obj_per_slab);
+            const list = self.nextList(obj_per_slab);
             self.first_free_obj_idx = list[object_id_int];
             self.free_object_count -= 1;
 
@@ -122,7 +122,7 @@ pub const SlabAllocator = struct {
             obj_size: usize,
             obj_alignment_log: u5,
         ) void {
-            const list = self.next_list(obj_per_slab);
+            const list = self.nextList(obj_per_slab);
             // align the first object properly
             const obj_alignment = std.math.shl(usize, 1, obj_alignment_log);
             const list_end: usize = @intFromPtr(list.ptr + list.len);
@@ -219,7 +219,7 @@ pub const SlabAllocator = struct {
 
             // 'next list'
             slab_descriptor.first_free_obj_idx = @enumFromInt(0);
-            const list = slab_descriptor.next_list(self.objects_per_slab);
+            const list = slab_descriptor.nextList(self.objects_per_slab);
             for (0..list.len - 1) |i| list[i] = @enumFromInt(i + 1);
             list[list.len - 1] = .end_of_list;
 

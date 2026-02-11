@@ -46,3 +46,5 @@ pub const modules: []const Module = &.{
         },
     },
 };
+
+pub const debug_scheduler: bool = true;

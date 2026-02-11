@@ -8,6 +8,7 @@ pub const arch = @import("arch/arch.zig");
 pub const time = @import("time.zig");
 pub const interrupt = @import("interrupt.zig");
 pub const config = @import("config.zig");
+pub const scheduler = @import("scheduler.zig");
 
 pub const slab_allocator = @import("mem/slab_allocator.zig");
 
@@ -64,17 +65,15 @@ fn init() void {
         @panic("Failed to get physical memory regions");
 
     buddy_allocator.init(frame_regions);
-    slab_allocator.global_slab_allocator.init();
-
-    var cache = slab_allocator.global_slab_allocator.createObjectCache(u128);
-    const a = cache.alloc() catch unreachable;
-    std.log.info("slab allocator: 0x{x}", .{@intFromPtr(a)});
+    slab_allocator.init();
 
     static_mem_allocator.free(frame_regions);
 
     // find interrupt controllers first
     devicetree.initDriversFromDeviceTreeEarly(&dt);
     devicetree.initDriversFromDeviceTree(&dt);
+
+    scheduler.init();
 
     // time.init(&dt) catch @panic("Failed to initialize timer");
 

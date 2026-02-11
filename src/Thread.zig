@@ -1,5 +1,8 @@
+const std = @import("std");
+
 id: Id,
 level: Level,
+list_node: std.SinglyLinkedList.Node,
 
 pub const Id = enum(usize) {
     _,

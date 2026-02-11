@@ -53,7 +53,9 @@ fn printLogPreamble(comptime scope: @Type(.enum_literal), comptime level: std.lo
 
     try kio_cfg.setColor(&kernel_writer, std.io.tty.Color.bold);
     try kio_cfg.setColor(&kernel_writer, logLevelColor(level));
-    _ = try kernel_writer.write(@tagName(level) ++ "(" ++ @tagName(scope) ++ ") ");
+    _ = try kernel_writer.write(@tagName(level));
+    try kio_cfg.setColor(&kernel_writer, std.io.tty.Color.bright_black);
+    _ = try kernel_writer.write("(" ++ @tagName(scope) ++ ") ");
     try kio_cfg.setColor(&kernel_writer, std.io.tty.Color.reset);
 }
 

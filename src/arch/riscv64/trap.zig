@@ -4,62 +4,11 @@ const csr = @import("csr.zig").CSR;
 const sbi = @import("sbi.zig");
 const timer = @import("timer.zig");
 const devicetree = @import("root").devicetree;
+const registers = @import("registers.zig");
+
+const Registers = registers.Registers;
 
 extern fn trapHandlerSupervisor() void;
-
-const TrapData = struct {
-    gprs: [32]u64,
-
-    const Self = @This();
-
-    fn printGPR(self: Self, writer: anytype, idx: usize) !void {
-        std.debug.assert(idx < 32);
-
-        const alternative_names = [_][]const u8{
-            "zr", "ra", "sp",  "gp",  "tp", "t0",
-            "t1", "t2", "s0",  "s1",  "a0", "a1",
-            "a2", "a3", "a4",  "a5",  "a6", "a7",
-            "s2", "s3", "s4",  "s5",  "s6", "s7",
-            "s8", "s9", "s10", "s11", "t3", "t4",
-            "t5", "t6",
-        };
-
-        const name = alternative_names[idx];
-        var name_total_len = 2 + name.len;
-        if (idx > 9) name_total_len += 1;
-
-        const align_to = 7;
-        const rem = align_to - name_total_len;
-
-        try writer.print("x{}/{s}", .{ idx, name });
-        try writer.writeByteNTimes(' ', rem);
-        try writer.print("0x{x:0>16}", .{self.gprs[idx]});
-    }
-
-    fn printGPRs(self: Self, comptime log_level: std.log.Level) void {
-        const total_regs = 32;
-        const regs_per_line = 4;
-        const lines = total_regs / regs_per_line;
-
-        var buff: [128]u8 = undefined;
-        var stream = std.io.fixedBufferStream(&buff);
-        var writer = stream.writer();
-
-        for (0..lines) |i| {
-            for (0..regs_per_line) |j| {
-                self.printGPR(writer, i * regs_per_line + j) catch unreachable;
-                writer.writeByte(' ') catch unreachable;
-            }
-            kio.kernel_log(log_level, .riscv_trap, "{s}", .{stream.getWritten()});
-            stream.reset();
-        }
-    }
-};
-
-// TODO: per hart
-var trapFrame = TrapData{
-    .gprs = [_]u64{0} ** 32,
-};
 
 const TrapVectorBaseAddr = packed struct(u64) {
     mode: Mode,
@@ -209,7 +158,7 @@ const MStatus = packed struct(u64) {
     state_dirty: bool,
 };
 
-const SStatus = packed struct(u64) {
+pub const SStatus = packed struct(u64) {
     __reserved1: u1,
     supervisor_interrupt_enable: bool,
     __reserved2: u3,
@@ -230,28 +179,6 @@ const SStatus = packed struct(u64) {
     state_dirty: bool,
 
     const Self = @This();
-
-    fn print(self: Self, comptime log_level: std.log.Level) void {
-        kio.kernel_log(log_level, .riscv_trap, "SIE={} SPIE={} SPP={s}", .{
-            self.supervisor_interrupt_enable,
-            self.supervisor_previous_interrupt_enable,
-            @tagName(self.supervisor_previous_privilege),
-        });
-
-        kio.kernel_log(log_level, .riscv_trap, "VS={s} FS={s} XS={s} SD={}", .{
-            @tagName(self.vector_status),
-            @tagName(self.float_status),
-            @tagName(self.extra_extension_status),
-            self.state_dirty,
-        });
-
-        kio.kernel_log(log_level, .riscv_trap, "SUM={} MXR={} UXL={} UBE={}", .{
-            self.supervisor_user_memory_accessable,
-            self.executable_memory_read,
-            self.supervisor_user_memory_accessable,
-            self.user_big_endian,
-        });
-    }
 };
 
 pub fn enableInterrupts() void {
@@ -277,19 +204,18 @@ pub fn clearPendingInterrupt(id: usize) void {
     csr.sip.clearBits(std.math.shl(u64, 1, id));
 }
 
-fn genericExceptionHandler(code: ExceptionCode, pc: u64, status: SStatus, tval: u64, frame: *TrapData) void {
-    status.print(.err);
-    frame.printGPRs(.err);
+fn genericExceptionHandler(code: ExceptionCode, pc: u64, status: SStatus, tval: u64, regs: *Registers) void {
+    _ = status;
+    regs.printGPRs(.err);
     std.log.err("PC=0x{x}", .{pc});
     std.log.err("Trap value: 0x{x}", .{tval});
     @panic(@tagName(code));
 }
 
-fn handleException(code: ExceptionCode, pc: u64, status: SStatus, tval: u64, frame: *TrapData) void {
+fn handleException(code: ExceptionCode, pc: u64, status: SStatus, tval: u64, regs: *Registers) void {
     switch (code) {
         .load_page_fault, .instruction_page_fault, .store_or_amo_page_fault => {
-            status.print(.err);
-            frame.printGPRs(.err);
+            regs.printGPRs(.err);
             std.log.err("PC=0x{x}", .{pc});
             std.log.err("Faulting address: 0x{x}", .{tval});
             @panic("Page fault");
@@ -298,34 +224,37 @@ fn handleException(code: ExceptionCode, pc: u64, status: SStatus, tval: u64, fra
             @panic("TODO");
         },
         .ecall_s_mode => {
-            status.print(.err);
-            frame.printGPRs(.err);
+            regs.printGPRs(.err);
             std.log.err("PC=0x{x}", .{pc});
             std.log.err("Trap value: 0x{x}", .{tval});
             @panic("Environment call from S mode");
         },
         .ecall_m_mode => {
-            status.print(.err);
-            frame.printGPRs(.err);
+            regs.printGPRs(.err);
             std.log.err("PC=0x{x}", .{pc});
             std.log.err("Trap value: 0x{x}", .{tval});
             @panic("Environment call from M mode");
         },
-        else => genericExceptionHandler(code, pc, status, tval, frame),
+        else => genericExceptionHandler(code, pc, status, tval, regs),
     }
 }
 
-fn handleInterrupt(code: InterruptCode, pc: u64, status: SStatus, tval: u64, frame: *TrapData) void {
+fn handleInterrupt(
+    code: InterruptCode,
+    pc: u64,
+    status: SStatus,
+    tval: u64,
+    frame: *Registers,
+) void {
     _ = tval;
+    _ = status;
     switch (code) {
         .supervisor_software => {
-            status.print(.err);
             frame.printGPRs(.err);
             std.log.err("PC=0x{x}", .{pc});
             @panic("Supervisor software interrupt");
         },
         .machine_software => {
-            status.print(.err);
             frame.printGPRs(.err);
             std.log.err("PC=0x{x}", .{pc});
             @panic("Machine software interrupt");
@@ -334,25 +263,21 @@ fn handleInterrupt(code: InterruptCode, pc: u64, status: SStatus, tval: u64, fra
             timer.tick();
         },
         .machine_timer => {
-            status.print(.err);
             frame.printGPRs(.err);
             std.log.err("PC=0x{x}", .{pc});
             @panic("Machine timer interrupt");
         },
         .supervisor_external => {
-            status.print(.err);
             frame.printGPRs(.err);
             std.log.err("PC=0x{x}", .{pc});
             @panic("Supervisor external interrupt");
         },
         .machine_external => {
-            status.print(.err);
             frame.printGPRs(.err);
             std.log.err("PC=0x{x}", .{pc});
             @panic("Machine external interrupt");
         },
         .counter_overflow => {
-            status.print(.err);
             frame.printGPRs(.err);
             std.log.err("PC=0x{x}", .{pc});
             @panic("Counter overflow interrupt");
@@ -360,12 +285,17 @@ fn handleInterrupt(code: InterruptCode, pc: u64, status: SStatus, tval: u64, fra
     }
 }
 
+// TODO: REPLACE THIS
+const trap_stack_size = 4 * 4096;
+var trap_stack: [trap_stack_size]u8 align(16) = undefined;
+export var trap_stack_bottom: u64 = undefined;
+
 export fn handleTrap(
     epc: u64,
     cause: TrapCause,
     status: SStatus,
     tval: u64,
-    frame: *TrapData,
+    frame: *Registers,
 ) void {
     if (cause.asynchronous) {
         handleInterrupt(cause.interrupt(), epc, status, tval, frame);
@@ -383,5 +313,5 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: usize) !void {
     );
 
     csr.stvec.write(@bitCast(stvec));
-    csr.sscratch.write(@intFromPtr(&trapFrame));
+    trap_stack_bottom = @intFromPtr(&trap_stack) + trap_stack_size;
 }

@@ -2,13 +2,31 @@ const std = @import("std");
 const config = @import("config.zig");
 const Thread = @import("Thread.zig");
 const slab_allocator = @import("mem/slab_allocator.zig");
+const buddy_allocator = @import("mem/buddy_allocator.zig");
+const arch = @import("arch/arch.zig");
+const mm = @import("mem/mm.zig");
 
 const log = std.log.scoped(.scheduler);
 
-pub var running_threads: std.SinglyLinkedList = .{};
+const stack_size_order = 4;
+const stack_size = @shlExact(1, stack_size_order) * 4096;
+
+pub var running_threads: std.SinglyLinkedList = .{
+    .first = &sentinel_thread.list_node,
+};
 pub var threads_available = std.bit_set.ArrayBitSet(usize, Thread.Id.max).initFull();
 
 var thread_cache: slab_allocator.ObjectCache(Thread) = .{};
+
+extern const __stack_top: void;
+
+var sentinel_thread: Thread = .{
+    .id = @enumFromInt(0),
+    .level = .kernel,
+    .registers = undefined,
+    .stack_top = undefined,
+    .list_node = .{ .next = null },
+};
 
 pub const Error = error{
     no_available_threads,
@@ -44,27 +62,48 @@ fn nextThreadId() Error!Thread.Id {
 }
 
 /// Create a new kernel thread
-fn newKernelThread() Error!Thread.Id {
+pub fn newKernelThread(entry_point: *const fn () void) Error!Thread.Id {
     const thread_id = try nextThreadId();
 
     var thread: *Thread = thread_cache.alloc() catch return error.out_of_memory;
     thread.id = thread_id;
     thread.level = .kernel;
 
+    const stack_bottom = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
+    const stack_top = mm.PhysicalAddress.make(stack_bottom.asInt() + stack_size);
+    thread.stack_top = mm.physicalToHHDMAddress(stack_top);
+
+    const entry_point_addr = @intFromPtr(entry_point);
+    arch.setupNewThread(thread, entry_point_addr, thread.stack_top.asInt());
     appendRunningThread(thread);
+
+    if (config.debug_scheduler) {
+        std.log.debug("new thread(TID={}) with entry point: 0x{x}", .{ thread_id, entry_point_addr });
+    }
 
     return thread_id;
 }
 
+fn scheduleNextThread() void {
+    const prev_thread_node = running_threads.popFirst() orelse @panic("No running threads?");
+    const prev_thread: *Thread = @fieldParentPtr("list_node", prev_thread_node);
+    appendRunningThread(prev_thread);
+
+    const next_thread_node = running_threads.first orelse unreachable;
+    const next_thread: *Thread = @fieldParentPtr("list_node", next_thread_node);
+    arch.scheduleNextThread(next_thread);
+}
+
+pub fn tick() void {
+    scheduleNextThread();
+}
+
 /// Initialize the scheduler.
-/// A sentinel kernel thread is create with TID 0 and always runs.
+/// A statically allocated sentinel kernel thread always runs with TID 0.
 pub fn init() void {
     thread_cache = slab_allocator.createObjectCache(Thread);
+    threads_available.unset(@intFromEnum(sentinel_thread.id));
+    sentinel_thread.stack_top = .make(@intFromPtr(&__stack_top));
 
-    const id = newKernelThread() catch unreachable;
-    log.info("sentinel thread id: {}", .{@intFromEnum(id)});
-    if (config.debug_scheduler)
-        std.debug.assert(@intFromEnum(id) == 0);
-    const id2 = newKernelThread() catch unreachable;
-    log.info("thread id: {}", .{@intFromEnum(id2)});
+    arch.scheduleNextThread(&sentinel_thread);
 }

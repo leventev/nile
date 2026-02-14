@@ -26,6 +26,18 @@ pub const PhysicalAddress = switch (target) {
     Arch.riscv64 => riscv64.PhysicalAddress,
 };
 
+pub const Registers = switch (target) {
+    Arch.riscv64 => riscv64.Registers,
+};
+
+pub const scheduleNextThread = switch (target) {
+    Arch.riscv64 => riscv64.scheduleNextThread,
+};
+
+pub const setupNewThread = switch (target) {
+    Arch.riscv64 => riscv64.setupNewThread,
+};
+
 // TODO: better way to abstract clocks
 pub const clock_source = switch (target) {
     Arch.riscv64 => riscv64.clock_source,

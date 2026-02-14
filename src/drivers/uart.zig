@@ -156,8 +156,6 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
         return error.InvalidDeviceTree;
     const int_num = std.mem.readInt(u32, interrupts[0..4], .big);
 
-    std.log.debug("{}", .{int_num});
-
     try interrupt.enableInterrupt(int_num);
     try interrupt.setPriority(int_num, 1);
 

@@ -35,6 +35,7 @@ SECTIONS {
 	.data : ALIGN(4K) {
 		PROVIDE(__data_start = .);
 		*(.data);
+		*(.data*);
 		*(.sdata);
 		PROVIDE(__data_end = .);
 	} :data

@@ -19,12 +19,13 @@ var temp_heap: [temp_heap_size]u8 = undefined;
 var fba = std.heap.FixedBufferAllocator.init(&temp_heap);
 const static_mem_allocator = fba.allocator();
 
-pub const std_options: std.Options = .{
-    .log_level = .info,
-    .logFn = kio.kernel_log,
-};
+pub const std_options: std.Options = .{ .log_level = .debug, .logFn = kio.kernel_log };
 
-pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+pub fn panic(
+    msg: []const u8,
+    error_return_trace: ?*std.builtin.StackTrace,
+    ret_addr: ?usize,
+) noreturn {
     _ = ret_addr;
     _ = error_return_trace;
 
@@ -74,12 +75,28 @@ fn init() void {
     devicetree.initDriversFromDeviceTree(&dt);
 
     scheduler.init();
+    _ = scheduler.newKernelThread(thread2) catch unreachable;
+    _ = scheduler.newKernelThread(thread3) catch unreachable;
 
-    // time.init(&dt) catch @panic("Failed to initialize timer");
+    time.init(&dt) catch @panic("Failed to initialize timer");
 
-    // arch.enableInterrupts();
+    arch.enableInterrupts();
 
     while (true) {
+        std.log.info("thread 1", .{});
+
         asm volatile ("wfi");
+    }
+}
+
+fn thread2() void {
+    while (true) {
+        std.log.info("thread 2", .{});
+    }
+}
+
+fn thread3() void {
+    while (true) {
+        std.log.info("thread 3", .{});
     }
 }

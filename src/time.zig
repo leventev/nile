@@ -2,11 +2,13 @@ const std = @import("std");
 const dt = @import("devicetree.zig");
 const kio = @import("kio.zig");
 const arch = @import("arch/arch.zig");
+const scheduler = @import("scheduler.zig");
 
 pub const ns_per_microseconds = 1_000;
 pub const ns_per_milliseconds = 1_000_000;
 pub const ns_per_second = 1_000_000_000;
-pub const ns_per_tick = 1_000_000;
+
+pub const ns_per_tick = 1_000_000_000;
 
 pub const ClockSourceInitError = error{InvalidDeviceTree};
 
@@ -19,13 +21,14 @@ pub const ClockSource = struct {
 
 // TODO: locking
 const Timer = struct {
-    initialized: bool,
-    ns_per_increment: u64,
-    start_count: u64,
+    initialized: bool = false,
+    ns_per_increment: u64 = undefined,
+    start_count: u64 = undefined,
 
     const Self = @This();
 
     fn init(self: *Self, dt_root: *const dt.DeviceTree) !void {
+        std.debug.assert(self.initialized == false);
         const frequency = try arch.clock_source.init(dt_root);
         self.ns_per_increment = ns_per_second / frequency;
 
@@ -39,7 +42,7 @@ const Timer = struct {
     }
 };
 
-var timer: Timer = undefined;
+var timer: Timer = .{};
 
 pub fn enable() void {
     std.debug.assert(timer.initialized);
@@ -53,7 +56,7 @@ pub fn disable() void {
 
 pub fn tick() void {
     std.debug.assert(timer.initialized);
-    // TODO: scheduling
+    scheduler.tick();
 }
 
 pub fn nanoseconds() ?u64 {

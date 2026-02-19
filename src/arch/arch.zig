@@ -38,6 +38,10 @@ pub const setupNewThread = switch (target) {
     Arch.riscv64 => riscv64.setupNewThread,
 };
 
+pub const Lock = switch (target) {
+    Arch.riscv64 => riscv64.Lock,
+};
+
 // TODO: better way to abstract clocks
 pub const clock_source = switch (target) {
     Arch.riscv64 => riscv64.clock_source,

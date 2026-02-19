@@ -2,6 +2,7 @@ const std = @import("std");
 
 const sbi = @import("arch/riscv64/sbi.zig");
 const time = @import("time.zig");
+const arch = @import("arch/arch.zig");
 
 pub const IOBackend = struct {
     name: []const u8,
@@ -85,13 +86,17 @@ fn writeBytes(bytes: []const u8) error{}!usize {
     return best.writeBytes(bytes) orelse unreachable;
 }
 
+var lock: arch.Lock = .{};
+
 pub fn kernel_log(
     comptime level: std.log.Level,
     comptime scope: @Type(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {
+    lock.lock();
     printLogPreamble(scope, level) catch unreachable;
     kernel_writer.print(format, args) catch unreachable;
     kernel_writer.writeByte('\n') catch unreachable;
+    lock.unlock();
 }

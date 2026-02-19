@@ -3,10 +3,14 @@ const cfg = @import("src/config.zig");
 
 pub fn build(b: *std.Build) void {
     // we are targeting riscv64
+    const riscv_f = std.Target.riscv.Feature;
+    const features_add = [_]std.Target.riscv.Feature{riscv_f.a};
+
     const target = b.resolveTargetQuery(.{
         .os_tag = .freestanding,
         .cpu_arch = .riscv64,
         .ofmt = .elf,
+        .cpu_features_add = std.Target.riscv.featureSet(&features_add),
     });
 
     // the user can choose the optimization level
@@ -24,6 +28,7 @@ pub fn build(b: *std.Build) void {
 
     exe.addAssemblyFile(b.path("src/arch/riscv64/start.s"));
     exe.addAssemblyFile(b.path("src/arch/riscv64/trap.s"));
+    exe.addAssemblyFile(b.path("src/arch/riscv64/lock.s"));
     exe.setLinkerScript(b.path("linker.ld"));
 
     b.installArtifact(exe);
@@ -48,7 +53,9 @@ pub fn build(b: *std.Build) void {
         "-serial",  "stdio",
         "-m",
         "128M",
-        // "-d",       "int",
+        // "-d",
+        // "int",
+        // "-s",       "-S",
     });
     qemu.step.dependOn(b.getInstallStep());
 

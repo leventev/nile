@@ -34,6 +34,8 @@ trapHandlerSupervisor:
     csrr t6, sscratch
     writeGPR t1, 31
 
+    amoswap.d t0, t0, (t1)
+
     # move *TrapData back into sscratch
     csrw sscratch, t1
 

@@ -4,6 +4,22 @@ ENTRY(start);
 KERNEL_ADDRESS = 0x80200000;
 STACK_SIZE = 0x10000;
 
+DEBUG_SECTION_ALIGN = 8;
+
+RX_REGION_SIZE = 4M;
+RW_REGION_SIZE = 2M;
+RO_REGION_SIZE = 2M;
+
+RX_REGION_START = KERNEL_ADDRESS;
+RW_REGION_START = RX_REGION_START + RX_REGION_SIZE;
+RO_REGION_START = RW_REGION_START + RW_REGION_SIZE;
+
+MEMORY {
+	ram_rx (rx) : ORIGIN = RX_REGION_START, LENGTH = RX_REGION_SIZE
+	ram_rw (rw) : ORIGIN = RW_REGION_START, LENGTH = RW_REGION_SIZE
+	ram_ro (r)  : ORIGIN = RO_REGION_START, LENGTH = RO_REGION_SIZE
+}
+
 PHDRS {
 	text PT_LOAD ;
 	data PT_LOAD ;
@@ -13,47 +29,110 @@ PHDRS {
 
 SECTIONS {
 	. = KERNEL_ADDRESS;
-	PROVIDE(__kernel_start = .);
+	__kernel_start = .;
 
 	.text : ALIGN(4K) {
-		PROVIDE(__text_start = .);
+		__text_start = .;
 		*(.init);
 		*(.text);
 		*(.text*);
-		PROVIDE(__text_end = .);
-	} :text
+		__text_end = .;
+	} > ram_rx :text
 
 	.rodata : ALIGN(4K) {
-		PROVIDE(__rodata_start = .);
+		__rodata_start = .;
 		*(.rodata);
 		*(.rodata*);
-		PROVIDE(__rodata_end = .);
-	} :rodata
 
-	PROVIDE(__global_pointer = .);
+		. = ALIGN(DEBUG_SECTION_ALIGN);
+
+		/* __debug_info_start = .; */
+		/* KEEP(*(.debug_info)); */
+		/* __debug_info_end = .; */
+		/**/
+		/* . = ALIGN(DEBUG_SECTION_ALIGN); */
+		/**/
+		/* __debug_abbrev_start = .; */
+		/* KEEP(*(.debug_abbrev)); */
+		/* __debug_abbrev_end = .; */
+		/**/
+		/* . = ALIGN(DEBUG_SECTION_ALIGN); */
+		/**/
+		/* __debug_str_start = .; */
+		/* KEEP(*(.debug_str)); */
+		/* __debug_str_end = .; */
+		/**/
+		/* . = ALIGN(DEBUG_SECTION_ALIGN); */
+		/**/
+		/* __debug_ranges_start = .; */
+		/* KEEP(*(.debug_ranges)); */
+		/* __debug_ranges_end = .; */
+		/**/
+		/* . = ALIGN(DEBUG_SECTION_ALIGN); */
+		/**/
+		/* __debug_line_start = .; */
+		/* KEEP(*(.debug_line)); */
+		/* __debug_line_end = .; */
+		/**/
+		/* . = ALIGN(DEBUG_SECTION_ALIGN); */
+		/**/
+		/* __debug_frame_start = .; */
+		/* KEEP(*(.debug_frame)); */
+		/* __debug_frame_end = .; */
+		/**/
+		__rodata_end = .;
+	} > ram_ro :rodata
+
+	/* TODO: related to the issue linked in debug.zig */
+  /* .rodata declaration consumes .debug_info and others */
+	.debug_info : {
+		KEEP(*(.debug_info));
+	}
+
+	.debug_abbrev : {
+		KEEP(*(.debug_abbrev));
+	}
+
+	.debug_str : {
+		KEEP(*(.debug_str));
+	}
+
+	.debug_range : {
+		KEEP(*(.debug_range));
+	}
+	
+	.debug_line : {
+		KEEP(*(.debug_line));
+	}
+
+	.debug_frame : {
+		KEEP(*(.debug_frame));
+	}
+
+	__global_pointer = .;
 
 	.data : ALIGN(4K) {
-		PROVIDE(__data_start = .);
+		__data_start = .;
 		*(.data);
 		*(.data*);
 		*(.sdata);
-		PROVIDE(__data_end = .);
-	} :data
+		__data_end = .;
+	} > ram_rw :data
 
 	.bss : ALIGN(4K) {
-		PROVIDE(__bss_start = .);
+		__bss_start = .;
 		*(.bss);
 		*(.bss*);
 		*(.sbss);
-		PROVIDE(__bss_end = .);
-	} :bss
+		__bss_end = .;
+	} > ram_rw :bss
 
 	.stack(NOLOAD) : ALIGN(4K) {
-		PROVIDE(__stack_start = .);
+		__stack_start = .;
 		. += STACK_SIZE;
-		PROVIDE(__stack_top = .);
-		PROVIDE(__stack_end = .);
-	} :bss
+		__stack_top = .;
+		__stack_end = .;
+	} > ram_rw :bss
 
-	PROVIDE(__kernel_end = .);
+	__kernel_end = .;
 }

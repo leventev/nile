@@ -9,6 +9,7 @@ pub const time = @import("time.zig");
 pub const interrupt = @import("interrupt.zig");
 pub const config = @import("config.zig");
 pub const scheduler = @import("scheduler.zig");
+pub const debug = @import("debug.zig");
 
 pub const slab_allocator = @import("mem/slab_allocator.zig");
 

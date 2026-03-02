@@ -10,8 +10,10 @@ pub const interrupt = @import("interrupt.zig");
 pub const config = @import("config.zig");
 pub const scheduler = @import("scheduler.zig");
 pub const debug = @import("debug.zig");
-
+pub const processes = @import("processes.zig");
 pub const slab_allocator = @import("mem/slab_allocator.zig");
+
+const test_file = @embedFile("test");
 
 export var device_tree_pointer: *void = undefined;
 
@@ -76,28 +78,17 @@ fn init() void {
     devicetree.initDriversFromDeviceTree(&dt);
 
     scheduler.init();
-    _ = scheduler.newKernelThread(thread2) catch unreachable;
-    _ = scheduler.newKernelThread(thread3) catch unreachable;
 
     time.init(&dt) catch @panic("Failed to initialize timer");
 
     arch.enableInterrupts();
 
+    processes.init();
+    _ = processes.spawnProcess(null, test_file) catch @panic("TODO");
+
     while (true) {
         std.log.info("thread 1", .{});
 
         asm volatile ("wfi");
-    }
-}
-
-fn thread2() void {
-    while (true) {
-        std.log.info("thread 2", .{});
-    }
-}
-
-fn thread3() void {
-    while (true) {
-        std.log.info("thread 3", .{});
     }
 }

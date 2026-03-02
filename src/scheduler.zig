@@ -84,6 +84,27 @@ pub fn newKernelThread(entry_point: *const fn () void) Error!Thread.Id {
     return thread_id;
 }
 
+/// Create a new user thread
+pub fn newUserThread() Error!Thread.Id {
+    const thread_id = try nextThreadId();
+
+    var thread: *Thread = thread_cache.alloc() catch return error.out_of_memory;
+    thread.id = thread_id;
+    thread.level = .user;
+
+    // const stack_bottom = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
+    // const stack_top = mm.PhysicalAddress.make(stack_bottom.asInt() + stack_size);
+    // thread.stack_top = mm.physicalToHHDMAddress(stack_top);
+
+    appendRunningThread(thread);
+
+    if (config.debug_scheduler) {
+        std.log.debug("new user thread(TID={})", .{thread_id});
+    }
+
+    return thread_id;
+}
+
 fn scheduleNextThread() void {
     const prev_thread_node = running_threads.popFirst() orelse @panic("No running threads?");
     const prev_thread: *Thread = @fieldParentPtr("list_node", prev_thread_node);

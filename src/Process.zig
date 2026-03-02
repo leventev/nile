@@ -2,7 +2,7 @@ const Thread = @import("Thread.zig");
 
 parent_id: ?Id,
 id: Id,
-user_thread: Thread,
+user_thread_id: Thread.Id,
 
 pub const Id = enum(u32) {
     _,

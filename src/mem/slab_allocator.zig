@@ -46,6 +46,7 @@ pub const SlabAllocator = struct {
     pub fn init(self: *SlabAllocator) void {
         self.meta_cache = .{
             .__slab_backing = &self.meta_cache_backing,
+            .initialized = true,
         };
         self.caches.append(&self.meta_cache.__slab_backing.list_node);
         self.cache_count += 1;
@@ -354,35 +355,45 @@ pub fn ObjectCache(comptime T: type) type {
         /// for nicer interface. Should not be accessed outside.
         __slab_backing: *SlabAllocator.Cache = undefined,
 
+        initialized: bool = false,
+
         /// Allocate a single T object
         pub fn alloc(self: Self) BuddyAllocator.Error!*T {
+            std.debug.assert(self.initialized);
             const addr: VirtualAddress = try self.__slab_backing.alloc();
             return @as(*T, @ptrFromInt(addr.asInt()));
         }
 
         /// Free a single T object
         pub fn free(self: Self, ptr: *T) void {
+            std.debug.assert(self.initialized);
             const addr: VirtualAddress = .make(@intFromPtr(ptr));
             self.__slab_backing.free(addr);
         }
 
         /// The total number of objects reserved, the sum of free and allocated objects
         pub fn totalCount(self: Self) usize {
+            std.debug.assert(self.initialized);
             return self.__slab_backing.total_object_count;
         }
 
         /// The number of free objects
         pub fn freeCount(self: Self) usize {
+            std.debug.assert(self.initialized);
             return self.__slab_backing.free_object_count;
         }
 
         /// The number of allocated objects
         pub fn allocatedCount(self: Self) usize {
+            std.debug.assert(self.initialized);
             return self.totalCount() - self.freeCount();
         }
 
         /// Initializes the cache
         fn init(self: *Self, slab_allocator: *SlabAllocator) void {
+            std.debug.assert(!self.initialized);
+
+            self.initialized = true;
             self.__slab_backing = slab_allocator.meta_cache.alloc() catch @panic("Unable to allocate new cache");
 
             // TODO: come up with some kind of logic for assigning higher block orders

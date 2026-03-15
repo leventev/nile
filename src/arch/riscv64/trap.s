@@ -18,6 +18,7 @@
 .global trap_stack_bottom
 .align 4
 trapHandlerSupervisor:
+    j trapHandlerSupervisor
     # move *Registers from sscratch into t6 and t6 into sscratch
     csrrw t6, sscratch, t6
 

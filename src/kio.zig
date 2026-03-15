@@ -26,6 +26,7 @@ pub var kernel_writer = std.io.Writer{
 const kio_cfg: std.io.tty.Config = .escape_codes;
 
 pub fn addBackend(backend: IOBackend) !void {
+    while (true) {}
     // TODO: locking
     if (backend_count == max_backends) return error.TooManyBackends;
     backends[backend_count] = backend;
@@ -74,7 +75,9 @@ fn drain(writer: *std.io.Writer, buffers: []const []const u8, splat: usize) std.
 
 fn writeBytes(bytes: []const u8) error{}!usize {
     // TODO: locking
-    if (backend_count == 0) return 0;
+    const abc = backend_count;
+    _ = abc;
+    if (backend_count == 0) return bytes.len;
 
     // TODO: order the list so we don't have to loop each time
     var best = &backends[0];

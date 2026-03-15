@@ -18,8 +18,6 @@ extern const __rodata_start: u8;
 extern const __rodata_end: u8;
 extern const __bss_start: u8;
 extern const __bss_end: u8;
-extern const __stack_start: u8;
-extern const __stack_end: u8;
 
 pub const page_size = 4096;
 pub const frame_size = page_size;
@@ -231,21 +229,16 @@ fn addKernelReservedMemory(
     const bss_end = @intFromPtr(&__bss_end);
     const bss_size = bss_end - bss_start;
 
-    const stack_start = @intFromPtr(&__stack_start);
-    const stack_end = @intFromPtr(&__stack_end);
-    const stack_size = stack_end - stack_start;
-
     const kernel_start = @intFromPtr(&__kernel_start);
     // we align forward so that the size of the region is divisible by 4K
     const kernel_end = std.mem.alignForward(usize, @intFromPtr(&__kernel_end), 4096);
     const kernel_size = kernel_end - kernel_start;
 
-    std.log.info("Kernel code: {} KiB, rodata: {} KiB, data: {} KiB, bss: {} KiB, stack: {} KiB", .{
+    std.log.info("Kernel code: {} KiB, rodata: {} KiB, data: {} KiB, bss: {} KiB", .{
         text_size / 1024,
         rodata_size / 1024,
         data_size / 1024,
         bss_size / 1024,
-        stack_size / 1024,
     });
 
     try reserved_regions.append(allocator, ReservedMemoryRegion{

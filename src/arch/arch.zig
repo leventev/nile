@@ -10,6 +10,10 @@ pub const init = switch (target) {
     Arch.riscv64 => riscv64.init,
 };
 
+pub const setupVM = switch (target) {
+    Arch.riscv64 => riscv64.setupVM,
+};
+
 pub const enableInterrupts = switch (target) {
     Arch.riscv64 => riscv64.enableInterrupts,
 };

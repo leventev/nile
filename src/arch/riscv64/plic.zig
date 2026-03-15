@@ -44,42 +44,45 @@ const PLICError = error{
 var plic: ?PLIC = null;
 
 pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
-    if (plic != null) {
-        @panic("PLIC is already initialized");
-    }
-
-    const node = dt.nodes.items[handle];
-
-    const max_interrupts = node.getPropertyOtherU32("riscv,ndev") orelse
-        return error.InvalidDeviceTree;
-
-    const addressCells = node.getAddressCellFromParent(dt) orelse
-        return error.InvalidDeviceTree;
-
-    const reg = node.getProperty(.reg) orelse
-        return error.InvalidDeviceTree;
-    var reg_it = try reg.iterator(addressCells, 0);
-    const base_addr = (reg_it.next() orelse return error.InvalidDeviceTree).addr;
-    const phys_addr = mm.PhysicalAddress.make(base_addr);
-    const virt_addr = mm.physicalToHHDMAddress(phys_addr);
-
-    plic = .{
-        .base_ptr = virt_addr,
-        .max_interrupts = max_interrupts,
-    };
-
-    try setThreshold(0, 0);
-
-    try interrupt.registerInterruptController(interrupt.InterruptController{
-        .enableInterrupt = enableInterruptWrapper,
-        .disableInterrupt = disableInterruptWrapper,
-        .setPriority = setPriorityWrapper,
-        .getPriority = getPriorityWrapper,
-        .setHandler = setHandlerWrapper,
-    });
-
-    riscv_int.enableInterrupt(@intCast(@intFromEnum(riscv_int.InterruptCode.machine_external)));
-    riscv_int.enableInterrupt(@intCast(@intFromEnum(riscv_int.InterruptCode.supervisor_external)));
+    _ = dt;
+    _ = handle;
+    return;
+    // if (plic != null) {
+    //     @panic("PLIC is already initialized");
+    // }
+    //
+    // const node = dt.nodes.items[handle];
+    //
+    // const max_interrupts = node.getPropertyOtherU32("riscv,ndev") orelse
+    //     return error.InvalidDeviceTree;
+    //
+    // const addressCells = node.getAddressCellFromParent(dt) orelse
+    //     return error.InvalidDeviceTree;
+    //
+    // const reg = node.getProperty(.reg) orelse
+    //     return error.InvalidDeviceTree;
+    // var reg_it = try reg.iterator(addressCells, 0);
+    // const base_addr = (reg_it.next() orelse return error.InvalidDeviceTree).addr;
+    // const phys_addr = mm.PhysicalAddress.make(base_addr);
+    // const virt_addr = mm.physicalToHHDMAddress(phys_addr);
+    //
+    // plic = .{
+    //     .base_ptr = virt_addr,
+    //     .max_interrupts = max_interrupts,
+    // };
+    //
+    // try setThreshold(0, 0);
+    //
+    // try interrupt.registerInterruptController(interrupt.InterruptController{
+    //     .enableInterrupt = enableInterruptWrapper,
+    //     .disableInterrupt = disableInterruptWrapper,
+    //     .setPriority = setPriorityWrapper,
+    //     .getPriority = getPriorityWrapper,
+    //     .setHandler = setHandlerWrapper,
+    // });
+    //
+    // riscv_int.enableInterrupt(@intCast(@intFromEnum(riscv_int.InterruptCode.machine_external)));
+    // riscv_int.enableInterrupt(@intCast(@intFromEnum(riscv_int.InterruptCode.supervisor_external)));
 }
 
 fn enableInterruptWrapper(int_num: usize) interrupt.InterruptController.Error!void {

@@ -47,26 +47,28 @@ fn sbiWriteBytes(bytes: []const u8) ?usize {
     return bytes.len;
 }
 
-pub fn init() linksection(".init") void {
-    kio.addBackend(.{
-        .name = "riscv64-sbi",
-        .priority = 100,
-        .writeBytes = sbiWriteBytes,
-    }) catch unreachable;
+pub fn setupVM() linksection(".init") void {
+    // mm.setupPaging();
+}
 
-    std.log.info("Starting nile(riscv64)...", .{});
-    const sbi_version = sbi.getSpecificationVersion();
-    const sbi_version_major = sbi_version >> 24;
-    const sbi_version_minor = sbi_version & 0x00FFFFFF;
-    const sbi_impl_id = sbi.getImplementationID();
-    const sbi_impl_str: []const u8 = if (sbi_impl_id < sbi.sbi_implementations.len)
-        sbi.sbi_implementations[sbi_impl_id]
-    else
-        "Unknown";
-    const sbi_implementation_version = sbi.getImplementationVersion();
+pub fn init() void {
+    // kio.addBackend(.{
+    //     .name = "riscv64-sbi",
+    //     .priority = 100,
+    //     .writeBytes = sbiWriteBytes,
+    // }) catch unreachable;
 
-    std.log.info("SBI specification version: {}.{}", .{ sbi_version_major, sbi_version_minor });
-    std.log.info("SBI implementation: {s} (ID={x}) version: 0x{x}", .{ sbi_impl_str, sbi_impl_id, sbi_implementation_version });
+    // std.log.info("Starting nile(riscv64)...", .{});
+    // const sbi_version = sbi.getSpecificationVersion();
+    // const sbi_version_major = sbi_version >> 24;
+    // const sbi_version_minor = sbi_version & 0x00FFFFFF;
+    // const sbi_impl_id = sbi.getImplementationID();
+    // const sbi_impl_str: []const u8 = if (sbi_impl_id < sbi.sbi_implementations.len)
+    //     sbi.sbi_implementations[sbi_impl_id]
+    // else
+    //     "Unknown";
+    // const sbi_implementation_version = sbi.getImplementationVersion();
 
-    mm.setupPaging();
+    // std.log.info("SBI specification version: {}.{}", .{ sbi_version_major, sbi_version_minor });
+    // std.log.info("SBI implementation: {s} (ID={x}) version: 0x{x}", .{ sbi_impl_str, sbi_impl_id, sbi_implementation_version });
 }

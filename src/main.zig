@@ -45,22 +45,7 @@ pub fn panic(
     while (true) {}
 }
 
-export fn kmain(hart_id: usize, dt_ptr_phys: *void) void {
-    // at this point virtual memory is still disabled
-    // arch.setupVM();
-    // virtual memory has been enabled
-    _ = hart_id;
-    const KERNEL_PHYS_ADDRESS = 0x80200000;
-    const KERNEL_VIRT_ADDRESS = 0xffffffffc0200000;
-    const KERNEL_OFFSET = KERNEL_VIRT_ADDRESS - KERNEL_PHYS_ADDRESS;
-    const dt_ptr_virt: *void = @ptrFromInt(@intFromPtr(dt_ptr_phys) + KERNEL_OFFSET);
-
-    init(dt_ptr_virt);
-}
-
-fn init(dt_ptr_virt: *void) void {
-    arch.init();
-
+pub fn init(dt_ptr_virt: *void) void {
     // std.log.info("Device tree address: 0x{x}", .{@intFromPtr(dt_ptr_virt)});
     const dt = devicetree.readDeviceTreeBlob(static_mem_allocator, dt_ptr_virt) catch
         @panic("Failed to read device tree blob");
@@ -73,16 +58,16 @@ fn init(dt_ptr_virt: *void) void {
         std.log.info("Module '{s}'(always run) initialized", .{mod.name});
     }
 
-    // const machine = dt.root().getProperty(.model) orelse @panic("Invalid device tree");
-    // std.log.info("Machine model: {s}", .{machine});
+    const machine = dt.root().getProperty(.model) orelse @panic("Invalid device tree");
+    std.log.info("Machine model: {s}", .{machine});
 
-    // const frame_regions = mm.getFrameRegions(static_mem_allocator, &dt) catch
-    //     @panic("Failed to get physical memory regions");
+    const frame_regions = mm.getFrameRegions(static_mem_allocator, &dt) catch
+        @panic("Failed to get physical memory regions");
 
-    // buddy_allocator.init(frame_regions);
-    // slab_allocator.init();
-    //
-    // static_mem_allocator.free(frame_regions);
+    buddy_allocator.init(frame_regions);
+    slab_allocator.init();
+
+    static_mem_allocator.free(frame_regions);
 
     // find interrupt controllers first
     devicetree.initDriversFromDeviceTreeEarly(&dt);

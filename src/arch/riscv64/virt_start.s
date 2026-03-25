@@ -24,9 +24,7 @@ bss_clear:
     addi t5, t5, 8
     bltu t5, t6, bss_clear
 
-    la t0, device_tree_pointer
-    sd a1, (t0)
-    tail kmain
+    tail initRiscv64 
 
 loop:
     j loop

@@ -105,7 +105,6 @@ var base_ptr: [*]u8 = undefined;
 inline fn writeReg(reg: u8, val: u8) void {
     std.debug.assert(reg < 8);
     base_ptr[reg] = val;
-    while (true) {}
 }
 
 inline fn readReg(reg: u8) u8 {
@@ -149,14 +148,15 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
 
     // TODO: parse all provided addresses?
     const baseAddr = (regs_it.next() orelse return error.InvalidDeviceTree).addr;
-    // const physAddr = mm.PhysicalAddress.make(baseAddr);
-    // const virtAddr = mm.physicalToHHDMAddress(physAddr);
-    const KERNEL_PHYS_ADDRESS = 0x80200000;
-    const KERNEL_VIRT_ADDRESS = 0xffffffffc0200000;
-    const KERNEL_OFFSET = KERNEL_VIRT_ADDRESS - KERNEL_PHYS_ADDRESS;
-    base_ptr = @ptrFromInt(baseAddr + KERNEL_OFFSET);
-    const abc = base_ptr;
-    _ = abc;
+    const physAddr = mm.PhysicalAddress.make(baseAddr);
+    const virtAddr = mm.physicalToHHDMAddress(physAddr);
+    base_ptr = @ptrFromInt(virtAddr.asInt());
+    // const KERNEL_PHYS_ADDRESS = 0x80200000;
+    // const KERNEL_VIRT_ADDRESS = 0xffffffffc0200000;
+    // const KERNEL_OFFSET = KERNEL_VIRT_ADDRESS - KERNEL_PHYS_ADDRESS;
+    // base_ptr = @ptrFromInt(baseAddr + KERNEL_OFFSET);
+    // const abc = base_ptr;
+    // _ = abc;
     // while (true) {}
 
     // const interrupts = uart.getProperty(.interrupts) orelse

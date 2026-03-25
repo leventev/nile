@@ -38,6 +38,8 @@ _start:
     csrw satp, t1
     sfence.vma
 
+    la a2, root_pg_tbl
+
     lui  t0, %hi(_start_higher_half)
     addi t0, t0, %lo(_start_higher_half)
     jalr ra, t0

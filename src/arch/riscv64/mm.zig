@@ -162,7 +162,7 @@ pub const PageTable = struct {
     }
 };
 
-var root_page_table: [entries_per_tbl]PageTableEntry align(4096) linksection(".bss") = undefined;
+pub var root_page_table: PageTable = undefined;
 
 fn writeSATP(satp: SATP) void {
     const val: u64 = @bitCast(satp);
@@ -172,38 +172,32 @@ fn writeSATP(satp: SATP) void {
     );
 }
 
-pub fn setupPaging() void {
-    // since rootPageTable is in .bss it should be all zeros
-    var page_table = PageTable.fromAddress(@intFromPtr(&root_page_table));
+fn flushPage(virt_addr: ?usize, asid: ?usize) void {
+    if (asid) |as| {
+        if (virt_addr) |virt| {
+            asm volatile ("sfence.vma %[virt], %[asid]"
+                :
+                : [virt] "r" (virt),
+                  [asid] "r" (as),
+            );
+        } else {
+            asm volatile ("sfence.vma x0, %[asid]"
+                :
+                : [asid] "r" (as),
+            );
+        }
+    } else {
+        asm volatile ("sfence.vma x0, x0");
+    }
+}
 
-    const kernel_reg_start = 0x80000000;
-    const kernel_reg_size = 0x40000000;
-    const kernel_reg_end = kernel_reg_start + kernel_reg_size;
-
-    const hhdm_reg_start = 0xffffffc000000000;
-    const hhdm_reg_size = 128 * 0x40000000;
-    const hhdm_reg_end = hhdm_reg_start + hhdm_reg_size;
-
-    // unfortunately llvm does not support -mcmodel=large yet so we have to identity map the kernel for now
-    // TODO: map the kernel high
-    // TODO: map smaller pages and set correct flags
-    page_table.writeEntry(
-        2,
-        Sv39PhysicalAddress.make(kernel_reg_start),
-        PageEntryType.leaf1G,
-        PageTableEntry.Flags{
-            .executable = true,
-            .readable = true,
-            .writable = true,
-            .global = true,
-            .user = false,
-        },
-    ) catch unreachable;
+pub fn setupPaging(root_page_table_virt: usize) void {
+    root_page_table = PageTable{ .entries = @ptrFromInt(root_page_table_virt) };
 
     // map 128GiB directly
     for (256..256 + 128, 0..) |i, j| {
         const phys_addr = Sv39PhysicalAddress.make(j * (1024 * 1024 * 1024));
-        page_table.writeEntry(
+        root_page_table.writeEntry(
             i,
             phys_addr,
             PageEntryType.leaf1G,
@@ -217,25 +211,9 @@ pub fn setupPaging() void {
         ) catch unreachable;
     }
 
-    const page_table_phys = @intFromPtr(&root_page_table);
-    const page_num: u44 = @intCast(std.math.shr(u64, page_table_phys, 12));
-    const satp = SATP{
-        .mode = SATP.Mode.sv39,
-        .addr_space_id = 0,
-        .phys_page_num = page_num,
-    };
+    // unmap identity mapping
+    root_page_table.zeroEntry(2) catch unreachable;
 
-    writeSATP(satp);
-
-    std.log.info("Virtual memory map:", .{});
-    std.log.info("    Kernel: [0x{x:0>16}-0x{x:0>16}] ({} KiB)", .{
-        kernel_reg_start,
-        kernel_reg_end,
-        kernel_reg_size / 1024,
-    });
-    std.log.info("      HHDM: [0x{x:0>16}-0x{x:0>16}] ({} KiB)", .{
-        hhdm_reg_start,
-        hhdm_reg_end,
-        hhdm_reg_size / 1024,
-    });
+    // TODO: flush individual pages
+    flushPage(null, 0);
 }

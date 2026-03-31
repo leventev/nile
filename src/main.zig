@@ -24,8 +24,8 @@ const static_mem_allocator = fba.allocator();
 
 pub const std_options: std.Options = .{ .log_level = .debug, .logFn = kio.kernel_log };
 
-const stack_size = 65536;
-export var kernel_stack: [stack_size]u8 = undefined;
+export const init_kernel_stack_size: usize = 65536;
+export var init_kernel_stack: [init_kernel_stack_size]u8 = undefined;
 
 pub fn panic(
     msg: []const u8,
@@ -46,7 +46,7 @@ pub fn panic(
 }
 
 pub fn init(dt_ptr_virt: *void) void {
-    // std.log.info("Device tree address: 0x{x}", .{@intFromPtr(dt_ptr_virt)});
+    std.log.info("Device tree address: 0x{x}", .{@intFromPtr(dt_ptr_virt)});
     const dt = devicetree.readDeviceTreeBlob(static_mem_allocator, dt_ptr_virt) catch
         @panic("Failed to read device tree blob");
 
@@ -72,10 +72,6 @@ pub fn init(dt_ptr_virt: *void) void {
     // find interrupt controllers first
     devicetree.initDriversFromDeviceTreeEarly(&dt);
     devicetree.initDriversFromDeviceTree(&dt);
-
-    while (true) {
-        std.log.info("HELLO", .{});
-    }
 
     scheduler.init();
 

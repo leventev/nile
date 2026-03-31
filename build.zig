@@ -26,8 +26,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/phys_start.s"));
-    exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/virt_start.s"));
+    exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/start.s"));
     exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/trap.s"));
     exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/lock.s"));
     exe.setLinkerScript(b.path("linker.ld"));
@@ -52,9 +51,10 @@ pub fn build(b: *std.Build) void {
         // "-bios",    "opensbi/build/platform/generic/firmware/fw_dynamic.bin",
         "-kernel",  "zig-out/bin/nile",
         "-serial",  "stdio",
-        "-m",       "128M",
-        "-d",
-        "int",
+        "-m",
+        "128M",
+        // "-d",
+        // "int",
         // "-s",       "-S",
     });
     qemu.step.dependOn(b.getInstallStep());

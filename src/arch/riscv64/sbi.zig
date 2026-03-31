@@ -90,9 +90,8 @@ pub fn call(extension: u64, function: u64, arg0: u64, arg1: u64, arg2: u64) SBIE
     }
 }
 
-pub fn debugConsoleWrite(str: []const u8) SBIError!void {
-    const addr_int = @intFromPtr(str.ptr);
-    _ = try call(sbi_debug_console_ext_id, sbi_debug_con_write, str.len, addr_int, 0);
+pub fn debugConsoleWrite(str_ptr_phys: usize, len: usize) SBIError!void {
+    _ = try call(sbi_debug_console_ext_id, sbi_debug_con_write, len, str_ptr_phys, 0);
 }
 
 pub fn getSpecificationVersion() u64 {

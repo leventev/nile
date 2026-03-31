@@ -20,6 +20,10 @@ pub const disableInterrupts = trap.disableInterrupts;
 
 extern const __global_pointer: ?void;
 
+const KERNEL_PHYS_ADDRESS = 0x80200000;
+const KERNEL_VIRT_ADDRESS = 0xffffffffc0200000;
+const KERNEL_OFFSET = KERNEL_VIRT_ADDRESS - KERNEL_PHYS_ADDRESS;
+
 pub fn setupNewThread(thread: *Thread, entry_point_addr: usize, stack_top: usize) void {
     if (config.debug_scheduler) {
         thread.registers.gprs = [_]u64{0xAA_BB_CC_DD_AA_BB_CC_DD} ** Registers.gpr_count;
@@ -44,7 +48,8 @@ pub fn scheduleNextThread(thread: *Thread) void {
 pub const clock_source = timer.riscv_clock_source;
 
 fn sbiWriteBytes(bytes: []const u8) ?usize {
-    sbi.debugConsoleWrite(bytes) catch return null;
+    const phys_ptr: usize = @intFromPtr(bytes.ptr) - KERNEL_OFFSET;
+    sbi.debugConsoleWrite(phys_ptr, bytes.len) catch return null;
     return bytes.len;
 }
 
@@ -53,13 +58,28 @@ export fn initRiscv64(
     dt_phys: usize,
     root_page_table_phys: usize,
 ) void {
-    // at this point virtual memory is still disabled
-    // arch.setupVM();
-    // virtual memory has been enabled
     _ = hart_id;
-    const KERNEL_PHYS_ADDRESS = 0x80200000;
-    const KERNEL_VIRT_ADDRESS = 0xffffffffc0200000;
-    const KERNEL_OFFSET = KERNEL_VIRT_ADDRESS - KERNEL_PHYS_ADDRESS;
+
+    kio.addBackend(.{
+        .name = "riscv64-sbi",
+        .priority = 100,
+        .writeBytes = sbiWriteBytes,
+    }) catch unreachable;
+
+    std.log.info("Starting nile(riscv64)...", .{});
+    const sbi_version = sbi.getSpecificationVersion();
+    const sbi_version_major = sbi_version >> 24;
+    const sbi_version_minor = sbi_version & 0x00FFFFFF;
+    const sbi_impl_id = sbi.getImplementationID();
+    const sbi_impl_str: []const u8 = if (sbi_impl_id < sbi.sbi_implementations.len)
+        sbi.sbi_implementations[sbi_impl_id]
+    else
+        "Unknown";
+    const sbi_implementation_version = sbi.getImplementationVersion();
+
+    std.log.info("SBI specification version: {}.{}", .{ sbi_version_major, sbi_version_minor });
+    std.log.info("SBI implementation: {s} (ID={x}) version: 0x{x}", .{ sbi_impl_str, sbi_impl_id, sbi_implementation_version });
+
     const dt_ptr_virt: *void = @ptrFromInt(dt_phys + KERNEL_OFFSET);
     const root_page_table_virt: usize = root_page_table_phys + KERNEL_OFFSET;
 

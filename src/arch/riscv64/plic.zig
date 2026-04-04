@@ -60,7 +60,7 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
         return error.InvalidDeviceTree;
     var reg_it = try reg.iterator(addressCells, 0);
     const base_addr = (reg_it.next() orelse return error.InvalidDeviceTree).addr;
-    const phys_addr = mm.PhysicalAddress.make(base_addr);
+    const phys_addr = mm.PhysicalAddress.fromInt(base_addr);
     const virt_addr = mm.physicalToHHDMAddress(phys_addr);
 
     plic = .{

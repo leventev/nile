@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const arch = @import("../arch/arch.zig");
 const buddy_allocator = @import("buddy_allocator.zig");
 const BuddyAllocator = buddy_allocator.BuddyAllocator;
 const mm = @import("mm.zig");
@@ -112,7 +113,7 @@ pub const SlabAllocator = struct {
             const gap = if (list_end_align_rem > 0) (obj_alignment - list_end_align_rem) else 0;
             const objs_start = list_end + gap;
 
-            return .make(objs_start + object_id_int * obj_size);
+            return .fromInt(objs_start + object_id_int * obj_size);
         }
 
         /// Frees an object. The caller must make sure that obj_per_slab, obj_size are correct.
@@ -317,7 +318,7 @@ pub const SlabAllocator = struct {
         obj_size: usize,
         obj_alignment_log: u5,
     ) usize {
-        const slab_size = std.math.shl(usize, 1, slab_block_order) * mm.page_size;
+        const slab_size = std.math.shl(usize, 1, slab_block_order) * arch.page_size;
         const obj_alignment = std.math.shl(usize, 1, obj_alignment_log);
 
         // make a rough estimate first without taking alignment into account

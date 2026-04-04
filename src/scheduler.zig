@@ -73,33 +73,43 @@ pub fn newKernelThread(entry_point: *const fn () void) Error!Thread.Id {
     const stack_top = mm.PhysicalAddress.make(stack_bottom.asInt() + stack_size);
     thread.stack_top = mm.physicalToHHDMAddress(stack_top);
 
+    const stack_top_addr = thread.stack_top.asInt();
+
     const entry_point_addr = @intFromPtr(entry_point);
-    arch.setupNewThread(thread, entry_point_addr, thread.stack_top.asInt());
+    arch.setupNewThread(thread, entry_point_addr, stack_top_addr, false);
     appendRunningThread(thread);
 
     if (config.debug_scheduler) {
-        std.log.debug("new thread(TID={}) with entry point: 0x{x}", .{ thread_id, entry_point_addr });
+        std.log.debug("new kernel thread(TID={}), entry point: 0x{x}, stack top: 0x{x}", .{
+            thread_id,
+            entry_point_addr,
+            stack_top_addr,
+        });
     }
 
     return thread_id;
 }
 
 /// Create a new user thread
-pub fn newUserThread() Error!Thread.Id {
+pub fn newUserThread(
+    entry_point_addr: usize,
+    stack_top_addr: usize,
+) Error!Thread.Id {
     const thread_id = try nextThreadId();
 
     var thread: *Thread = thread_cache.alloc() catch return error.out_of_memory;
     thread.id = thread_id;
     thread.level = .user;
 
-    // const stack_bottom = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
-    // const stack_top = mm.PhysicalAddress.make(stack_bottom.asInt() + stack_size);
-    // thread.stack_top = mm.physicalToHHDMAddress(stack_top);
-
+    arch.setupNewThread(thread, entry_point_addr, stack_top_addr, true);
     appendRunningThread(thread);
 
     if (config.debug_scheduler) {
-        std.log.debug("new user thread(TID={})", .{thread_id});
+        std.log.debug("new user thread(TID={}), entry point: 0x{x}, stack top: 0x{x}", .{
+            thread_id,
+            entry_point_addr,
+            stack_top_addr,
+        });
     }
 
     return thread_id;
@@ -124,7 +134,7 @@ pub fn tick() void {
 pub fn init() void {
     thread_cache = slab_allocator.createObjectCache(Thread);
     threads_available.unset(@intFromEnum(sentinel_thread.id));
-    sentinel_thread.stack_top = .make(@intFromPtr(&__stack_top));
+    sentinel_thread.stack_top = .fromInt(@intFromPtr(&__stack_top));
 
     arch.scheduleNextThread(&sentinel_thread);
 }

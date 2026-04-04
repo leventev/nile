@@ -216,7 +216,8 @@ fn handleException(code: ExceptionCode, pc: u64, status: SStatus, tval: u64, reg
     switch (code) {
         .load_page_fault, .instruction_page_fault, .store_or_amo_page_fault => {
             regs.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{pc});
+            std.log.err("sstatus={}", .{status});
+            std.log.err("pc=0x{x}", .{pc});
             std.log.err("Faulting address: 0x{x}", .{tval});
             @panic("Page fault");
         },
@@ -225,13 +226,15 @@ fn handleException(code: ExceptionCode, pc: u64, status: SStatus, tval: u64, reg
         },
         .ecall_s_mode => {
             regs.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{pc});
+            std.log.err("sstatus={}", .{status});
+            std.log.err("pc=0x{x}", .{pc});
             std.log.err("Trap value: 0x{x}", .{tval});
             @panic("Environment call from S mode");
         },
         .ecall_m_mode => {
             regs.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{pc});
+            std.log.err("sstatus={}", .{status});
+            std.log.err("pc=0x{x}", .{pc});
             std.log.err("Trap value: 0x{x}", .{tval});
             @panic("Environment call from M mode");
         },

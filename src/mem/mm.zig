@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const devicetree = @import("../devicetree.zig");
 const arch = @import("../arch/arch.zig");
+const Process = @import("../Process.zig");
 
 const bigToNative = std.mem.bigToNative;
 
@@ -19,11 +20,9 @@ extern const __rodata_end: u8;
 extern const __bss_start: u8;
 extern const __bss_end: u8;
 
-pub const page_size = 4096;
-pub const frame_size = page_size;
+pub const frame_size = arch.page_size;
 
-pub const entries_per_table = 512;
-
+pub const PageTable = arch.PageTable;
 pub const VirtualAddress = arch.VirtualAddress;
 pub const PhysicalAddress = arch.PhysicalAddress;
 
@@ -142,14 +141,14 @@ fn processRegion(
     region: PhysicalMemoryRegion,
     reserved_regions: []const ReservedMemoryRegion,
 ) !void {
-    std.debug.assert(region.range.start % page_size == 0);
-    std.debug.assert(region.range.size % page_size == 0);
+    std.debug.assert(region.range.start % arch.page_size == 0);
+    std.debug.assert(region.range.size % arch.page_size == 0);
 
     var range = region.range;
 
     for (reserved_regions) |resv| {
-        std.debug.assert(resv.range.start % page_size == 0);
-        std.debug.assert(resv.range.size % page_size == 0);
+        std.debug.assert(resv.range.start % arch.page_size == 0);
+        std.debug.assert(resv.range.size % arch.page_size == 0);
 
         if (!range.intersects(resv.range))
             continue;
@@ -352,9 +351,18 @@ pub fn getFrameRegions(allocator: std.mem.Allocator, dt: *const devicetree.Devic
 const hhdm_start = if (builtin.is_test) 0 else 0xffffffc000000000;
 
 pub fn physicalToHHDMAddress(phys: PhysicalAddress) VirtualAddress {
-    return VirtualAddress.make(hhdm_start + phys.asInt());
+    return VirtualAddress.fromInt(hhdm_start + phys.asInt());
 }
 
 pub fn virtualToPhysicalAddress(virt: VirtualAddress) PhysicalAddress {
-    return PhysicalAddress.make(virt.asInt() - hhdm_start);
+    return PhysicalAddress.fromInt(virt.asInt() - hhdm_start);
+}
+
+pub fn mapRegion(root_page_table: arch.PageTable, addr: VirtualAddress, size: usize, flags: Process.MappedRegion.Flags) void {
+    // TODO: errors
+    if (addr % arch.page_size != 0) @panic("unaligned address");
+    if (addr % size != 0) @panic("size != k * page_size");
+
+    // TODO: make this more efficient, map larger pages
+    arch.mapRegion(root_page_table, addr, size, flags);
 }

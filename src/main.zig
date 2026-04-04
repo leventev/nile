@@ -45,7 +45,7 @@ pub fn panic(
     while (true) {}
 }
 
-pub fn init(dt_ptr_virt: *void) void {
+pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) void {
     std.log.info("Device tree address: 0x{x}", .{@intFromPtr(dt_ptr_virt)});
     const dt = devicetree.readDeviceTreeBlob(static_mem_allocator, dt_ptr_virt) catch
         @panic("Failed to read device tree blob");
@@ -77,10 +77,11 @@ pub fn init(dt_ptr_virt: *void) void {
 
     time.init(&dt) catch @panic("Failed to initialize timer");
 
-    arch.enableInterrupts();
-
     processes.init();
-    _ = processes.spawnProcess(null, test_file) catch @panic("TODO");
+    _ = processes.spawnProcess(root_page_table, null, test_file) catch @panic("TODO");
+
+    // interrupts must be enabled only after we spawned PID 1
+    arch.enableInterrupts();
 
     while (true) {
         std.log.info("thread 1", .{});

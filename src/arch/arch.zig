@@ -38,6 +38,22 @@ pub const Lock = switch (target) {
     Arch.riscv64 => riscv64.Lock,
 };
 
+pub const mapRegion = switch (target) {
+    Arch.riscv64 => riscv64.mapRegion,
+};
+
+pub const PageTable = switch (target) {
+    Arch.riscv64 => riscv64.PageTable,
+};
+
+pub const page_size = switch (target) {
+    Arch.riscv64 => riscv64.page_size,
+};
+
+pub const entries_per_table = switch (target) {
+    Arch.riscv64 => riscv64.entries_per_table,
+};
+
 // TODO: better way to abstract clocks
 pub const clock_source = switch (target) {
     Arch.riscv64 => riscv64.clock_source,

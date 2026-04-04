@@ -18,7 +18,6 @@
 .global trap_stack_bottom
 .align 4
 trapHandlerSupervisor:
-    j trapHandlerSupervisor
     # move *Registers from sscratch into t6 and t6 into sscratch
     csrrw t6, sscratch, t6
 
@@ -59,12 +58,12 @@ trapHandlerSupervisor:
 
     ld t2, (32 * REGISTER_BYTES)(t6)
     csrw sepc, t2
-    # TODO: maybe set status???
-    # ld t2, (33 * REGISTER_BYTES)(t6)
-    # csrw sstatus, t2
+
+    ld t2, (33 * REGISTER_BYTES)(t6)
+    csrw sstatus, t2
 
     # load GPRs
-    # NOTE: it can seem we are rewriting t6 here but t6 is the last register thus writing all 30
+    # NOTE: it can seem that we are rewriting t6 here but t6 is the last register thus writing all 30
     # registers before it is fine
     .set i, 1
     .rept 31

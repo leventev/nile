@@ -90,7 +90,7 @@ pub const BuddyAllocator = struct {
 
             for (0..block_count) |i| {
                 const block_page_idx = next_aligned_page_idx + i * block_size_in_pages;
-                const block_addr = PhysicalAddress.make(block_page_idx * mm.page_size);
+                const block_addr = PhysicalAddress.fromInt(block_page_idx * arch.page_size);
 
                 self.orders[order].orderedAdd(block_addr);
             }
@@ -119,7 +119,7 @@ pub const BuddyAllocator = struct {
 
         for (0..page_count) |i| {
             const block_page_idx = start_page_idx + i;
-            const block_addr = arch.PhysicalAddress.make(block_page_idx * mm.page_size);
+            const block_addr = arch.PhysicalAddress.fromInt(block_page_idx * arch.page_size);
             self.orders[0].orderedAdd(block_addr);
         }
     }
@@ -163,7 +163,7 @@ pub const BuddyAllocator = struct {
         // for simplicity's sake we always try to select the leftmost block
         // to bias lower addresses hence popFirst() instead pop()
         if (self.orders[order].list.popFirst()) |list_node| {
-            const virt_addr: mm.VirtualAddress = .make(@intFromPtr(list_node));
+            const virt_addr: mm.VirtualAddress = .fromInt(@intFromPtr(list_node));
             const phys_addr = mm.virtualToPhysicalAddress(virt_addr);
             // when we split an N order block into two N-1 order blocks we always select the
             // left N-1 block so the address always stays the same
@@ -173,8 +173,8 @@ pub const BuddyAllocator = struct {
             while (order > desired_order) {
                 order -= 1;
                 const block_size_in_pages = std.math.shl(usize, 1, order);
-                const offset = block_size_in_pages * mm.page_size;
-                const right_block_addr = PhysicalAddress.make(phys_addr.asInt() + offset);
+                const offset = block_size_in_pages * arch.page_size;
+                const right_block_addr = phys_addr.add(offset);
                 self.orders[order].orderedAdd(right_block_addr);
             }
 
@@ -223,8 +223,8 @@ pub fn init(regions: []const mm.MemoryRegion) void {
         total_frames += frame_count;
 
         // TODO: convert the fields of mm.MemoryRegion to be page indices instead of absolute addresses
-        const start_page_index: usize = region.start / mm.page_size;
-        const page_count: usize = region.size / mm.page_size;
+        const start_page_index: usize = region.start / arch.page_size;
+        const page_count: usize = region.size / arch.page_size;
         global_buddy_allocator.addBlocksFromRegion(start_page_index, page_count);
     }
 

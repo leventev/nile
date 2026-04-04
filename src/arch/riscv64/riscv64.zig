@@ -18,13 +18,19 @@ pub const PhysicalAddress = mm.Sv39PhysicalAddress;
 pub const enableInterrupts = trap.enableInterrupts;
 pub const disableInterrupts = trap.disableInterrupts;
 
+pub const mapRegion = mm.mapRegion;
+pub const PageTable = mm.PageTable;
+
+pub const page_size = mm.page_size;
+pub const entries_per_table = mm.entries_per_table;
+
 extern const __global_pointer: ?void;
 
 const KERNEL_PHYS_ADDRESS = 0x80200000;
 const KERNEL_VIRT_ADDRESS = 0xffffffffc0200000;
 const KERNEL_OFFSET = KERNEL_VIRT_ADDRESS - KERNEL_PHYS_ADDRESS;
 
-pub fn setupNewThread(thread: *Thread, entry_point_addr: usize, stack_top: usize) void {
+pub fn setupNewThread(thread: *Thread, entry_point_addr: usize, stack_top: usize, user: bool) void {
     if (config.debug_scheduler) {
         thread.registers.gprs = [_]u64{0xAA_BB_CC_DD_AA_BB_CC_DD} ** Registers.gpr_count;
     } else {
@@ -34,6 +40,11 @@ pub fn setupNewThread(thread: *Thread, entry_point_addr: usize, stack_top: usize
     thread.registers.pc = @intCast(entry_point_addr);
     // TODO: maybe dont copy sstatus?
     thread.registers.status = @bitCast(CSR.sstatus.read());
+    if (user) {
+        thread.registers.status.supervisor_previous_privilege = .user;
+    } else {
+        thread.registers.status.supervisor_previous_privilege = .supervisor;
+    }
     thread.registers.gprs[Registers.stack_ptr] = @intCast(stack_top);
     thread.registers.gprs[Registers.global_data_ptr] = @intFromPtr(&__global_pointer);
 }
@@ -83,6 +94,8 @@ export fn initRiscv64(
     const dt_ptr_virt: *void = @ptrFromInt(dt_phys + KERNEL_OFFSET);
     const root_page_table_virt: usize = root_page_table_phys + KERNEL_OFFSET;
 
-    mm.setupPaging(root_page_table_virt);
-    root.init(dt_ptr_virt);
+    const root_page_table = PageTable{ .entries = @ptrFromInt(root_page_table_virt) };
+
+    mm.setupPaging(root_page_table);
+    root.init(root_page_table, dt_ptr_virt);
 }

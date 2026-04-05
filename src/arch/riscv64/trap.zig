@@ -5,6 +5,7 @@ const sbi = @import("sbi.zig");
 const timer = @import("timer.zig");
 const devicetree = @import("root").devicetree;
 const registers = @import("registers.zig");
+const syscalls = @import("syscalls.zig");
 
 const Registers = registers.Registers;
 
@@ -204,85 +205,81 @@ pub fn clearPendingInterrupt(id: usize) void {
     csr.sip.clearBits(std.math.shl(u64, 1, id));
 }
 
-fn genericExceptionHandler(code: ExceptionCode, pc: u64, status: SStatus, tval: u64, regs: *Registers) void {
-    _ = status;
+fn genericExceptionHandler(code: ExceptionCode, tval: u64, regs: *Registers) void {
     regs.printGPRs(.err);
-    std.log.err("PC=0x{x}", .{pc});
+    std.log.err("PC=0x{x}", .{regs.pc});
     std.log.err("Trap value: 0x{x}", .{tval});
     @panic(@tagName(code));
 }
 
-fn handleException(code: ExceptionCode, pc: u64, status: SStatus, tval: u64, regs: *Registers) void {
+fn handleException(code: ExceptionCode, tval: u64, regs: *Registers) void {
     switch (code) {
         .load_page_fault, .instruction_page_fault, .store_or_amo_page_fault => {
             regs.printGPRs(.err);
-            std.log.err("sstatus={}", .{status});
-            std.log.err("pc=0x{x}", .{pc});
+            std.log.err("sstatus={}", .{regs.status});
+            std.log.err("pc=0x{x}", .{regs.pc});
             std.log.err("Faulting address: 0x{x}", .{tval});
             @panic("Page fault");
         },
         .ecall_u_mode => {
-            @panic("TODO");
+            syscalls.dispatchSyscall(regs);
         },
         .ecall_s_mode => {
             regs.printGPRs(.err);
-            std.log.err("sstatus={}", .{status});
-            std.log.err("pc=0x{x}", .{pc});
+            std.log.err("sstatus={}", .{regs.status});
+            std.log.err("pc=0x{x}", .{regs.pc});
             std.log.err("Trap value: 0x{x}", .{tval});
             @panic("Environment call from S mode");
         },
         .ecall_m_mode => {
             regs.printGPRs(.err);
-            std.log.err("sstatus={}", .{status});
-            std.log.err("pc=0x{x}", .{pc});
+            std.log.err("sstatus={}", .{regs.status});
+            std.log.err("pc=0x{x}", .{regs.pc});
             std.log.err("Trap value: 0x{x}", .{tval});
             @panic("Environment call from M mode");
         },
-        else => genericExceptionHandler(code, pc, status, tval, regs),
+        else => genericExceptionHandler(code, tval, regs),
     }
 }
 
 fn handleInterrupt(
     code: InterruptCode,
-    pc: u64,
-    status: SStatus,
     tval: u64,
-    frame: *Registers,
+    regs: *Registers,
 ) void {
     _ = tval;
-    _ = status;
     switch (code) {
         .supervisor_software => {
-            frame.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{pc});
+            regs.printGPRs(.err);
+            std.log.err("PC=0x{x}", .{regs.pc});
             @panic("Supervisor software interrupt");
         },
         .machine_software => {
-            frame.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{pc});
+            regs.printGPRs(.err);
+            std.log.err("PC=0x{x}", .{regs.pc});
             @panic("Machine software interrupt");
         },
         .supervisor_timer => {
             timer.tick();
         },
         .machine_timer => {
-            frame.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{pc});
+            regs.printGPRs(.err);
+            std.log.err("PC=0x{x}", .{regs.pc});
             @panic("Machine timer interrupt");
         },
         .supervisor_external => {
-            frame.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{pc});
+            regs.printGPRs(.err);
+            std.log.err("PC=0x{x}", .{regs.pc});
             @panic("Supervisor external interrupt");
         },
         .machine_external => {
-            frame.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{pc});
+            regs.printGPRs(.err);
+            std.log.err("PC=0x{x}", .{regs.pc});
             @panic("Machine external interrupt");
         },
         .counter_overflow => {
-            frame.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{pc});
+            regs.printGPRs(.err);
+            std.log.err("PC=0x{x}", .{regs.pc});
             @panic("Counter overflow interrupt");
         },
     }
@@ -294,16 +291,14 @@ var trap_stack: [trap_stack_size]u8 align(16) = undefined;
 export var trap_stack_bottom: u64 = undefined;
 
 export fn handleTrap(
-    epc: u64,
     cause: TrapCause,
-    status: SStatus,
     tval: u64,
-    frame: *Registers,
+    regs: *Registers,
 ) void {
     if (cause.asynchronous) {
-        handleInterrupt(cause.interrupt(), epc, status, tval, frame);
+        handleInterrupt(cause.interrupt(), tval, regs);
     } else {
-        handleException(cause.exception(), epc, status, tval, frame);
+        handleException(cause.exception(), tval, regs);
     }
 }
 

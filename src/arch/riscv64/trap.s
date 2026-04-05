@@ -28,39 +28,42 @@ trapHandlerSupervisor:
         .set i, i+1
     .endr
 
-    # since t1 is already saved we can move *TrapData into it
+    # since t1 is already saved we can move *Registers into it
     mv t1, t6
     # move the original t6 value back into t6
     csrr t6, sscratch
     writeGPR t1, 31
 
-    # move *TrapData back into sscratch
+    # move *Registers back into sscratch
     csrw sscratch, t1
 
     # save exception PC into *Registers
-    csrr a0, sepc 
-    sd a0, (32 * REGISTER_BYTES)(t1)
+    csrr t0, sepc 
+    sd t0, (32 * REGISTER_BYTES)(t1)
 
-    csrr a1, scause
-   
     # save previous sstatus
-    csrr a2, sstatus
-    ; sd a2, (33 * REGISTER_BYTES)(t1)
+    csrr t0, sstatus
+    sd t0, (33 * REGISTER_BYTES)(t1)
 
-    csrr a3, stval
-    mv a4, t1
-
+    # set trap stack
     ld sp, trap_stack_bottom
+
+    # pass scause and stval to zig trap handler
+    csrr a0, scause
+    csrr a1, stval
+    # pass *Registers to zig trap handler
+    mv a2, t1
 
     call handleTrap
 
+    # load *Registers into t6
     csrr t6, sscratch
 
-    ld t2, (32 * REGISTER_BYTES)(t6)
-    csrw sepc, t2
+    ld t0, (32 * REGISTER_BYTES)(t6)
+    csrw sepc, t0
 
-    ld t2, (33 * REGISTER_BYTES)(t6)
-    csrw sstatus, t2
+    ld t0, (33 * REGISTER_BYTES)(t6)
+    csrw sstatus, t0
 
     # load GPRs
     # NOTE: it can seem that we are rewriting t6 here but t6 is the last register thus writing all 30

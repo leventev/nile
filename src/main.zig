@@ -12,6 +12,7 @@ pub const scheduler = @import("scheduler.zig");
 pub const debug = @import("debug.zig");
 pub const processes = @import("processes.zig");
 pub const slab_allocator = @import("mem/slab_allocator.zig");
+pub const Thread = @import("Thread.zig");
 
 const test_file = @embedFile("test");
 
@@ -45,7 +46,7 @@ pub fn panic(
     while (true) {}
 }
 
-pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) void {
+pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     std.log.info("Device tree address: 0x{x}", .{@intFromPtr(dt_ptr_virt)});
     const dt = devicetree.readDeviceTreeBlob(static_mem_allocator, dt_ptr_virt) catch
         @panic("Failed to read device tree blob");
@@ -77,15 +78,15 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) void {
 
     time.init(&dt) catch @panic("Failed to initialize timer");
 
-    processes.init();
-    _ = processes.spawnProcess(root_page_table, null, test_file) catch @panic("TODO");
+    const idle_process_thread = processes.init();
+    _ = processes.spawnInitProcess(root_page_table, null, test_file) catch @panic("TODO");
+    // TODO: this could probably be done in a nicer way
+    arch.scheduleNextThread(idle_process_thread);
 
     // interrupts must be enabled only after we spawned PID 1
     arch.enableInterrupts();
 
     while (true) {
-        std.log.info("thread 1", .{});
-
         asm volatile ("wfi");
     }
 }

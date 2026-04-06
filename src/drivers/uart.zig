@@ -149,7 +149,7 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
     // TODO: parse all provided addresses?
     const baseAddr = (regs_it.next() orelse return error.InvalidDeviceTree).addr;
     const physAddr = mm.PhysicalAddress.fromInt(baseAddr);
-    const virtAddr = mm.physicalToHHDMAddress(physAddr);
+    const virtAddr = mm.physicalToVirtualAddress(physAddr);
     base_ptr = @ptrFromInt(virtAddr.asInt());
     // const KERNEL_PHYS_ADDRESS = 0x80200000;
     // const KERNEL_VIRT_ADDRESS = 0xffffffffc0200000;

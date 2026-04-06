@@ -53,6 +53,10 @@ pub const PageTableEntry = packed struct(u64) {
         return @as(u64, @bitCast(self)) == 0;
     }
 
+    pub inline fn isBranch(self: Self) bool {
+        return !self.flags.readable and !self.flags.writable and !self.flags.readable;
+    }
+
     pub inline fn address(self: Self) Sv39PhysicalAddress {
         const addend2 = @shlExact(@as(u64, self.page_num_2), 30);
         const addend1 = @shlExact(@as(u64, self.page_num_1), 21);
@@ -119,9 +123,9 @@ pub const PageTable = struct {
 
     const Self = @This();
 
-    pub inline fn fromAddress(addr: u64) PageTable {
+    pub inline fn fromVirtualAddress(addr: Sv39VirtualAddress) PageTable {
         return .{
-            .entries = @ptrFromInt(addr),
+            .entries = @ptrFromInt(addr.asInt()),
         };
     }
 
@@ -185,7 +189,7 @@ pub const PageTable = struct {
     }
 };
 
-fn writeSATP(satp: SATP) void {
+pub fn writeSATP(satp: SATP) void {
     const val: u64 = @bitCast(satp);
     asm volatile ("csrw satp, %[satp]"
         :
@@ -230,7 +234,7 @@ fn getOrMapPageTable(parent_page_tbl: PageTable, index: usize) !PageTable {
                 },
             ) catch unreachable;
 
-            const virt = mm.physicalToHHDMAddress(frame);
+            const virt = mm.physicalToVirtualAddress(frame);
             const ptr = @as([*]u64, @ptrFromInt(virt.asInt()));
             const page: []u64 = ptr[0..entries_per_table];
             @memset(page, 0);
@@ -239,12 +243,25 @@ fn getOrMapPageTable(parent_page_tbl: PageTable, index: usize) !PageTable {
         } else blk: {
             const frame = pg_tbl_entry.address();
 
-            const virt = mm.physicalToHHDMAddress(frame);
+            const virt = mm.physicalToVirtualAddress(frame);
             const ptr = @as([*]u64, @ptrFromInt(virt.asInt()));
             break :blk ptr;
         };
 
     return .{ .entries = @ptrCast(pg_tbl_ptr) };
+}
+
+pub fn switchAddressSpace(root_page_table: PageTable) void {
+    const pg_tbl_virt = Sv39VirtualAddress.fromInt(@intFromPtr(root_page_table.entries));
+    const pg_tbl_ppn: u44 = @intCast(mm.virtualToPhysicalAddress(pg_tbl_virt).asInt() / 4096);
+    writeSATP(.{
+        .addr_space_id = 0,
+        .mode = .sv39,
+        .phys_page_num = pg_tbl_ppn,
+    });
+
+    // TODO: dont always flush TLB
+    flushPage(null, 0);
 }
 
 pub fn mapRegion(
@@ -301,6 +318,54 @@ pub fn mapRegion(
         prev_addr = current_addr;
         current_addr = current_addr.add(page_size);
     }
+}
+
+pub fn copyPageTable(original_page_table: PageTable, new_page_table: PageTable) void {
+    @memcpy(new_page_table.entries, original_page_table.entries);
+}
+
+pub fn unmapPageTable(
+    page_table: PageTable,
+    level: usize,
+    base_address: Sv39VirtualAddress,
+) void {
+    // NOTE: the root page table above 256th index contains kernel mappings which must not be unmapped
+    const is_root_pg_tbl = level == 2;
+    const end_idx: usize = if (is_root_pg_tbl) 256 else 512;
+
+    for (0..end_idx) |i| {
+        // NOTE: since in level 2 we only iterate until 256 we do not need to deal
+        // with sign extending the addresses
+        const address = base_address.add(i * std.math.shl(u64, 1, 12 + level * 9));
+        const entry = page_table.entries[i];
+        if (entry.isZero()) continue;
+
+        const frame = entry.address();
+        if (entry.isBranch()) {
+            std.debug.assert(level > 0);
+
+            const virt = mm.physicalToVirtualAddress(frame);
+            const lower_level_pg_tbl = PageTable.fromVirtualAddress(virt);
+            unmapPageTable(lower_level_pg_tbl, level - 1, address);
+        } else {
+            flushPage(address.asInt(), 0);
+        }
+
+        const block_order: usize = if (entry.isBranch()) 0 else switch (level) {
+            0 => 0,
+            1 => 9,
+            2 => @panic("TODO: support 1GiB pages"),
+            else => unreachable,
+        };
+        buddy_allocator.deallocBlock(frame, block_order);
+    }
+}
+
+pub fn unmapAddressSpace(root_page_table: PageTable) void {
+    unmapPageTable(root_page_table, 2, Sv39VirtualAddress.fromInt(0));
+    const page_tbl_virt_ptr = Sv39VirtualAddress.fromInt(@intFromPtr(root_page_table.entries));
+    const root_page_table_addr = mm.virtualToPhysicalAddress(page_tbl_virt_ptr);
+    buddy_allocator.deallocBlock(root_page_table_addr, 0);
 }
 
 pub fn setupPaging(root_page_table: PageTable) void {

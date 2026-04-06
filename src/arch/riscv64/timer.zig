@@ -45,6 +45,9 @@ fn readCounter() u64 {
 pub fn tick() void {
     time.tick();
     trap.clearPendingInterrupt(@intFromEnum(trap.InterruptCode.supervisor_timer));
+}
+
+pub fn resetTimer() void {
     const current_time = csr.time.read();
     const val = current_time + counter_cmp;
     sbi.setTimer(val);

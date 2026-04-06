@@ -6,10 +6,11 @@ const Self = @This();
 
 parent_id: ?Id,
 id: Id,
-user_thread_id: Thread.Id,
+associated_threads: std.DoublyLinkedList,
 mapped_regions: std.DoublyLinkedList,
 mapped_region_count: usize,
 root_page_table: arch.PageTable,
+list_node: std.DoublyLinkedList.Node,
 
 pub const Id = enum(u32) {
     _,

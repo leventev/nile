@@ -26,7 +26,7 @@ pub const BuddyAllocator = struct {
         /// Add a block to the free list. The list of block addresses is always ordered
         /// in ascending order.
         pub fn orderedAdd(self: *Order, block_addr: PhysicalAddress) void {
-            const virt_addr = mm.physicalToHHDMAddress(block_addr);
+            const virt_addr = mm.physicalToVirtualAddress(block_addr);
             const node_ptr: *std.DoublyLinkedList.Node = @ptrFromInt(virt_addr.asInt());
 
             // TODO: possibly clean this up and get rid of the special cases
@@ -133,7 +133,7 @@ pub const BuddyAllocator = struct {
     /// Returns whether the block was in the free list of the specified order.
     pub fn removeBlock(self: *BuddyAllocator, order: usize, block_address: PhysicalAddress) bool {
         var list_node = self.orders[order].list.first;
-        const virt_addr = mm.physicalToHHDMAddress(block_address);
+        const virt_addr = mm.physicalToVirtualAddress(block_address);
         const node_ptr: *std.DoublyLinkedList.Node = @ptrFromInt(virt_addr.asInt());
 
         while (list_node) |node| : (list_node = node.next) {
@@ -195,8 +195,8 @@ pub const BuddyAllocator = struct {
         // we try to coalesce the specified block and its buddy
         while (order <= max_order) : (order += 1) {
             // buddy's address can be calculated by XOR-ing with the size
-            const block_size = std.math.shl(usize, 1, order) * mm.page_size;
-            const buddy_address = PhysicalAddress.make(address.asInt() ^ block_size);
+            const block_size = std.math.shl(usize, 1, order) * arch.page_size;
+            const buddy_address = PhysicalAddress.fromInt(address.asInt() ^ block_size);
 
             // if the buddy is free then we remove it and move on to the next order
             const buddy_is_free = self.removeBlock(order, buddy_address);
@@ -204,7 +204,7 @@ pub const BuddyAllocator = struct {
                 break;
             }
 
-            address = .make(@min(address.asInt(), buddy_address.asInt()));
+            address = .fromInt(@min(address.asInt(), buddy_address.asInt()));
         }
 
         self.orders[order].orderedAdd(address);

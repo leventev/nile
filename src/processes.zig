@@ -2,11 +2,13 @@ const std = @import("std");
 const slab_allocator = @import("mem/slab_allocator.zig");
 const scheduler = @import("scheduler.zig");
 const Process = @import("Process.zig");
+const Thread = @import("Thread.zig");
 const arch = @import("arch/arch.zig");
+const mm = @import("mem/mm.zig");
 
 const log = std.log.scoped(.processes);
 
-var processes: std.DoublyLinkedList(Process) = .{};
+var running_processes: std.DoublyLinkedList = .{};
 var processes_available: std.bit_set.ArrayBitSet(usize, Process.Id.max) = .initFull();
 
 var process_cache: slab_allocator.ObjectCache(Process) = .{};
@@ -20,19 +22,22 @@ fn nextProcessId() Error!Process.Id {
 }
 
 // TODO
-pub fn spawnProcess(
+pub fn spawnInitProcess(
     root_page_table: arch.PageTable,
     parent_pid: ?Process.Id,
     data: []const u8,
-) !Process.Id {
-    const new_proc_id = processes_available.toggleFirstSet() orelse
-        @panic("TODO: No more PIDs available");
+) !*Process {
+    const new_proc_id = nextProcessId() catch @panic("TODO: this is pid 1 anyways but handle error");
+    std.debug.assert(@intFromEnum(new_proc_id) == 1);
     var new_proc = try process_cache.alloc();
 
-    new_proc.id = @enumFromInt(new_proc_id);
+    new_proc.id = new_proc_id;
     new_proc.parent_id = parent_pid;
-    // PID 1 takes over the original root page table
-    new_proc.root_page_table = root_page_table;
+    // PID 0 owns root_page_table and it only contains the kernel higher half mappings
+    // we copy it for PID 1
+    new_proc.root_page_table = try mm.clonePageTable(root_page_table);
+
+    arch.switchAddressSpace(new_proc.root_page_table);
 
     var reader = std.Io.Reader.fixed(data);
     const elf_header = std.elf.Header.read(&reader) catch @panic("TODO: elf header error");
@@ -48,7 +53,6 @@ pub fn spawnProcess(
         if (prog_header.p_type != std.elf.PT_LOAD)
             continue;
 
-        std.log.debug("{}", .{prog_header});
         // TODO: dont ignore .align
         var pages = prog_header.p_memsz / arch.page_size;
         if (prog_header.p_memsz % arch.page_size != 0) {
@@ -78,14 +82,64 @@ pub fn spawnProcess(
         @memset(zeroed_region, 0);
     }
 
-    new_proc.user_thread_id = try scheduler.newUserThread(elf_header.entry, 0);
+    _ = try scheduler.newUserThread(elf_header.entry, 0, new_proc);
 
-    return new_proc.id;
+    running_processes.append(&new_proc.list_node);
+
+    return new_proc;
 }
 
-pub fn init() void {
+/// Terminates current process.
+pub fn killCurrentProcess() void {
+    const current_thread = scheduler.getCurrentThread();
+
+    // TODO:LOCKING
+
+    // process killing checklist:
+    // - remove process from running_processes
+    // - remove all threads created by the process
+    // - unmap all pages from the process's address space(including its root page table)
+    // - free all threads created by the process
+    // - free Process structure
+    // - schedule the next thread in line
+
+    const current_process = current_thread.owner_process;
+
+    if (@intFromEnum(current_process.id) == 0) {
+        @panic("Trying to kill sentinel process");
+    }
+
+    running_processes.remove(&current_process.list_node);
+
+    while (current_process.associated_threads.popFirst()) |thread_node| {
+        const thread: *Thread = @fieldParentPtr("process_list_node", thread_node);
+        scheduler.removeThread(thread);
+    }
+
+    scheduler.scheduleCurrent();
+    arch.unmapAddressSpace(current_process.root_page_table);
+    process_cache.free(current_process);
+}
+
+fn sentinel_thread() void {
+    while (true) {
+        asm volatile ("wfi");
+    }
+}
+
+pub fn init() *Thread {
     process_cache = slab_allocator.createObjectCache(Process);
-    // permanently mark PID 0 as used so first PID allocated is 1
-    // TODO: consider having a sentinel Process instead of Thread
-    processes_available.unset(0);
+
+    // TODO: maybe dont catch unreachable these errors???
+
+    const sentinel_process_id = nextProcessId() catch unreachable;
+    std.debug.assert(@intFromEnum(sentinel_process_id) == 0);
+
+    const sentinel_process = process_cache.alloc() catch unreachable;
+    sentinel_process.id = sentinel_process_id;
+
+    running_processes.append(&sentinel_process.list_node);
+
+    const thread = scheduler.newKernelThread(sentinel_thread, sentinel_process) catch unreachable;
+    return thread;
 }

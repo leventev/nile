@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const devicetree = @import("../devicetree.zig");
 const arch = @import("../arch/arch.zig");
 const Process = @import("../Process.zig");
+const buddy_allocator = @import("buddy_allocator.zig");
 
 const bigToNative = std.mem.bigToNative;
 
@@ -350,12 +351,22 @@ pub fn getFrameRegions(allocator: std.mem.Allocator, dt: *const devicetree.Devic
 
 const hhdm_start = if (builtin.is_test) 0 else 0xffffffc000000000;
 
-pub fn physicalToHHDMAddress(phys: PhysicalAddress) VirtualAddress {
+pub fn physicalToVirtualAddress(phys: PhysicalAddress) VirtualAddress {
     return VirtualAddress.fromInt(hhdm_start + phys.asInt());
 }
 
 pub fn virtualToPhysicalAddress(virt: VirtualAddress) PhysicalAddress {
     return PhysicalAddress.fromInt(virt.asInt() - hhdm_start);
+}
+
+pub fn clonePageTable(page_table: arch.PageTable) !arch.PageTable {
+    const new_page_table_phys = try buddy_allocator.allocBlock(0);
+    const new_page_table_virt = physicalToVirtualAddress(new_page_table_phys);
+    const new_page_table = PageTable.fromVirtualAddress(new_page_table_virt);
+
+    arch.copyPageTable(page_table, new_page_table);
+
+    return new_page_table;
 }
 
 pub fn mapRegion(root_page_table: arch.PageTable, addr: VirtualAddress, size: usize, flags: Process.MappedRegion.Flags) void {

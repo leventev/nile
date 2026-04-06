@@ -133,7 +133,7 @@ pub const SlabAllocator = struct {
             const objs_start = list_end + gap;
 
             const obj_addr_int = obj_addr.asInt();
-            std.debug.assert(obj_addr_int > objs_start);
+            std.debug.assert(obj_addr_int >= objs_start);
             const obj_id = (obj_addr_int - objs_start) / obj_size;
             std.debug.assert(obj_id < obj_per_slab);
 
@@ -153,7 +153,7 @@ pub const SlabAllocator = struct {
             slab_order: usize,
         ) bool {
             const start = @intFromPtr(self);
-            const end = start + std.math.shl(usize, 1, slab_order) * mm.page_size;
+            const end = start + std.math.shl(usize, 1, slab_order) * arch.page_size;
             const obj_addr_int = obj_addr.asInt();
             return obj_addr_int > start and obj_addr_int < end;
         }
@@ -214,7 +214,7 @@ pub const SlabAllocator = struct {
             // TODO: on 32bit we cant map the entire physical address space so we will have to
             // find a different way to do this
             const phys_addr = try buddy_allocator.allocBlock(self.slab_block_order);
-            const virt_addr = mm.physicalToHHDMAddress(phys_addr);
+            const virt_addr = mm.physicalToVirtualAddress(phys_addr);
 
             var slab_descriptor: *Descriptor = @ptrFromInt(virt_addr.asInt());
             slab_descriptor.free_object_count = self.objects_per_slab;
@@ -368,7 +368,7 @@ pub fn ObjectCache(comptime T: type) type {
         /// Free a single T object
         pub fn free(self: Self, ptr: *T) void {
             std.debug.assert(self.initialized);
-            const addr: VirtualAddress = .make(@intFromPtr(ptr));
+            const addr: VirtualAddress = .fromInt(@intFromPtr(ptr));
             self.__slab_backing.free(addr);
         }
 

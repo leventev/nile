@@ -1,7 +1,8 @@
 const root = @import("root");
 const std = @import("std");
 const sbi = @import("sbi.zig");
-const mm = @import("mm.zig");
+const riscv64_mm = @import("mm.zig");
+const mm = @import("../../mem/mm.zig");
 const kio = @import("../../kio.zig");
 const trap = @import("trap.zig");
 const timer = @import("timer.zig");
@@ -12,17 +13,20 @@ const CSR = @import("csr.zig").CSR;
 const config = @import("../../config.zig");
 pub const Lock = @import("Lock.zig");
 
-pub const VirtualAddress = mm.Sv39VirtualAddress;
-pub const PhysicalAddress = mm.Sv39PhysicalAddress;
+pub const VirtualAddress = riscv64_mm.Sv39VirtualAddress;
+pub const PhysicalAddress = riscv64_mm.Sv39PhysicalAddress;
 
 pub const enableInterrupts = trap.enableInterrupts;
 pub const disableInterrupts = trap.disableInterrupts;
 
-pub const mapRegion = mm.mapRegion;
-pub const PageTable = mm.PageTable;
+pub const switchAddressSpace = riscv64_mm.switchAddressSpace;
+pub const unmapAddressSpace = riscv64_mm.unmapAddressSpace;
+pub const copyPageTable = riscv64_mm.copyPageTable;
+pub const mapRegion = riscv64_mm.mapRegion;
+pub const PageTable = riscv64_mm.PageTable;
 
-pub const page_size = mm.page_size;
-pub const entries_per_table = mm.entries_per_table;
+pub const page_size = riscv64_mm.page_size;
+pub const entries_per_table = riscv64_mm.entries_per_table;
 
 extern const __global_pointer: ?void;
 
@@ -51,9 +55,11 @@ pub fn setupNewThread(thread: *Thread, entry_point_addr: usize, stack_top: usize
 
 pub fn scheduleNextThread(thread: *Thread) void {
     if (config.debug_scheduler) {
+        std.log.debug("schedule next thread: {}", .{thread.id});
         thread.registers.printRegs(.debug);
     }
     CSR.sscratch.write(@intFromPtr(&thread.registers));
+    timer.resetTimer();
 }
 
 pub const clock_source = timer.riscv_clock_source;
@@ -64,11 +70,13 @@ fn sbiWriteBytes(bytes: []const u8) ?usize {
     return bytes.len;
 }
 
+var init_scratch_registers: Registers = undefined;
+
 export fn initRiscv64(
     hart_id: usize,
     dt_phys: usize,
     root_page_table_phys: usize,
-) void {
+) noreturn {
     _ = hart_id;
 
     kio.addBackend(.{
@@ -96,6 +104,10 @@ export fn initRiscv64(
 
     const root_page_table = PageTable{ .entries = @ptrFromInt(root_page_table_virt) };
 
-    mm.setupPaging(root_page_table);
+    // set up a temporary sscratch so that if we hit a trap during initialization
+    // the exception handler can run
+    CSR.sscratch.write(@intFromPtr(&init_scratch_registers));
+
+    riscv64_mm.setupPaging(root_page_table);
     root.init(root_page_table, dt_ptr_virt);
 }

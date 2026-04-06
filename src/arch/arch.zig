@@ -54,6 +54,18 @@ pub const entries_per_table = switch (target) {
     Arch.riscv64 => riscv64.entries_per_table,
 };
 
+pub const copyPageTable = switch (target) {
+    Arch.riscv64 => riscv64.copyPageTable,
+};
+
+pub const unmapAddressSpace = switch (target) {
+    Arch.riscv64 => riscv64.unmapAddressSpace,
+};
+
+pub const switchAddressSpace = switch (target) {
+    Arch.riscv64 => riscv64.switchAddressSpace,
+};
+
 // TODO: better way to abstract clocks
 pub const clock_source = switch (target) {
     Arch.riscv64 => riscv64.clock_source,

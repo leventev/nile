@@ -90,7 +90,7 @@ pub fn spawnInitProcess(
 }
 
 /// Terminates current process.
-pub fn killCurrentProcess() void {
+pub fn killCurrentProcess(exit_code: usize) void {
     const current_thread = scheduler.getCurrentThread();
 
     // TODO:LOCKING
@@ -118,6 +118,9 @@ pub fn killCurrentProcess() void {
 
     scheduler.scheduleCurrent();
     arch.unmapAddressSpace(current_process.root_page_table);
+
+    std.log.debug("PID {} killed with exit code: {}", .{ @intFromEnum(current_process.id), exit_code });
+
     process_cache.free(current_process);
 }
 

@@ -8,8 +8,8 @@ pub const page_size = 4096;
 pub const entries_per_table = 512;
 
 pub const SATP = packed struct(u64) {
-    phys_page_num: u44,
-    addr_space_id: u16,
+    physical_page_number: u44,
+    address_space_id: u16,
     mode: Mode,
 
     pub const Mode = enum(u4) {
@@ -23,9 +23,9 @@ pub const SATP = packed struct(u64) {
 
 pub const PageEntryType = enum {
     branch,
-    leaf4K,
-    leaf2M,
-    leaf1G,
+    leaf_4kib,
+    leaf_2mib,
+    leaf_1gib,
 };
 
 pub const PageTableEntry = packed struct(u64) {
@@ -34,9 +34,9 @@ pub const PageTableEntry = packed struct(u64) {
     accessed: bool,
     dirty: bool,
     __reserved: u2,
-    page_num_0: u9,
-    page_num_1: u9,
-    page_num_2: u9,
+    page_number_0: u9,
+    page_number_1: u9,
+    page_number_2: u9,
     __reserved2: u27,
 
     pub const Flags = packed struct(u5) {
@@ -58,9 +58,9 @@ pub const PageTableEntry = packed struct(u64) {
     }
 
     pub inline fn address(self: Self) Sv39PhysicalAddress {
-        const addend2 = @shlExact(@as(u64, self.page_num_2), 30);
-        const addend1 = @shlExact(@as(u64, self.page_num_1), 21);
-        const addend0 = @shlExact(@as(u64, self.page_num_0), 12);
+        const addend2 = @shlExact(@as(u64, self.page_number_2), 30);
+        const addend1 = @shlExact(@as(u64, self.page_number_1), 21);
+        const addend0 = @shlExact(@as(u64, self.page_number_0), 12);
         return .fromInt(addend2 + addend1 + addend0);
     }
 };
@@ -68,9 +68,9 @@ pub const PageTableEntry = packed struct(u64) {
 // TODO: support other addressing modes like Sv48, Sv57...
 pub const Sv39PhysicalAddress = packed struct(u64) {
     offset: u12,
-    page_num_0: u9,
-    page_num_1: u9,
-    page_num_2: u9,
+    page_number_0: u9,
+    page_number_1: u9,
+    page_number_2: u9,
     __unused: u25,
 
     const Self = @This();
@@ -94,9 +94,9 @@ pub const Sv39PhysicalAddress = packed struct(u64) {
 
 pub const Sv39VirtualAddress = packed struct(u64) {
     offset: u12,
-    page_num_0: u9,
-    page_num_1: u9,
-    page_num_2: u9,
+    page_number_0: u9,
+    page_number_1: u9,
+    page_number_2: u9,
     __unused: u25,
 
     const Self = @This();
@@ -133,7 +133,7 @@ pub const PageTable = struct {
         self: Self,
         idx: usize,
         phys: Sv39PhysicalAddress,
-        entryType: PageEntryType,
+        entry_type: PageEntryType,
         flags: PageTableEntry.Flags,
     ) !void {
         if (idx >= entries_per_table)
@@ -142,10 +142,10 @@ pub const PageTable = struct {
         if (!phys.isPageAligned())
             return error.InvalidAddress;
 
-        _ = switch (entryType) {
-            PageEntryType.leaf2M => if (phys.page_num_0 != 0)
+        _ = switch (entry_type) {
+            PageEntryType.leaf_2mib => if (phys.page_number_0 != 0)
                 return error.InvalidAddress,
-            PageEntryType.leaf1G => if (phys.page_num_0 != 0 or phys.page_num_1 != 0)
+            PageEntryType.leaf_1gib => if (phys.page_number_0 != 0 or phys.page_number_1 != 0)
                 return error.InvalidAddress,
             PageEntryType.branch => if (flags.executable or flags.readable or flags.writable)
                 return error.InvalidFlags,
@@ -157,9 +157,9 @@ pub const PageTable = struct {
             .flags = flags,
             .accessed = false,
             .dirty = false,
-            .page_num_0 = phys.page_num_0,
-            .page_num_1 = phys.page_num_1,
-            .page_num_2 = phys.page_num_2,
+            .page_number_0 = phys.page_number_0,
+            .page_number_1 = phys.page_number_1,
+            .page_number_2 = phys.page_number_2,
             .__reserved = 0,
             .__reserved2 = 0,
         };
@@ -180,9 +180,9 @@ pub const PageTable = struct {
             },
             .accessed = false,
             .dirty = false,
-            .page_num_0 = 0,
-            .page_num_1 = 0,
-            .page_num_2 = 0,
+            .page_number_0 = 0,
+            .page_number_1 = 0,
+            .page_number_2 = 0,
             .__reserved = 0,
             .__reserved2 = 0,
         };
@@ -255,9 +255,9 @@ pub fn switchAddressSpace(root_page_table: PageTable) void {
     const pg_tbl_virt = Sv39VirtualAddress.fromInt(@intFromPtr(root_page_table.entries));
     const pg_tbl_ppn: u44 = @intCast(mm.virtualToPhysicalAddress(pg_tbl_virt).asInt() / 4096);
     writeSATP(.{
-        .addr_space_id = 0,
+        .address_space_id = 0,
         .mode = .sv39,
-        .phys_page_num = pg_tbl_ppn,
+        .physical_page_number = pg_tbl_ppn,
     });
 
     // TODO: dont always flush TLB
@@ -271,41 +271,43 @@ pub fn mapRegion(
     flags: Process.MappedRegion.Flags,
 ) !void {
     // TODO: instead of addr we should provide the page number and instead of size provide page_count
+    std.debug.assert(addr.asInt() != 0);
     std.debug.assert(addr.asInt() % page_size == 0);
     std.debug.assert(size % page_size == 0);
+
+    const end_addr = addr.add(size);
+
+    // set them equal so on the first iteration loading
+    // the page tables gets bypassed
+    var prev_addr = addr;
+    var current_addr = addr;
 
     // in Sv39 we have 3 levels of page tables
     // level 2 is the highest(root page table)
     const pg_tbl_2 = root_page_tbl;
-    var pg_tbl_1: PageTable = undefined;
-    var pg_tbl_0: PageTable = undefined;
-
-    const start_addr = addr;
-    const end_addr = Sv39VirtualAddress.fromInt(addr.asInt() + size);
-
-    var prev_addr: ?Sv39VirtualAddress = null;
-    var current_addr = start_addr;
+    var pg_tbl_1 = try getOrMapPageTable(pg_tbl_2, current_addr.page_number_2);
+    var pg_tbl_0 = try getOrMapPageTable(pg_tbl_1, current_addr.page_number_1);
 
     while (end_addr.asInt() != current_addr.asInt()) {
-        if (prev_addr == null or prev_addr.?.page_num_2 != current_addr.page_num_2) {
-            pg_tbl_1 = try getOrMapPageTable(pg_tbl_2, current_addr.page_num_2);
+        if (prev_addr.page_number_2 != current_addr.page_number_2) {
+            pg_tbl_1 = try getOrMapPageTable(pg_tbl_2, current_addr.page_number_2);
         }
 
-        if (prev_addr == null or prev_addr.?.page_num_1 != current_addr.page_num_1) {
-            pg_tbl_0 = try getOrMapPageTable(pg_tbl_1, current_addr.page_num_1);
+        if (prev_addr.page_number_1 != current_addr.page_number_1) {
+            pg_tbl_0 = try getOrMapPageTable(pg_tbl_1, current_addr.page_number_1);
         }
 
-        const prev_entry = pg_tbl_0.entries[current_addr.page_num_0];
+        const prev_entry = pg_tbl_0.entries[current_addr.page_number_0];
         if (!prev_entry.isZero()) {
             std.log.warn("overwriting page table mapping(VPN={},{},{})", .{
-                current_addr.page_num_2,
-                current_addr.page_num_1,
-                current_addr.page_num_0,
+                current_addr.page_number_2,
+                current_addr.page_number_1,
+                current_addr.page_number_0,
             });
         }
 
         const frame = try buddy_allocator.allocBlock(0);
-        pg_tbl_0.writeEntry(current_addr.page_num_0, frame, .leaf4K, .{
+        pg_tbl_0.writeEntry(current_addr.page_number_0, frame, .leaf_4kib, .{
             .executable = flags.execute,
             .readable = flags.read,
             .writable = flags.write,
@@ -375,7 +377,7 @@ pub fn setupPaging(root_page_table: PageTable) void {
         root_page_table.writeEntry(
             i,
             phys_addr,
-            .leaf1G,
+            .leaf_1gib,
             .{
                 .executable = false,
                 .readable = true,

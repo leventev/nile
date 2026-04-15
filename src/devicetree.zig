@@ -120,7 +120,7 @@ pub const DeviceTreeNode = struct {
                 };
             }
 
-            pub fn print(self: InterruptsExtended, dt: *const DeviceTree, writer: anytype) !void {
+            pub fn print(self: InterruptsExtended, dt: *const DeviceTree, writer: *std.Io.Writer) !void {
                 var it = self.iterator(dt);
                 var first = true;
                 while (it.next()) |int| {
@@ -131,7 +131,7 @@ pub const DeviceTreeNode = struct {
                     }
 
                     const name = dt.getNodeName(int.handle);
-                    try std.fmt.format(writer, "<&{s} 0x{x}>", .{ name, int.int_specifier });
+                    try writer.print("<&{s} 0x{x}>", .{ name, int.int_specifier });
                 }
             }
 
@@ -192,7 +192,7 @@ pub const DeviceTreeNode = struct {
                 }
             };
 
-            pub fn print(self: Compatible, writer: anytype) !void {
+            pub fn print(self: Compatible, writer: *std.Io.Writer) !void {
                 var it = self.iterator();
                 var first = true;
                 while (it.next()) |comp| {
@@ -210,7 +210,7 @@ pub const DeviceTreeNode = struct {
         pub const Reg = struct {
             buff: []const u8,
 
-            pub fn print(self: Reg, writer: anytype, address_cells: u32, size_cells: u32) !void {
+            pub fn print(self: Reg, writer: *std.Io.Writer, address_cells: u32, size_cells: u32) !void {
                 var it = try self.iterator(address_cells, size_cells);
                 var first = true;
                 _ = try writer.writeByte('<');
@@ -222,9 +222,9 @@ pub const DeviceTreeNode = struct {
                     }
 
                     if (size_cells == 0) {
-                        try std.fmt.format(writer, "0x{x}", .{reg.addr});
+                        try writer.print("0x{x}", .{reg.addr});
                     } else {
-                        try std.fmt.format(writer, "0x{x} 0x{x}", .{ reg.addr, reg.size });
+                        try writer.print("0x{x} 0x{x}", .{ reg.addr, reg.size });
                     }
                 }
                 _ = try writer.writeByte('>');
@@ -284,26 +284,26 @@ pub const DeviceTreeNode = struct {
             };
         };
 
-        pub fn print(self: Property, handle: u32, dt: *const DeviceTree, writer: anytype) !void {
+        pub fn print(self: Property, handle: u32, dt: *const DeviceTree, writer: *std.Io.Writer) !void {
             switch (self) {
                 .compatible => {
                     _ = try writer.write("compatible = ");
                     try self.compatible.print(writer);
                 },
                 .model => |val| {
-                    try std.fmt.format(writer, "model = {s}", .{val});
+                    try writer.print("model = {s}", .{val});
                 },
                 .phandle => |val| {
-                    try std.fmt.format(writer, "phandle = {}", .{val});
+                    try writer.print("phandle = {}", .{val});
                 },
                 .status => |val| {
-                    try std.fmt.format(writer, "status = {s}", .{val});
+                    try writer.print("status = {s}", .{val});
                 },
                 .address_cells => |val| {
-                    try std.fmt.format(writer, "address_cells = {}", .{val});
+                    try writer.print("address_cells = {}", .{val});
                 },
                 .size_cells => |val| {
-                    try std.fmt.format(writer, "size_cells = {}", .{val});
+                    try writer.print("size_cells = {}", .{val});
                 },
                 .reg => {
                     const node = dt.nodes.items[handle];
@@ -326,7 +326,7 @@ pub const DeviceTreeNode = struct {
                     try self.reg.print(writer, address_cells, size_cells);
                 },
                 .interrupts => |val| {
-                    _ = try std.fmt.format(writer, "interrupts = {any}", .{val});
+                    _ = try writer.print("interrupts = {any}", .{val});
                 },
                 .interrupts_extended => {
                     _ = try writer.write("interrupts_extended = ");
@@ -335,22 +335,22 @@ pub const DeviceTreeNode = struct {
                 .interrupt_parent => |val| {
                     const parent_handle = dt.phandle_table.get(val) orelse
                         return error.InvalidDeviceTree;
-                    try std.fmt.format(writer, "interrupt_parent = <&{s}>", .{dt.getNodeName(parent_handle)});
+                    try writer.print("interrupt_parent = <&{s}>", .{dt.getNodeName(parent_handle)});
                 },
                 .interrupt_cells => |val| {
-                    try std.fmt.format(writer, "interrupt_cells = {}", .{val});
+                    try writer.print("interrupt_cells = {}", .{val});
                 },
                 .interrupt_controller => {
-                    try std.fmt.format(writer, "interrupt_controller;", .{});
+                    try writer.print("interrupt_controller;", .{});
                 },
                 .clock_frequency => |val| {
-                    try std.fmt.format(writer, "clock_frequency = {}", .{val});
+                    try writer.print("clock_frequency = {}", .{val});
                 },
                 .timebase_frequency => |val| {
-                    try std.fmt.format(writer, "timebase_frequency = {}", .{val});
+                    try writer.print("timebase_frequency = {}", .{val});
                 },
                 .other => |val| {
-                    try std.fmt.format(writer, "{s} = {any}", .{ val.name, val.value });
+                    try writer.print("{s} = {any}", .{ val.name, val.value });
                 },
                 else => @panic("UNIMPLEMENTED"),
             }
@@ -538,7 +538,7 @@ fn readNode(allocator: std.mem.Allocator, dt: *DeviceTree, node_handle: u32, ptr
 
     // NOTE: we do not need to errdefer deallocate the allocated memory
     // since if we can't parse the device tree the kernel should halt thus
-    // freeing the memory is redundant
+    // freeing the memory is unnecessary
 
     while (continue_reading) {
         const tokenType: TokenType = readToken(ptr[ptr_idx]);
@@ -550,8 +550,8 @@ fn readNode(allocator: std.mem.Allocator, dt: *DeviceTree, node_handle: u32, ptr
 
                 const child_handle: u32 = @intCast(dt.nodes.items.len);
                 try dt.nodes.append(allocator, .{
-                    .children = std.ArrayListUnmanaged(DeviceTreeNode.Child){},
-                    .properties = std.ArrayListUnmanaged(DeviceTreeNode.Property){},
+                    .children = std.ArrayListUnmanaged(DeviceTreeNode.Child).empty,
+                    .properties = std.ArrayListUnmanaged(DeviceTreeNode.Property).empty,
                     .parent_handle = node_handle,
                 });
 
@@ -600,12 +600,11 @@ pub fn printDeviceTree(
 
     // TODO: determine a good buffer size
     var prop_buff: [4096]u8 = undefined;
-    var stream = std.io.fixedBufferStream(prop_buff[0..]);
-    const writer = stream.writer();
+    var writer = std.Io.Writer.fixed(prop_buff[0..]);
     for (node.properties.items) |prop| {
-        stream.reset();
-        prop.print(handle, dt_root, writer) catch @panic("buffer too small");
-        const str = stream.getWritten();
+        writer.end = 0;
+        prop.print(handle, dt_root, &writer) catch @panic("buffer too small");
+        const str = writer.buffered();
         std.log.info("{s}{s}", .{ space_buf[0..space_count], str });
     }
 
@@ -645,10 +644,9 @@ fn initDriverFromDeviceTree(
     }
 
     var compBuff: [256]u8 = undefined;
-    var stream = std.io.fixedBufferStream(compBuff[0..]);
-    const writer = stream.writer();
-    compatible.print(writer) catch @panic("compatible string too long");
-    const allCompString = stream.getWritten();
+    var writer = std.Io.Writer.fixed(compBuff[0..]);
+    compatible.print(&writer) catch @panic("compatible string too long");
+    const allCompString = writer.buffered();
 
     std.log.warn(
         "Compatible driver not found for '{s}' compatible: '{s}'",
@@ -694,14 +692,14 @@ pub fn readDeviceTreeBlob(allocator: std.mem.Allocator, blobPtr: *void) !DeviceT
     const ptr = token_ptr + 1 + words;
 
     var dt = DeviceTree{
-        .nodes = std.ArrayListUnmanaged(DeviceTreeNode){},
+        .nodes = std.ArrayList(DeviceTreeNode).empty,
         .blob = blob[0 .. blob_size / 4],
         .phandle_table = std.AutoArrayHashMapUnmanaged(u32, u32){},
     };
 
     try dt.nodes.append(allocator, .{
-        .children = std.ArrayListUnmanaged(DeviceTreeNode.Child){},
-        .properties = std.ArrayListUnmanaged(DeviceTreeNode.Property){},
+        .children = std.ArrayList(DeviceTreeNode.Child).empty,
+        .properties = std.ArrayList(DeviceTreeNode.Property).empty,
         .parent_handle = no_parent,
     });
 

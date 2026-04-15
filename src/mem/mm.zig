@@ -71,7 +71,7 @@ fn parseMemoryRegions(
     dt: *const devicetree.DeviceTree,
     root: *const devicetree.DeviceTreeNode,
 ) !std.ArrayListUnmanaged(PhysicalMemoryRegion) {
-    var regions = std.ArrayListUnmanaged(PhysicalMemoryRegion){};
+    var regions = std.ArrayList(PhysicalMemoryRegion).empty;
 
     for (root.children.items) |child| {
         if (!std.mem.startsWith(u8, child.name, "memory"))
@@ -104,7 +104,7 @@ fn parseReservedMemoryRegions(
 ) !std.ArrayListUnmanaged(ReservedMemoryRegion) {
     const reserved_memory = dt.getChild(root, "reserved-memory") orelse return error.InvalidDeviceTree;
 
-    var regions = std.ArrayListUnmanaged(ReservedMemoryRegion){};
+    var regions = std.ArrayList(ReservedMemoryRegion).empty;
 
     for (reserved_memory.children.items) |region| {
         const node = dt.nodes.items[region.handle];
@@ -199,7 +199,7 @@ fn getUsableRegions(
     physical_regions: []const PhysicalMemoryRegion,
     reserved_regions: []const ReservedMemoryRegion,
 ) !std.ArrayList(MemoryRegion) {
-    var regions = std.ArrayList(MemoryRegion){};
+    var regions = std.ArrayList(MemoryRegion).empty;
 
     for (physical_regions) |phys| {
         try processRegion(allocator, &regions, phys, reserved_regions);

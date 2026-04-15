@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const CSR = enum(comptime_int) {
+pub const CSR = enum(u64) {
     // unprivileged floating point CSRs
     fflags = 0x001,
     frm = 0x002,

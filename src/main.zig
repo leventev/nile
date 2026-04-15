@@ -23,7 +23,13 @@ var temp_heap: [temp_heap_size]u8 = undefined;
 var fba = std.heap.FixedBufferAllocator.init(&temp_heap);
 const static_mem_allocator = fba.allocator();
 
-pub const std_options: std.Options = .{ .log_level = .debug, .logFn = kio.kernel_log };
+pub const std_options: std.Options = .{
+    .log_level = .debug,
+    .logFn = kio.kernel_log,
+    .page_size_min = 4096,
+};
+
+pub const std_options_debug_io: std.Io = std.Io.failing;
 
 export const init_kernel_stack_size: usize = 65536;
 export var init_kernel_stack: [init_kernel_stack_size]u8 = undefined;
@@ -38,9 +44,15 @@ pub fn panic(
 
     std.log.err("KERNEL PANIC: {s}", .{msg});
     std.log.err("Stack trace:", .{});
-    const first_trace_addr = @returnAddress();
-    var it = std.debug.StackIterator.init(first_trace_addr, null);
-    while (it.next()) |addr| {
+    const max_stacktrace_depth = 64;
+    var address_buffer: [max_stacktrace_depth]usize = undefined;
+    const stack_trace = std.debug.captureCurrentStackTrace(
+        .{
+            .first_address = @returnAddress(),
+        },
+        &address_buffer,
+    );
+    for (stack_trace.return_addresses) |addr| {
         std.log.err("    0x{x}", .{addr});
     }
     while (true) {}

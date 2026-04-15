@@ -23,7 +23,7 @@ pub const Registers = extern struct {
     pub const thread_ptr = 4;
     pub const frame_ptr = 8;
 
-    pub fn printGPR(self: Self, writer: anytype, idx: usize) !void {
+    pub fn printGPR(self: Self, writer: *std.Io.Writer, idx: usize) !void {
         std.debug.assert(idx < gpr_count);
 
         const alternative_names = [_][]const u8{
@@ -43,7 +43,7 @@ pub const Registers = extern struct {
         const rem = align_to - name_total_len;
 
         try writer.print("x{}/{s}", .{ idx, name });
-        try writer.writeByteNTimes(' ', rem);
+        try writer.splatByteAll(' ', rem);
         try writer.print("0x{x:0>16}", .{self.gprs[idx]});
     }
 
@@ -53,16 +53,15 @@ pub const Registers = extern struct {
         const lines = total_regs / regs_per_line;
 
         var buff: [128]u8 = undefined;
-        var stream = std.io.fixedBufferStream(&buff);
-        var writer = stream.writer();
+        var writer = std.Io.Writer.fixed(&buff);
 
         for (0..lines) |i| {
             for (0..regs_per_line) |j| {
-                self.printGPR(writer, i * regs_per_line + j) catch unreachable;
+                self.printGPR(&writer, i * regs_per_line + j) catch unreachable;
                 writer.writeByte(' ') catch unreachable;
             }
-            kio.kernel_log(log_level, .riscv, "{s}", .{stream.getWritten()});
-            stream.reset();
+            kio.kernel_log(log_level, .riscv, "{s}", .{writer.buffered()});
+            writer.end = 0;
         }
     }
 

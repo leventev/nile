@@ -15,15 +15,18 @@ const max_backends = 8;
 var backends: [max_backends]IOBackend = undefined;
 var backend_count: usize = 0;
 
-const kernel_writer_vtable = std.io.Writer.VTable{
+const kernel_writer_vtable = std.Io.Writer.VTable{
     .drain = drain,
 };
-pub var kernel_writer = std.io.Writer{
+pub var kernel_writer = std.Io.Writer{
     .vtable = &kernel_writer_vtable,
     .buffer = &.{},
 };
 
-const kio_cfg: std.io.tty.Config = .escape_codes;
+pub const kio_term = std.Io.Terminal{
+    .writer = &kernel_writer,
+    .mode = .escape_codes,
+};
 
 pub fn addBackend(backend: IOBackend) !void {
     if (backend_count == max_backends) return error.TooManyBackends;
@@ -34,7 +37,7 @@ pub fn addBackend(backend: IOBackend) !void {
 
 // TODO: removeBackend
 
-fn logLevelColor(level: std.log.Level) std.io.tty.Color {
+fn logLevelColor(level: std.log.Level) std.Io.Terminal.Color {
     return switch (level) {
         .info => .blue,
         .debug => .magenta,
@@ -43,7 +46,7 @@ fn logLevelColor(level: std.log.Level) std.io.tty.Color {
     };
 }
 
-fn printLogPreamble(comptime scope: @Type(.enum_literal), comptime level: std.log.Level) !void {
+fn printLogPreamble(comptime scope: @EnumLiteral(), comptime level: std.log.Level) !void {
     const ns = time.nanoseconds() orelse 0;
     const sec = ns / time.ns_per_second;
     const rem = ns % time.ns_per_second;
@@ -51,15 +54,15 @@ fn printLogPreamble(comptime scope: @Type(.enum_literal), comptime level: std.lo
 
     try kernel_writer.print("{}.{:0>5} ", .{ sec, qs });
 
-    try kio_cfg.setColor(&kernel_writer, std.io.tty.Color.bold);
-    try kio_cfg.setColor(&kernel_writer, logLevelColor(level));
+    try kio_term.setColor(.bold);
+    try kio_term.setColor(logLevelColor(level));
     _ = try kernel_writer.write(@tagName(level));
-    try kio_cfg.setColor(&kernel_writer, std.io.tty.Color.bright_black);
+    try kio_term.setColor(.bright_black);
     _ = try kernel_writer.write("(" ++ @tagName(scope) ++ ") ");
-    try kio_cfg.setColor(&kernel_writer, std.io.tty.Color.reset);
+    try kio_term.setColor(.reset);
 }
 
-fn drain(writer: *std.io.Writer, buffers: []const []const u8, splat: usize) std.io.Writer.Error!usize {
+fn drain(writer: *std.Io.Writer, buffers: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
     _ = writer;
     // TODO: implement expected drain behavior
     _ = splat;
@@ -89,7 +92,7 @@ var lock: arch.Lock = .{};
 
 pub fn kernel_log(
     comptime level: std.log.Level,
-    comptime scope: @Type(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {

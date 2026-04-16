@@ -2,8 +2,8 @@
 
 Do these in any kind of order.
 
-- [ ] User threads
-- [ ] Syscalls
+- [X] User threads
+- [X] Syscalls
 - [ ] DWARF debug info 
 - [ ] VFS
 - [ ] Design permission system

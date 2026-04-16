@@ -13,8 +13,10 @@ pub const debug = @import("debug.zig");
 pub const processes = @import("processes.zig");
 pub const slab_allocator = @import("mem/slab_allocator.zig");
 pub const Thread = @import("Thread.zig");
+pub const cpio = @import("cpio.zig");
 
-const test_file = @embedFile("test");
+const test_binary_file = @embedFile("test");
+const test_archive = @embedFile("test_archive.cpio");
 
 export var device_tree_pointer: *void = undefined;
 
@@ -90,8 +92,10 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     time.init(&dt) catch @panic("Failed to initialize timer");
 
+    cpio.readArchive(test_archive) catch @panic("TODO");
+
     const idle_process_thread = processes.init();
-    _ = processes.spawnInitProcess(root_page_table, null, test_file) catch @panic("TODO");
+    _ = processes.spawnInitProcess(root_page_table, null, test_binary_file) catch @panic("TODO");
     // TODO: this could probably be done in a nicer way
     arch.scheduleNextThread(idle_process_thread);
 

@@ -1,6 +1,7 @@
 //! Documentation for the CPIO format: https://www.systutorials.com/docs/linux/man/5-cpio/
 
 const std = @import("std");
+const ramfs = @import("drivers/ramfs.zig");
 
 /// Old binary CPIO file header format
 ///
@@ -72,6 +73,15 @@ const NewAsciiHeader = extern struct {
 /// At the end of every archive is a special record with this name
 const end_record_name = "TRAILER!!!";
 
+const file_type_mask: u16 = 0o170000;
+const file_type_socket: u16 = 0o140000;
+const file_type_symbol_link: u16 = 0o120000;
+const file_type_regular_file: u16 = 0o100000;
+const file_type_block_device: u16 = 0o060000;
+const file_type_directory: u16 = 0o040000;
+const file_type_character_device: u16 = 0o020000;
+const file_type_pipe: u16 = 0o010000;
+
 const HeaderType = enum {
     old_binary_little_endian,
     old_binary_big_endian,
@@ -101,93 +111,113 @@ fn getHeaderType(reader: *std.Io.Reader) !HeaderType {
     return error.UnknownHeaderType;
 }
 
+const Record = struct {
+    path: []const u8,
+    content: []const u8,
+    mode: u16,
+};
+
+fn readRecord(reader: *std.Io.Reader, record: *Record, header_type: HeaderType) !bool {
+    switch (header_type) {
+        .old_binary_little_endian, .old_binary_big_endian => {
+            const endinanness = if (header_type == .old_binary_little_endian)
+                std.builtin.Endian.little
+            else
+                std.builtin.Endian.big;
+
+            // TODO: we could do a tiny optimization here by making endianness comptime known
+            const header = try reader.takeStruct(OldBinaryHeader, endinanness);
+
+            // path_size contains '\0' too
+            const path_size = header.full_path_size;
+            const total_header_size = @sizeOf(OldBinaryHeader) + path_size;
+            record.path = (try reader.take(path_size))[0 .. path_size - 1];
+            if (total_header_size % 2 != 0) {
+                _ = try reader.take(1);
+            }
+
+            const upper_file_size = @shlExact(@as(u32, header.file_size[0]), 16);
+            const file_size: u32 = upper_file_size + header.file_size[1];
+            record.content = try reader.take(file_size);
+            if (file_size % 2 != 0) {
+                _ = try reader.take(1);
+            }
+
+            record.mode = header.mode;
+
+            return !std.mem.eql(u8, record.path, end_record_name);
+        },
+        .old_ascii => {
+            const header = try reader.takeStruct(OldAsciiHeader, .native);
+
+            // path_size contains '\0' too
+            const path_size = try std.fmt.parseInt(usize, &header.full_path_size, 8);
+            record.path = (try reader.take(path_size))[0 .. path_size - 1];
+
+            const file_size = try std.fmt.parseInt(usize, &header.file_size, 8);
+            record.content = try reader.take(file_size);
+
+            record.mode = try std.fmt.parseInt(u16, &header.mode, 8);
+
+            return !std.mem.eql(u8, record.path, end_record_name);
+        },
+        .new_ascii, .new_ascii_crc => {
+            const calculate_checksum = header_type == .new_ascii_crc;
+
+            const header = try reader.takeStruct(NewAsciiHeader, .native);
+
+            // path_size contains '\0' too
+            const path_size = try std.fmt.parseInt(usize, &header.full_path_size, 16);
+            const total_header_size = @sizeOf(NewAsciiHeader) + path_size;
+            record.path = (try reader.take(path_size))[0 .. path_size - 1];
+            if (total_header_size % 4 != 0) {
+                _ = try reader.take(4 - total_header_size % 4);
+            }
+
+            const file_size = try std.fmt.parseInt(usize, &header.file_size, 16);
+            record.content = try reader.take(file_size);
+            if (file_size % 4 != 0) {
+                _ = try reader.take(4 - file_size % 4);
+            }
+
+            record.mode = try std.fmt.parseInt(u16, &header.mode, 16);
+
+            if (calculate_checksum) {
+                const expected_checksum = try std.fmt.parseInt(u32, &header.checksum, 16);
+                var checksum: u32 = 0;
+                for (record.content) |byte| {
+                    checksum +%= byte;
+                }
+
+                if (checksum != expected_checksum) {
+                    return error.ChecksumMismatch;
+                }
+            }
+
+            return !std.mem.eql(u8, record.path, end_record_name);
+        },
+    }
+}
+
 // TODO: custom errorset instead of std Io error
-pub fn readArchive(cpio_data: []const u8) !void {
+pub fn readArchive(cpio_data: []const u8, initramfs: *ramfs.RamFs) !void {
     var reader = std.Io.Reader.fixed(cpio_data);
 
     const header_type = try getHeaderType(&reader);
-    std.log.debug("header type: {}", .{header_type});
 
     // The documentation doesn't say anything about this but it's fair to assume that all headers
     // within an archive use the same format and that we don't need to check for this.
 
-    var archive_end_reached: bool = false;
+    // TODO: permission bits
 
-    while (!archive_end_reached) {
-        switch (header_type) {
-            .old_binary_little_endian, .old_binary_big_endian => {
-                const endinanness = if (header_type == .old_binary_little_endian)
-                    std.builtin.Endian.little
-                else
-                    std.builtin.Endian.big;
+    var record: Record = undefined;
 
-                // TODO: we could do a tiny optimization here by making endianness comptime known
-                const header = try reader.takeStruct(OldBinaryHeader, endinanness);
-
-                // path_size contains '\0' too
-                const path_size = header.full_path_size;
-                const total_header_size = @sizeOf(OldBinaryHeader) + path_size;
-                const path: []u8 = (try reader.take(path_size))[0 .. path_size - 1];
-                if (total_header_size % 2 != 0) {
-                    _ = try reader.take(1);
-                }
-
-                const upper_file_size = @shlExact(@as(u32, header.file_size[0]), 16);
-                const file_size: u32 = upper_file_size + header.file_size[1];
-                const file_contents = try reader.take(file_size);
-                _ = file_contents;
-                if (file_size % 2 != 0) {
-                    _ = try reader.take(1);
-                }
-
-                archive_end_reached = std.mem.eql(u8, path, end_record_name);
-            },
-            .old_ascii => {
-                const header = try reader.takeStruct(OldAsciiHeader, .native);
-
-                // path_size contains '\0' too
-                const path_size = try std.fmt.parseInt(usize, &header.full_path_size, 8);
-                const path: []u8 = (try reader.take(path_size))[0 .. path_size - 1];
-
-                const file_size = try std.fmt.parseInt(usize, &header.file_size, 8);
-                const file_contents = try reader.take(file_size);
-                _ = file_contents;
-
-                archive_end_reached = std.mem.eql(u8, path, end_record_name);
-            },
-            .new_ascii, .new_ascii_crc => {
-                const calculate_checksum = header_type == .new_ascii_crc;
-
-                const header = try reader.takeStruct(NewAsciiHeader, .native);
-
-                // path_size contains '\0' too
-                const path_size = try std.fmt.parseInt(usize, &header.full_path_size, 16);
-                const total_header_size = @sizeOf(NewAsciiHeader) + path_size;
-                const path: []u8 = (try reader.take(path_size))[0 .. path_size - 1];
-                if (total_header_size % 4 != 0) {
-                    _ = try reader.take(4 - total_header_size % 4);
-                }
-
-                const file_size = try std.fmt.parseInt(usize, &header.file_size, 16);
-                const file_contents = try reader.take(file_size);
-                if (file_size % 4 != 0) {
-                    _ = try reader.take(4 - file_size % 4);
-                }
-
-                if (calculate_checksum) {
-                    const expected_checksum = try std.fmt.parseInt(u32, &header.checksum, 16);
-                    var checksum: u32 = 0;
-                    for (file_contents) |byte| {
-                        checksum +%= byte;
-                    }
-
-                    if (checksum != expected_checksum) {
-                        return error.ChecksumMismatch;
-                    }
-                }
-
-                archive_end_reached = std.mem.eql(u8, path, end_record_name);
-            },
+    // TODO: handle directories properly
+    while (try readRecord(&reader, &record, header_type)) {
+        const file_type = record.mode & file_type_mask;
+        switch (file_type) {
+            file_type_regular_file => try initramfs.addFile(record.path, record.content),
+            else => {},
         }
     }
 }

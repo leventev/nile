@@ -14,6 +14,7 @@ pub const processes = @import("processes.zig");
 pub const slab_allocator = @import("mem/slab_allocator.zig");
 pub const Thread = @import("Thread.zig");
 pub const cpio = @import("cpio.zig");
+pub const ramfs = @import("drivers/ramfs.zig");
 
 const test_binary_file = @embedFile("test");
 const test_archive = @embedFile("root.cpio");
@@ -95,10 +96,16 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     time.init(&dt) catch @panic("Failed to initialize timer");
 
-    cpio.readArchive(test_archive) catch |err| {
+    // TODO
+    var initramfs: ramfs.RamFs = undefined;
+    initramfs.init();
+
+    cpio.readArchive(test_archive, &initramfs) catch |err| {
         std.log.err("Failed to read CPIO archive: {s}", .{@errorName(err)});
         @panic("");
     };
+
+    initramfs.dumpTree();
 
     const idle_process_thread = processes.init();
     _ = processes.spawnInitProcess(root_page_table, null, test_binary_file) catch @panic("TODO");

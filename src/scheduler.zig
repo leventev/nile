@@ -117,7 +117,6 @@ pub fn newUserThread(
 /// The thread is freed thus the pointer becomes invalid.
 /// The function does not schedule the new first thread.
 pub fn removeThread(thread: *Thread) void {
-    std.log.debug("removing thread {}", .{thread.id});
     running_threads.remove(&thread.scheduler_list_node);
     thread_cache.free(thread);
 }

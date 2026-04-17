@@ -16,7 +16,7 @@ pub const Thread = @import("Thread.zig");
 pub const cpio = @import("cpio.zig");
 
 const test_binary_file = @embedFile("test");
-const test_archive = @embedFile("test_archive.cpio");
+const test_archive = @embedFile("root.cpio");
 
 export var device_tree_pointer: *void = undefined;
 
@@ -44,14 +44,17 @@ pub fn panic(
     _ = ret_addr;
     _ = error_return_trace;
 
-    std.log.err("KERNEL PANIC: {s}", .{msg});
+    if (msg.len > 0) {
+        std.log.err("KERNEL PANIC: {s}", .{msg});
+    } else {
+        std.log.err("KERNEL PANIC", .{});
+    }
+
     std.log.err("Stack trace:", .{});
     const max_stacktrace_depth = 64;
     var address_buffer: [max_stacktrace_depth]usize = undefined;
     const stack_trace = std.debug.captureCurrentStackTrace(
-        .{
-            .first_address = @returnAddress(),
-        },
+        .{ .first_address = @returnAddress() },
         &address_buffer,
     );
     for (stack_trace.return_addresses) |addr| {
@@ -92,7 +95,10 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     time.init(&dt) catch @panic("Failed to initialize timer");
 
-    cpio.readArchive(test_archive) catch @panic("TODO");
+    cpio.readArchive(test_archive) catch |err| {
+        std.log.err("Failed to read CPIO archive: {s}", .{@errorName(err)});
+        @panic("");
+    };
 
     const idle_process_thread = processes.init();
     _ = processes.spawnInitProcess(root_page_table, null, test_binary_file) catch @panic("TODO");

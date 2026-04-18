@@ -15,6 +15,7 @@ pub const slab_allocator = @import("mem/slab_allocator.zig");
 pub const Thread = @import("Thread.zig");
 pub const cpio = @import("cpio.zig");
 pub const ramfs = @import("drivers/ramfs.zig");
+pub const fs = @import("fs.zig");
 
 const test_binary_file = @embedFile("test");
 const test_archive = @embedFile("root.cpio");
@@ -96,9 +97,20 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     time.init(&dt) catch @panic("Failed to initialize timer");
 
+    fs.init();
+
+    var ram_file_system: fs.FileSystem = .{
+        .name = "ramfs",
+        .flags = .{},
+        .mount_init = ramfs.init,
+    };
+
+    fs.registerFileSystem(&ram_file_system) catch @panic("Failed to register ramfs");
+    fs.dumpRegisteredFilesystems();
+
     // TODO
     var initramfs: ramfs.RamFs = undefined;
-    initramfs.init();
+    initramfs.init() catch unreachable;
 
     cpio.readArchive(test_archive, &initramfs) catch |err| {
         std.log.err("Failed to read CPIO archive: {s}", .{@errorName(err)});

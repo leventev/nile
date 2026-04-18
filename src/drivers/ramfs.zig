@@ -1,6 +1,7 @@
 const std = @import("std");
 const PathIterator = @import("../PathIterator.zig");
 const slab_allocator = @import("../mem/slab_allocator.zig");
+const fs = @import("../fs.zig");
 
 // TODO: this is an abysmal solution and i am ashamed of myself. replace this with something nicer
 
@@ -109,7 +110,7 @@ pub const RamFs = struct {
         self.root_directory.dumpTree(0);
     }
 
-    pub fn init(self: *RamFs) void {
+    pub fn init(self: *RamFs) fs.FileSystemError!void {
         self.file_cache = slab_allocator.createObjectCache(File);
         self.root_directory = .{
             .child_count = 0,
@@ -117,3 +118,8 @@ pub const RamFs = struct {
         };
     }
 };
+
+pub fn init(internal_data: *anyopaque) fs.FileSystemError!void {
+    const ramfs: *RamFs = @ptrCast(@alignCast(internal_data));
+    return ramfs.init();
+}

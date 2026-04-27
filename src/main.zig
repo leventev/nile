@@ -108,16 +108,24 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     fs.registerFileSystem(&ram_file_system) catch @panic("Failed to register ramfs");
     fs.dumpRegisteredFilesystems();
 
-    // TODO
-    var initramfs: ramfs.RamFs = undefined;
-    initramfs.init() catch unreachable;
-
-    cpio.readArchive(test_archive, &initramfs) catch |err| {
-        std.log.err("Failed to read CPIO archive: {s}", .{@errorName(err)});
-        @panic("");
+    var mount_table: fs.MountTable = .{
+        .mount_count = 0,
+        .mounts = .{},
+        .lock = .{},
     };
+    fs.mountFileSystem(&mount_table, "/", "ramfs", null) catch @panic("Failed to mount /");
+    mount_table.dump();
 
-    initramfs.dumpTree();
+    // TODO
+    // var initramfs: ramfs.RamFs = undefined;
+    // initramfs.init() catch unreachable;
+    //
+    // cpio.readArchive(test_archive, &initramfs) catch |err| {
+    //     std.log.err("Failed to read CPIO archive: {s}", .{@errorName(err)});
+    //     @panic("");
+    // };
+    //
+    // initramfs.dumpTree();
 
     const idle_process_thread = processes.init();
     _ = processes.spawnInitProcess(root_page_table, null, test_binary_file) catch @panic("TODO");

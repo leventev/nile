@@ -1,6 +1,7 @@
 const std = @import("std");
 const arch = @import("arch/arch.zig");
 const slab_allocator = @import("mem/slab_allocator.zig");
+const Path = @import("Path.zig");
 
 pub const Inode = enum(u64) {
     _,
@@ -12,10 +13,6 @@ pub const Inode = enum(u64) {
     pub fn asInt(self: Inode) u64 {
         return @intFromEnum(self);
     }
-};
-
-const DirectoryEntry = struct {
-    inode: Inode,
 };
 
 pub const FileSystemError = error{};
@@ -41,6 +38,10 @@ pub const FileSystem = struct {
     pub const Flags = packed struct {
         /// Can only be mounted as a read-only file system
         read_only_mount: bool = false,
+
+        /// File system has no block device backing it and lives entirely in
+        /// the file system cache
+        no_device: bool = false,
     };
 };
 
@@ -114,14 +115,14 @@ const Mount = struct {
     /// TODO: struct Path?
     path: []const u8,
 
-    /// Mounted file system type
-    file_system: *FileSystem,
+    /// Mounted file system
+    file_system: *MountedFileSystem,
 
     /// Mount flags
     flags: Flags,
 
     /// Linked list node pointing to the next mount in a process's mount table.
-    namespace_list_node: std.SinglyLinkedList.Node,
+    next: ?*Mount,
 
     /// Mount flags.
     const Flags = packed struct {};
@@ -132,6 +133,62 @@ const Mount = struct {
 pub const DeviceId = struct {
     major: u16,
     minor: u16,
+};
+
+const FileSystemCache = struct {
+    root_directory: Directory,
+
+    const DirectoryEntry = struct {
+        name: []const u8,
+        data: FileData,
+        next: ?*DirectoryEntry,
+
+        var cache: slab_allocator.ObjectCache(DirectoryEntry) = undefined;
+    };
+
+    const FileType = enum {
+        file,
+        directory,
+    };
+
+    const FileData = union(FileType) {
+        regular: Regular,
+        directory: Directory,
+    };
+
+    const Regular = struct {
+        // TODO: temporary
+        data: []const u8,
+    };
+
+    // TODO: ERRORS
+
+    const Directory = struct {
+        entry_count: usize,
+        entries: ?*DirectoryEntry,
+
+        fn lookup(self: *Directory, name: []const u8) *?*DirectoryEntry {
+            var dent_ptr = &self.entries;
+            while (dent_ptr.*) |dent| : (dent_ptr = &dent.next) {
+                if (std.mem.eql(u8, dent.name, name))
+                    break;
+            }
+            return dent_ptr;
+        }
+
+        fn create(self: *Directory, name: []const u8, file_data: FileData) !void {
+            const dent_ptr = self.lookup(name);
+
+            if (dent_ptr.* != null) return error.AlreadyExists;
+
+            var new_entry = try DirectoryEntry.cache.alloc();
+            new_entry.name = name;
+            new_entry.data = file_data;
+            new_entry.next = null;
+
+            dent_ptr.* = &new_entry;
+        }
+    };
 };
 
 /// A mounted file system. Can be associated with a device whose ID then can uniquely identify
@@ -151,6 +208,8 @@ const MountedFileSystem = struct {
     /// The total (global) number of times this file system (identified by the device) is mounted.
     reference_count: usize,
 
+    fs_cache: FileSystemCache,
+
     /// Linked list node pointing to the next mounted file system.
     list_node: std.SinglyLinkedList.Node,
 
@@ -167,7 +226,7 @@ var global_file_system_table: struct {
 /// New entries are appended to the end.
 pub const MountTable = struct {
     /// Linked list of struct Mount
-    mounts: std.SinglyLinkedList,
+    mounts: ?*Mount,
 
     /// Number of mounts in the list
     mount_count: usize,
@@ -179,12 +238,23 @@ pub const MountTable = struct {
         self.lock.lock();
         defer self.lock.unlock();
 
-        std.log.debug("Mounts in namespaces({}):", .{self.mount_count});
-        var node = self.mounts.first;
-        while (node) |list_node| : (node = list_node.next) {
-            const mount: *Mount = @fieldParentPtr("namespace_list_node", list_node);
-            std.log.debug("  {s} - {s}", .{ mount.path, mount.file_system.name });
+        std.log.info("Mounts in namespaces({}):", .{self.mount_count});
+        var mount_ptr = self.mounts;
+        while (mount_ptr) |mount| : (mount_ptr = mount.next) {
+            std.log.info("  {s} - {s}", .{ mount.path, mount.file_system.file_system.name });
         }
+    }
+
+    /// If a mount matches the provided path return a pointer to the 'next' pointer pointing to it.
+    /// Otherwise returns a pointer to the last element's 'next' pointer (which points to null).
+    pub fn findMount(self: *MountTable, path: []const u8) *?*Mount {
+        var mount_ptr = &self.mounts;
+        while (mount_ptr.*) |mount| : (mount_ptr = &mount.next) {
+            if (std.mem.eql(u8, mount.path, path))
+                break;
+        }
+
+        return mount_ptr;
     }
 };
 
@@ -218,12 +288,8 @@ pub fn mountFileSystem(
     // TODO: validate path
     // TODO: we may want to abstract the linked list searches
 
-    var mnt_node_ptr = &mount_table.mounts.first;
-    while (mnt_node_ptr.*) |mnt_node| : (mnt_node_ptr = &mnt_node.next) {
-        const mount: *Mount = @fieldParentPtr("namespace_list_node", mnt_node);
-        if (std.mem.eql(u8, mount.path, path))
-            return error.AlreadyMounted;
-    }
+    const mount_next_ptr = mount_table.findMount(path);
+    if (mount_next_ptr.* != null) return error.AlreadyMounted;
 
     const file_system = blk: {
         var fs_node_ptr: *?*std.SinglyLinkedList.Node = &registered_file_systems.list.first;
@@ -252,12 +318,21 @@ pub fn mountFileSystem(
         break :blk fs_node_ptr;
     };
 
+    var new_mount = try Mount.cache.alloc();
+    errdefer Mount.cache.free(new_mount);
+
+    new_mount.flags = .{};
+    // TODO: copy name
+    new_mount.path = path;
+    new_mount.next = null;
+    mount_next_ptr.* = new_mount;
+
     if (existing_mounted_fs.*) |mounted_fs_node| {
         var mounted_fs: *MountedFileSystem = @fieldParentPtr("list_node", mounted_fs_node);
         mounted_fs.reference_count += 1;
+        new_mount.file_system = mounted_fs;
     } else {
         var new_mounted_fs = try MountedFileSystem.cache.alloc();
-        // TODO: free new_mounted_fs if mount allocation failed
 
         new_mounted_fs.device = null;
         new_mounted_fs.file_system = file_system;
@@ -265,22 +340,75 @@ pub fn mountFileSystem(
         new_mounted_fs.reference_count = 1;
         new_mounted_fs.list_node = .{};
 
+        new_mount.file_system = new_mounted_fs;
         existing_mounted_fs.* = &new_mounted_fs.list_node;
     }
 
-    var new_mount = try Mount.cache.alloc();
-    new_mount.file_system = file_system;
-    new_mount.flags = .{};
-    // TODO: copy name
-    new_mount.path = path;
-    new_mount.namespace_list_node = .{};
-    mnt_node_ptr.* = &new_mount.namespace_list_node;
-
     mount_table.mount_count += 1;
+}
+
+pub const OpenFile = struct {};
+
+pub const OpenFlags = packed struct {
+    create: bool,
+};
+
+// TODO: ERRORS
+pub fn openFile(mount_table: *MountTable, path_str: []const u8, flags: OpenFlags) !OpenFile {
+    // TODO: clean name (VERY IMPORTANT!!!!)
+    if (path_str.len == 0) return error.InvalidPath;
+    if (path_str[0] != '/') return error.InvalidPath;
+
+    // TODO: consider saving the root mapping in MountTable for easier access
+    const root_mount = mount_table.mounts orelse @panic("No root mount");
+
+    var current_mount = root_mount;
+    var current_fs = root_mount.file_system;
+    var current_dir = &current_fs.fs_cache.root_directory;
+
+    var path = try Path.fromStringWithSlash(path_str);
+    while (path.next()) |path_element| {
+        const traversed_path = path.alreadyTraversed();
+        const last_component = path.reachedEnd();
+
+        if (mount_table.findMount(traversed_path).*) |mount| {
+            std.log.debug("found mount: {s}", .{mount.path});
+            current_mount = mount;
+            current_fs = current_mount.file_system;
+            current_dir = &current_fs.fs_cache.root_directory;
+            continue;
+        }
+
+        const dir_entry_ptr = current_dir.lookup(path_element);
+        if (last_component) {
+            if (dir_entry_ptr.*) |dir_entry| {
+                if (flags.create) return error.AlreadyExists;
+                // TODO:
+            } else {
+                if (!flags.create) return error.EntryNotFound;
+            }
+        } else {
+            if (dir_entry_ptr.*) |dir_entry| {
+                switch (dir_entry.data) {
+                    .regular => return error.EntryNotFound,
+                    .directory => |*dir| current_dir = dir,
+                }
+            } else {
+                if (current_fs.file_system.flags.no_device) {
+                    return error.EntryNotFound;
+                } else {
+                    @panic("TODO");
+                }
+            }
+        }
+    }
+
+    return OpenFile{};
 }
 
 /// Initialize the Virtual File System.
 pub fn init() void {
     Mount.cache = slab_allocator.createObjectCache(Mount);
     MountedFileSystem.cache = slab_allocator.createObjectCache(MountedFileSystem);
+    FileSystemCache.DirectoryEntry.cache = slab_allocator.createObjectCache(FileSystemCache.DirectoryEntry);
 }

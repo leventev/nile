@@ -101,7 +101,9 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     var ram_file_system: fs.FileSystem = .{
         .name = "ramfs",
-        .flags = .{},
+        .flags = .{
+            .no_device = true,
+        },
         .mount_init = ramfs.init,
     };
 
@@ -110,11 +112,14 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     var mount_table: fs.MountTable = .{
         .mount_count = 0,
-        .mounts = .{},
+        .mounts = null,
         .lock = .{},
     };
     fs.mountFileSystem(&mount_table, "/", "ramfs", null) catch @panic("Failed to mount /");
+    fs.mountFileSystem(&mount_table, "/test_dir/abc", "ramfs", null) catch @panic("Failed to mount /");
     mount_table.dump();
+
+    _ = fs.openFile(&mount_table, "/test_dir/abc/def") catch @panic("aaa");
 
     // TODO
     // var initramfs: ramfs.RamFs = undefined;

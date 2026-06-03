@@ -1,5 +1,5 @@
 const std = @import("std");
-const PathIterator = @import("../PathIterator.zig");
+const Path = @import("../Path.zig");
 const slab_allocator = @import("../mem/slab_allocator.zig");
 const fs = @import("../fs.zig");
 
@@ -79,7 +79,7 @@ pub const RamFs = struct {
     // TODO: GET RID OF THIS UGLY MESS
     pub fn addFile(self: *RamFs, full_path: []const u8, content: []const u8) !void {
         var current_dir: *Directory = &self.root_directory;
-        var path_iterator = try PathIterator.fromString(full_path);
+        var path_iterator = try Path.fromStringWithoutSlash(full_path);
 
         while (path_iterator.next()) |path_segment| {
             const existing_child = current_dir.findChild(path_segment);

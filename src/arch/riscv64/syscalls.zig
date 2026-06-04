@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const exit = @import("syscalls/exit.zig");
+const fs = @import("syscalls/fs.zig");
 
 const Registers = @import("registers.zig").Registers;
 const SyscallCallback = *const fn (args: [7]usize) u64;
@@ -12,6 +13,8 @@ pub const Syscall = struct {
 
 const syscall_table: []const Syscall = &[_]Syscall{
     .{ .name = "exit", .callback = exit.exit },
+    .{ .name = "openat", .callback = fs.openat },
+    .{ .name = "read", .callback = fs.read },
 };
 
 pub fn dispatchSyscall(regs: *Registers) void {

@@ -53,16 +53,24 @@ pub fn spawnInitProcess(
         if (prog_header.p_type != std.elf.PT_LOAD)
             continue;
 
-        // TODO: dont ignore .align
-        var pages = prog_header.p_memsz / arch.page_size;
-        if (prog_header.p_memsz % arch.page_size != 0) {
-            pages += 1;
-        }
+        // TODO: error
+        std.debug.assert(prog_header.p_memsz > 0);
+        const virt_last_byte_addr = prog_header.p_vaddr + prog_header.p_memsz - 1;
+        const virt_start_page_num = prog_header.p_vaddr / arch.page_size;
+        const virt_end_page_num = virt_last_byte_addr / arch.page_size;
+        const page_count = virt_end_page_num - virt_start_page_num + 1;
+
+        std.debug.assert(
+            prog_header.p_vaddr % prog_header.p_align == prog_header.p_offset % prog_header.p_align,
+        );
+
+        // TODO: do additional checking to make sure regions dont overlap
+        const start_page_addr = virt_start_page_num * arch.page_size;
 
         // TODO: instead of loading the binary like this use demand paging
-        new_proc.mapRegion(
-            .fromInt(prog_header.p_vaddr),
-            pages * arch.page_size,
+        try new_proc.mapRegion(
+            .fromInt(start_page_addr),
+            page_count * arch.page_size,
             .{
                 .execute = true,
                 .read = true,
@@ -71,7 +79,9 @@ pub fn spawnInitProcess(
                 // .read = prog_header.p_flags & std.elf.PF_R != 0,
                 // .write = prog_header.p_flags & std.elf.PF_W != 0,
             },
-        ) catch unreachable;
+        );
+
+        // TODO: zero out the bytes between start_page_addr and prog_header.p_vaddr
 
         const ph_data = data[prog_header.p_offset .. prog_header.p_offset + prog_header.p_filesz];
         const mapped_region = (@as([*]u8, @ptrFromInt(prog_header.p_vaddr)))[0..prog_header.p_memsz];
@@ -82,7 +92,22 @@ pub fn spawnInitProcess(
         @memset(zeroed_region, 0);
     }
 
-    _ = try scheduler.newUserThread(elf_header.entry, 0, new_proc);
+    // TODO:
+    const stack_bottom = 0xA000_0000;
+    const stack_size = 64 * arch.page_size;
+    const stack_top = stack_bottom + stack_size;
+
+    try new_proc.mapRegion(
+        .fromInt(stack_bottom),
+        stack_size,
+        .{
+            .execute = false,
+            .read = true,
+            .write = true,
+        },
+    );
+
+    _ = try scheduler.newUserThread(elf_header.entry, stack_top, new_proc);
 
     running_processes.append(&new_proc.list_node);
 

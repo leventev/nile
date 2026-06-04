@@ -111,9 +111,12 @@ pub fn dumpRegisteredFilesystems() void {
 
 /// An entry in a per-process MountTable. The path can be used to identify the entry.
 const Mount = struct {
-    /// Path the file system is mounted on
-    /// TODO: struct Path?
+    // TODO: clean name
+    /// Path
     path: []const u8,
+
+    // null if root
+    file: ?OpenFile,
 
     /// Mounted file system
     file_system: *MountedFileSystem,
@@ -123,6 +126,8 @@ const Mount = struct {
 
     /// Linked list node pointing to the next mount in a process's mount table.
     next: ?*Mount,
+
+    const Id = enum(u32) { _ };
 
     /// Mount flags.
     const Flags = packed struct {};
@@ -137,17 +142,25 @@ pub const DeviceId = struct {
 
 const FileSystemCache = struct {
     root_directory: Directory,
+    ids_available: std.bit_set.ArrayBitSet(usize, DirectoryEntry.Id.max) = .full,
 
     const DirectoryEntry = struct {
+        id: Id,
         name: []const u8,
         data: FileData,
+        reference_count: usize,
         next: ?*DirectoryEntry,
 
         var cache: slab_allocator.ObjectCache(DirectoryEntry) = undefined;
+
+        const Id = enum(usize) {
+            _,
+            const max = 4096;
+        };
     };
 
     const FileType = enum {
-        file,
+        regular,
         directory,
     };
 
@@ -186,7 +199,7 @@ const FileSystemCache = struct {
             new_entry.data = file_data;
             new_entry.next = null;
 
-            dent_ptr.* = &new_entry;
+            dent_ptr.* = new_entry;
         }
     };
 };
@@ -195,6 +208,8 @@ const FileSystemCache = struct {
 /// a mounted file system. Not providing a device ID could be useful for in-memory file systems
 /// e.g. ramfs. If the reference count reaches 0 then the struct is deallocated(TODO).
 const MountedFileSystem = struct {
+    id: Id,
+
     /// The device the file system is mounted on. Usually null if the file system is ramfs.
     /// In that case the reference count cannot go above 1.
     device: ?DeviceId,
@@ -213,7 +228,12 @@ const MountedFileSystem = struct {
     /// Linked list node pointing to the next mounted file system.
     list_node: std.SinglyLinkedList.Node,
 
+    const Id = enum(usize) { _ };
+
     var cache: slab_allocator.ObjectCache(MountedFileSystem) = undefined;
+
+    // TODO: TEMPORARY, NOT EVEN LOCKED
+    var counter: usize = 0;
 };
 
 var global_file_system_table: struct {
@@ -275,6 +295,8 @@ pub fn mountFileSystem(
     fs_name: []const u8,
     dev_id: ?DeviceId,
 ) !void {
+    // TODO: special case mounting root
+
     // TODO: the order shouldnt matter here, right?
     mount_table.lock.lock();
     registered_file_systems.lock.lock();
@@ -302,6 +324,11 @@ pub fn mountFileSystem(
         return error.FsNotRegistered;
     };
 
+    const source_file: ?OpenFile = if (std.mem.eql(u8, path, "/"))
+        null
+    else
+        try openFile(mount_table, path);
+
     // either points to the 'next' pointer that points to the MountedFileSystem that matches
     // the device id or points to the last element's 'next' pointer (which contains null)
     const existing_mounted_fs: *?*std.SinglyLinkedList.Node = blk: {
@@ -324,12 +351,15 @@ pub fn mountFileSystem(
     new_mount.flags = .{};
     // TODO: copy name
     new_mount.path = path;
+    new_mount.file = source_file;
     new_mount.next = null;
     mount_next_ptr.* = new_mount;
 
     if (existing_mounted_fs.*) |mounted_fs_node| {
         var mounted_fs: *MountedFileSystem = @fieldParentPtr("list_node", mounted_fs_node);
         mounted_fs.reference_count += 1;
+        mounted_fs.id = @enumFromInt(MountedFileSystem.counter);
+        MountedFileSystem.counter += 1;
         new_mount.file_system = mounted_fs;
     } else {
         var new_mounted_fs = try MountedFileSystem.cache.alloc();
@@ -347,17 +377,23 @@ pub fn mountFileSystem(
     mount_table.mount_count += 1;
 }
 
-pub const OpenFile = struct {};
-
-pub const OpenFlags = packed struct {
-    create: bool,
+pub const OpenFile = struct {
+    mounted_fs_id: MountedFileSystem.Id,
+    file_id: FileSystemCache.DirectoryEntry.Id,
 };
 
-// TODO: ERRORS
-pub fn openFile(mount_table: *MountTable, path_str: []const u8, flags: OpenFlags) !OpenFile {
+pub fn walkUntilLastComponent(
+    mount_table: *MountTable,
+    path_str: []const u8,
+    out_mnt: **Mount,
+    out_parent_dir: **FileSystemCache.Directory,
+    out_last_component: *[]const u8,
+) !void {
+    // TODO: LOCKING
+
     // TODO: clean name (VERY IMPORTANT!!!!)
-    if (path_str.len == 0) return error.InvalidPath;
-    if (path_str[0] != '/') return error.InvalidPath;
+
+    if (path_str.len == 0 or path_str[0] != '/') return error.InvalidPath;
 
     // TODO: consider saving the root mapping in MountTable for easier access
     const root_mount = mount_table.mounts orelse @panic("No root mount");
@@ -369,7 +405,8 @@ pub fn openFile(mount_table: *MountTable, path_str: []const u8, flags: OpenFlags
     var path = try Path.fromStringWithSlash(path_str);
     while (path.next()) |path_element| {
         const traversed_path = path.alreadyTraversed();
-        const last_component = path.reachedEnd();
+        const is_last_component = path.reachedEnd();
+        std.log.debug("traversed: {s}, is_last: {}", .{ traversed_path, is_last_component });
 
         if (mount_table.findMount(traversed_path).*) |mount| {
             std.log.debug("found mount: {s}", .{mount.path});
@@ -380,15 +417,14 @@ pub fn openFile(mount_table: *MountTable, path_str: []const u8, flags: OpenFlags
         }
 
         const dir_entry_ptr = current_dir.lookup(path_element);
-        if (last_component) {
-            if (dir_entry_ptr.*) |dir_entry| {
-                if (flags.create) return error.AlreadyExists;
-                // TODO:
-            } else {
-                if (!flags.create) return error.EntryNotFound;
-            }
+        std.log.debug("dir ent: {}", .{dir_entry_ptr});
+        if (is_last_component) {
+            out_mnt.* = current_mount;
+            out_last_component.* = path_element;
+            out_parent_dir.* = current_dir;
         } else {
             if (dir_entry_ptr.*) |dir_entry| {
+                std.log.debug("dir entry", .{});
                 switch (dir_entry.data) {
                     .regular => return error.EntryNotFound,
                     .directory => |*dir| current_dir = dir,
@@ -402,8 +438,76 @@ pub fn openFile(mount_table: *MountTable, path_str: []const u8, flags: OpenFlags
             }
         }
     }
+}
 
-    return OpenFile{};
+pub fn createDirectory(mount_table: *MountTable, path_str: []const u8) !void {
+    var mount: *Mount = undefined;
+    var dir: *FileSystemCache.Directory = undefined;
+    var last_component: []const u8 = &.{};
+
+    try walkUntilLastComponent(mount_table, path_str, &mount, &dir, &last_component);
+
+    try dir.create(last_component, .{ .directory = .{ .entry_count = 0, .entries = null } });
+}
+
+// TODO: CONTENT
+pub fn createRegularFile(mount_table: *MountTable, path_str: []const u8, content: []const u8) !void {
+    var mount: *Mount = undefined;
+    var dir: *FileSystemCache.Directory = undefined;
+    var last_component: []const u8 = &.{};
+
+    try walkUntilLastComponent(mount_table, path_str, &mount, &dir, &last_component);
+
+    try dir.create(last_component, .{ .regular = .{ .data = content } });
+}
+
+// TODO: ERRORS
+pub fn openFile(mount_table: *MountTable, path_str: []const u8) !OpenFile {
+    var mount: *Mount = undefined;
+    var dir: *FileSystemCache.Directory = undefined;
+    var last_component: []const u8 = &.{};
+
+    try walkUntilLastComponent(mount_table, path_str, &mount, &dir, &last_component);
+
+    const dir_entry = dir.lookup(last_component).* orelse return error.EntryNotFound;
+    // TODO: LOCKING
+
+    dir_entry.reference_count += 1;
+    return OpenFile{
+        // TODO
+        .mounted_fs_id = @enumFromInt(0),
+        .file_id = dir_entry.id,
+    };
+}
+
+pub fn dumpTree(mount_table: *MountTable) void {
+    // TODO: this only prints the root mount
+    const root_mount = mount_table.mounts orelse @panic("No root mount");
+    const root_fs = root_mount.file_system;
+    const root_dir = &root_fs.fs_cache.root_directory;
+    dumpDirectory(root_dir, 0);
+}
+
+fn dumpDirectory(dir: *FileSystemCache.Directory, depth: usize) void {
+    // TODO: buffer likely too small
+    const space_count = depth * 4;
+    var indent_buffer: [512]u8 = undefined;
+    for (0..space_count) |i| indent_buffer[i] = ' ';
+
+    var dir_ent_ptr = dir.entries;
+    while (dir_ent_ptr) |dir_ent| : (dir_ent_ptr = dir_ent.next) {
+        switch (dir_ent.data) {
+            .regular => |child_file| std.log.info("{s}{s} [{} bytes]", .{
+                indent_buffer[0..space_count],
+                dir_ent.name,
+                child_file.data.len,
+            }),
+            .directory => |*child_dir| {
+                std.log.info("{s}{s}:", .{ indent_buffer[0..space_count], dir_ent.name });
+                dumpDirectory(child_dir, depth + 1);
+            },
+        }
+    }
 }
 
 /// Initialize the Virtual File System.

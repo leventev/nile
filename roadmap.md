@@ -5,7 +5,7 @@ Do these in any kind of order.
 - [X] User threads
 - [X] Syscalls
 - [ ] DWARF debug info 
-- [ ] VFS
+- [/] VFS
 - [ ] Design permission system
 - [ ] Design file system structure
 - [ ] Design process spawning without fork
@@ -18,3 +18,9 @@ Do these in any kind of order.
 - [ ] Disk drivers
 - [ ] FS drivers
 - [ ] Framebuffer
+- [ ] open syscall
+- [ ] read syscall
+- [ ] write syscall
+- [ ] close syscall
+- [ ] shell
+- [ ] set up zig to cross compile

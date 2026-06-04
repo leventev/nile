@@ -115,11 +115,14 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
         .mounts = null,
         .lock = .{},
     };
-    fs.mountFileSystem(&mount_table, "/", "ramfs", null) catch @panic("Failed to mount /");
-    fs.mountFileSystem(&mount_table, "/test_dir/abc", "ramfs", null) catch @panic("Failed to mount /");
-    mount_table.dump();
 
-    _ = fs.openFile(&mount_table, "/test_dir/abc/def") catch @panic("aaa");
+    fs.mountFileSystem(&mount_table, "/", "ramfs", null) catch @panic("Failed to mount /");
+    fs.createDirectory(&mount_table, "/test_dir") catch @panic("Failed to create file");
+    fs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
+    fs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");
+    fs.createRegularFile(&mount_table, "/test_dir/a/test_file", "burger") catch @panic("Failed to create file");
+    mount_table.dump();
+    fs.dumpTree(&mount_table);
 
     // TODO
     // var initramfs: ramfs.RamFs = undefined;

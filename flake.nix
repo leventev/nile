@@ -13,7 +13,7 @@
   in
   {
     devShells.${system}.default = pkgs.mkShell {
-      nativeBuildInputs = with pkgs; [zig];
+      nativeBuildInputs = with pkgs; [zig_0_16];
       packages = [pkgs.qemu pkgsCross.binutils pkgs.bloaty]; 
     };
   };

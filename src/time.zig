@@ -1,5 +1,6 @@
 const std = @import("std");
-const dt = @import("devicetree.zig");
+const root = @import("root");
+const dt = root.devicetree;
 const kio = @import("kio.zig");
 const arch = @import("arch/arch.zig");
 const scheduler = @import("scheduler.zig");

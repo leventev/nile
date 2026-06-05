@@ -53,13 +53,13 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
     const max_interrupts = node.getPropertyOtherU32("riscv,ndev") orelse
         return error.InvalidDeviceTree;
 
-    const addressCells = node.getAddressCellFromParent(dt) orelse
-        return error.InvalidDeviceTree;
+    const address_cells = node.getAddressCellFromParent(dt);
+    if (address_cells > 2) @panic("address-cells must not be bigger than 2");
 
     const reg = node.getProperty(.reg) orelse
         return error.InvalidDeviceTree;
-    var reg_it = try reg.iterator(addressCells, 0);
-    const base_addr = (reg_it.next() orelse return error.InvalidDeviceTree).addr;
+    var reg_it = try reg.iterator(address_cells, 0);
+    const base_addr: u64 = @intCast((reg_it.next() orelse return error.InvalidDeviceTree).address);
     const phys_addr = mm.PhysicalAddress.fromInt(base_addr);
     const virt_addr = mm.physicalToVirtualAddress(phys_addr);
 

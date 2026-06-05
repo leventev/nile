@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const devicetree = @import("../devicetree.zig");
+const root = @import("root");
+const devicetree = root.devicetree;
 const arch = @import("../arch/arch.zig");
 const Process = @import("../Process.zig");
 const buddy_allocator = @import("buddy_allocator.zig");
@@ -69,26 +70,30 @@ fn readMemoryPair(buff: []const u8, idx: usize, entrySize: usize) MemoryRegion {
 fn parseMemoryRegions(
     allocator: std.mem.Allocator,
     dt: *const devicetree.DeviceTree,
-    root: *const devicetree.DeviceTreeNode,
+    dt_root: *const devicetree.DeviceTreeNode,
 ) !std.ArrayListUnmanaged(PhysicalMemoryRegion) {
     var regions = std.ArrayList(PhysicalMemoryRegion).empty;
 
-    for (root.children.items) |child| {
+    for (dt_root.children.items) |child| {
         if (!std.mem.startsWith(u8, child.name, "memory"))
             continue;
 
         const node = dt.nodes.items[child.handle];
 
         const reg = node.getProperty(.reg) orelse return error.InvalidDeviceTree;
-        const address_cells = node.getAddressCellFromParent(dt) orelse return error.InvalidDeviceTree;
-        const size_cells = node.getSizeCellFromParent(dt) orelse return error.InvalidDeviceTree;
+        const address_cells = node.getAddressCellFromParent(dt);
+        const size_cells = node.getSizeCellFromParent(dt);
+
+        if (address_cells > 2 or size_cells > 2)
+            @panic("address-cells and size-cells must not be bigger than 2");
+
         var it = reg.iterator(address_cells, size_cells) catch return error.InvalidDeviceTree;
 
-        while (it.next()) |regpair| {
+        while (it.next()) |entry| {
             try regions.append(allocator, PhysicalMemoryRegion{
                 .range = .{
-                    .start = regpair.addr,
-                    .size = regpair.size,
+                    .start = @intCast(entry.address),
+                    .size = @intCast(entry.size),
                 },
             });
         }
@@ -100,9 +105,9 @@ fn parseMemoryRegions(
 fn parseReservedMemoryRegions(
     allocator: std.mem.Allocator,
     dt: *const devicetree.DeviceTree,
-    root: *const devicetree.DeviceTreeNode,
+    dt_root: *const devicetree.DeviceTreeNode,
 ) !std.ArrayListUnmanaged(ReservedMemoryRegion) {
-    const reserved_memory = dt.getChild(root, "reserved-memory") orelse return error.InvalidDeviceTree;
+    const reserved_memory = dt.getChild(dt_root, "reserved-memory") orelse return error.InvalidDeviceTree;
 
     var regions = std.ArrayList(ReservedMemoryRegion).empty;
 
@@ -113,15 +118,19 @@ fn parseReservedMemoryRegions(
         const reusable = node.getPropertyOther("reusable") != null;
 
         const reg = node.getProperty(.reg) orelse continue;
-        const address_cells = node.getAddressCellFromParent(dt) orelse return error.InvalidDeviceTree;
-        const size_cells = node.getSizeCellFromParent(dt) orelse return error.InvalidDeviceTree;
+        const address_cells = node.getAddressCellFromParent(dt);
+        const size_cells = node.getSizeCellFromParent(dt);
+
+        if (address_cells > 2 or size_cells > 2)
+            @panic("address-cells and size-cells must not be bigger than 2");
+
         var it = reg.iterator(address_cells, size_cells) catch return error.InvalidDeviceTree;
 
-        while (it.next()) |regpair| {
+        while (it.next()) |entry| {
             try regions.append(allocator, ReservedMemoryRegion{
                 .range = .{
-                    .start = regpair.addr,
-                    .size = regpair.size,
+                    .start = @intCast(entry.address),
+                    .size = @intCast(entry.size),
                 },
                 .name = region.name,
                 .no_map = no_map,

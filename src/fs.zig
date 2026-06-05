@@ -406,10 +406,8 @@ pub fn walkUntilLastComponent(
     while (path.next()) |path_element| {
         const traversed_path = path.alreadyTraversed();
         const is_last_component = path.reachedEnd();
-        std.log.debug("traversed: {s}, is_last: {}", .{ traversed_path, is_last_component });
 
         if (mount_table.findMount(traversed_path).*) |mount| {
-            std.log.debug("found mount: {s}", .{mount.path});
             current_mount = mount;
             current_fs = current_mount.file_system;
             current_dir = &current_fs.fs_cache.root_directory;
@@ -417,14 +415,12 @@ pub fn walkUntilLastComponent(
         }
 
         const dir_entry_ptr = current_dir.lookup(path_element);
-        std.log.debug("dir ent: {}", .{dir_entry_ptr});
         if (is_last_component) {
             out_mnt.* = current_mount;
             out_last_component.* = path_element;
             out_parent_dir.* = current_dir;
         } else {
             if (dir_entry_ptr.*) |dir_entry| {
-                std.log.debug("dir entry", .{});
                 switch (dir_entry.data) {
                     .regular => return error.EntryNotFound,
                     .directory => |*dir| current_dir = dir,

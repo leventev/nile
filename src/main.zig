@@ -1,7 +1,7 @@
 pub const std = @import("std");
 pub const builtin = @import("builtin");
 pub const kio = @import("kio.zig");
-pub const devicetree = @import("devicetree.zig");
+pub const devicetree = @import("dt/devicetree.zig");
 pub const mm = @import("mem/mm.zig");
 pub const buddy_allocator = @import("mem/buddy_allocator.zig");
 pub const arch = @import("arch/arch.zig");
@@ -16,8 +16,9 @@ pub const Thread = @import("Thread.zig");
 pub const cpio = @import("cpio.zig");
 pub const ramfs = @import("drivers/ramfs.zig");
 pub const fs = @import("fs.zig");
+pub const bus = @import("bus/pci.zig");
 
-const test_binary_file = @embedFile("test");
+const test_binary_file = @embedFile("shell");
 const test_archive = @embedFile("root.cpio");
 
 export var device_tree_pointer: *void = undefined;

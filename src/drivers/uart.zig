@@ -141,13 +141,14 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
     const regs = uart.getProperty(.reg) orelse
         return error.InvalidDeviceTree;
 
-    const addressCells = uart.getAddressCellFromParent(dt) orelse
-        return error.InvalidDeviceTree;
+    const address_cells = uart.getAddressCellFromParent(dt);
 
-    var regs_it = try regs.iterator(addressCells, 0);
+    if (address_cells > 2) @panic("address-cells must not be bigger than 2");
+
+    var regs_it = try regs.iterator(address_cells, 0);
 
     // TODO: parse all provided addresses?
-    const baseAddr = (regs_it.next() orelse return error.InvalidDeviceTree).addr;
+    const baseAddr: u64 = @intCast((regs_it.next() orelse return error.InvalidDeviceTree).address);
     const physAddr = mm.PhysicalAddress.fromInt(baseAddr);
     const virtAddr = mm.physicalToVirtualAddress(physAddr);
     base_ptr = @ptrFromInt(virtAddr.asInt());

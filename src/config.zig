@@ -45,6 +45,16 @@ pub const modules: []const Module = &.{
             },
         },
     },
+    .{
+        .name = "pci",
+        .module = @import("bus/pci.zig"),
+        .enabled = true,
+        .init_type = Module.ModuleType{
+            .driver = .{
+                .compatible = &.{"pci-host-ecam-generic"},
+            },
+        },
+    },
 };
 
 pub const debug_scheduler: bool = false;

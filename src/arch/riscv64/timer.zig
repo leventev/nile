@@ -1,9 +1,11 @@
+const std = @import("std");
+const root = @import("root");
 const time = @import("../../time.zig");
-const devicetree = @import("../../devicetree.zig");
 const csr = @import("csr.zig").CSR;
 const sbi = @import("sbi.zig");
 const trap = @import("trap.zig");
-const std = @import("std");
+
+const devicetree = root.devicetree;
 
 pub const riscv_clock_source = time.ClockSource{
     .init = init,

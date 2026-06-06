@@ -16,7 +16,6 @@ pub const Thread = @import("Thread.zig");
 pub const cpio = @import("cpio.zig");
 pub const ramfs = @import("drivers/ramfs.zig");
 pub const fs = @import("fs.zig");
-pub const bus = @import("bus/pci.zig");
 
 const test_binary_file = @embedFile("shell");
 const test_archive = @embedFile("root.cpio");

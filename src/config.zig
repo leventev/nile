@@ -46,8 +46,8 @@ pub const modules: []const Module = &.{
         },
     },
     .{
-        .name = "pci",
-        .module = @import("bus/pci.zig"),
+        .name = "pcie",
+        .module = @import("bus/pcie.zig"),
         .enabled = true,
         .init_type = Module.ModuleType{
             .driver = .{

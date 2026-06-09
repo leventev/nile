@@ -2,7 +2,9 @@
 // https://en.wikibooks.org/wiki/Serial_Programming
 
 const std = @import("std");
+const Module = @import("../Module.zig");
 const root = @import("root");
+
 const devicetree = root.devicetree;
 const mm = root.mm;
 const kio = root.kio;
@@ -129,7 +131,7 @@ fn writeBytes(buf: []const u8) ?usize {
     return buf.len;
 }
 
-pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
+pub fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!void {
     const uart = dt.nodes.items[handle];
 
     devicetree.printDeviceTree("/", dt, handle, 0);
@@ -145,7 +147,7 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
 
     if (address_cells > 2) @panic("address-cells must not be bigger than 2");
 
-    var regs_it = try regs.iterator(address_cells, 0);
+    var regs_it = regs.iterator(address_cells, 0) catch @panic("TODO");
 
     // TODO: parse all provided addresses?
     const baseAddr: u64 = @intCast((regs_it.next() orelse return error.InvalidDeviceTree).address);
@@ -212,3 +214,15 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
         .writeBytes = writeBytes,
     }) catch std.log.warn("Failed to add uart IO backend", .{});
 }
+
+pub const module: Module = .{
+    .name = "uart",
+    .module_type = .{
+        .device_driver = .{
+            .devicetree = .{
+                .compatible = &.{ "ns16550", "ns16550a" },
+                .init = init,
+            },
+        },
+    },
+};

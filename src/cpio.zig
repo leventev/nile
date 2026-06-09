@@ -1,7 +1,7 @@
 //! Documentation for the CPIO format: https://www.systutorials.com/docs/linux/man/5-cpio/
 
 const std = @import("std");
-const ramfs = @import("drivers/ramfs.zig");
+// const ramfs = @import("drivers/ramfs.zig");
 
 /// Old binary CPIO file header format
 ///
@@ -200,24 +200,24 @@ fn readRecord(reader: *std.Io.Reader, record: *Record, header_type: HeaderType) 
 }
 
 // TODO: custom errorset instead of std Io error
-pub fn readArchive(cpio_data: []const u8, initramfs: *ramfs.RamFs) !void {
-    var reader = std.Io.Reader.fixed(cpio_data);
-
-    const header_type = try getHeaderType(&reader);
-
-    // The documentation doesn't say anything about this but it's fair to assume that all headers
-    // within an archive use the same format and that we don't need to check for this.
-
-    // TODO: permission bits
-
-    var record: Record = undefined;
-
-    // TODO: handle directories properly
-    while (try readRecord(&reader, &record, header_type)) {
-        const file_type = record.mode & file_type_mask;
-        switch (file_type) {
-            file_type_regular_file => try initramfs.addFile(record.path, record.content),
-            else => {},
-        }
-    }
-}
+// pub fn readArchive(cpio_data: []const u8, initramfs: *ramfs.RamFs) !void {
+//     var reader = std.Io.Reader.fixed(cpio_data);
+//
+//     const header_type = try getHeaderType(&reader);
+//
+//     // The documentation doesn't say anything about this but it's fair to assume that all headers
+//     // within an archive use the same format and that we don't need to check for this.
+//
+//     // TODO: permission bits
+//
+//     var record: Record = undefined;
+//
+//     // TODO: handle directories properly
+//     while (try readRecord(&reader, &record, header_type)) {
+//         const file_type = record.mode & file_type_mask;
+//         switch (file_type) {
+//             file_type_regular_file => try initramfs.addFile(record.path, record.content),
+//             else => {},
+//         }
+//     }
+// }

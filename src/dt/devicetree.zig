@@ -3,6 +3,9 @@
 const std = @import("std");
 const root = @import("root");
 const property = @import("property.zig");
+const Module = @import("../Module.zig");
+const device = @import("../device.zig");
+const slab_allocator = @import("../mem/slab_allocator.zig");
 
 const kio = root.kio;
 const config = root.config;
@@ -39,6 +42,8 @@ const device_tree_blob_magic = 0xD00DFEED;
 const no_parent = std.math.maxInt(u32);
 
 const bigToNative = std.mem.bigToNative;
+
+var device_cache: slab_allocator.ObjectCache(device.Device) = undefined;
 
 fn getString(blob: []const u32, offset: u32) [*:0]const u8 {
     const string_block_offset = bigToNative(u32, blob[dt_strings_offset_idx]);
@@ -327,11 +332,11 @@ pub fn printDeviceTree(
     }
 }
 
-fn initDriverFromDeviceTree(
+fn addDevice(
     dt: *const DeviceTree,
     node: *const DeviceTreeNode,
     handle: u32,
-) void {
+) !void {
     const compatible = node.getProperty(.compatible) orelse return;
 
     const node_name = blk: {
@@ -340,45 +345,64 @@ fn initDriverFromDeviceTree(
         break :blk parent.getChildNameFromHandle(handle) orelse unreachable;
     };
 
-    var it = compatible.iterator();
-    while (it.next()) |node_comp| {
-        inline for (config.modules) |mod| {
-            if (!mod.enabled or mod.init_type != .driver) continue;
-            for (mod.init_type.driver.compatible) |driver_comp| {
-                if (!std.mem.eql(u8, driver_comp, node_comp)) continue;
+    var dev = try device_cache.alloc();
+    dev.name = node_name;
+    dev.parent = null;
+    dev.match_table = .{
+        .devicetree = .{
+            .compatible = compatible,
+            .handle = handle,
+        },
+    };
 
-                mod.module.initDriver(dt, handle) catch |err| {
-                    std.log.err("failed to initialize {s}: {s}", .{ mod.name, @errorName(err) });
-                };
-                std.log.info("Module '{s}'({s}) initialized", .{ mod.name, node_name });
+    try device.addDevice(dev);
 
-                return;
-            }
-        }
-    }
-
-    var compBuff: [256]u8 = undefined;
-    var writer = std.Io.Writer.fixed(compBuff[0..]);
-    compatible.print(&writer) catch @panic("compatible string too long");
-    const allCompString = writer.buffered();
-
-    std.log.warn(
-        "Compatible driver not found for '{s}' compatible: '{s}'",
-        .{ node_name, allCompString },
-    );
+    // var it = compatible.iterator();
+    // while (it.next()) |device_compatible| {
+    //     for (Module.modules) |mod| {
+    //         if (mod.initialized or mod.module.module_type != .device_driver) continue;
+    //         switch (mod.module.module_type.device_driver) {
+    //             .devicetree => |dt_mod| {
+    //                 for (dt_mod.compatible) |driver_compatible| {
+    //                     if (!std.mem.eql(u8, driver_compatible, device_compatible)) continue;
+    //
+    //                     dt_mod.init(dt, handle) catch |err| {
+    //                         std.log.err("failed to initialize {s}: {s}", .{ mod.module.name, @errorName(err) });
+    //                     };
+    //                     std.log.info("Module '{s}'({s}) initialized", .{ mod.module.name, node_name });
+    //
+    //                     return;
+    //                 }
+    //             },
+    //             else => {},
+    //         }
+    //     }
+    // }
+    //
+    // var compBuff: [256]u8 = undefined;
+    // var writer = std.Io.Writer.fixed(compBuff[0..]);
+    // compatible.print(&writer) catch @panic("compatible string too long");
+    // const allCompString = writer.buffered();
+    //
+    // std.log.warn(
+    //     "Compatible driver not found for '{s}' compatible: '{s}'",
+    //     .{ node_name, allCompString },
+    // );
 }
 
-pub fn initDriversFromDeviceTreeEarly(dt: *const DeviceTree) void {
-    for (dt.nodes.items, 0..) |*node, handle| {
-        if (node.getProperty(.interrupt_controller) == null) continue;
-        initDriverFromDeviceTree(dt, node, @intCast(handle));
-    }
-}
+// pub fn initDriversFromDeviceTreeEarly(dt: *const DeviceTree) void {
+//     for (dt.nodes.items, 0..) |*node, handle| {
+//         if (node.getProperty(.interrupt_controller) == null) continue;
+//         initDriverFromDeviceTree(dt, node, @intCast(handle));
+//     }
+// }
 
-pub fn initDriversFromDeviceTree(dt: *const DeviceTree) void {
+pub fn addDevices(dt: *const DeviceTree) !void {
+    // TODO: dont use objectcache
+    device_cache = slab_allocator.createObjectCache(device.Device);
     for (dt.nodes.items, 0..) |*node, handle| {
         if (node.getProperty(.interrupt_controller) != null) continue;
-        initDriverFromDeviceTree(dt, node, @intCast(handle));
+        try addDevice(dt, node, @intCast(handle));
     }
 }
 

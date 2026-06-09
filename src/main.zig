@@ -14,8 +14,9 @@ pub const processes = @import("processes.zig");
 pub const slab_allocator = @import("mem/slab_allocator.zig");
 pub const Thread = @import("Thread.zig");
 pub const cpio = @import("cpio.zig");
-pub const ramfs = @import("drivers/ramfs.zig");
 pub const fs = @import("fs.zig");
+pub const Module = @import("Module.zig");
+pub const device = @import("device.zig");
 
 const test_binary_file = @embedFile("shell");
 const test_archive = @embedFile("root.cpio");
@@ -70,13 +71,13 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     const dt = devicetree.readDeviceTreeBlob(static_mem_allocator, dt_ptr_virt) catch
         @panic("Failed to read device tree blob");
 
-    inline for (config.modules) |mod| {
-        if (!mod.enabled or mod.init_type != .always_run) continue;
-        mod.module.init(&dt) catch |err| {
-            std.log.err("failed to initialize {s}: {s}", .{ mod.name, @errorName(err) });
-        };
-        std.log.info("Module '{s}'(always run) initialized", .{mod.name});
-    }
+    // inline for (config.modules) |mod| {
+    //     if (!mod.enabled or mod.init_type != .always_run) continue;
+    //     mod.module.init(&dt) catch |err| {
+    //         std.log.err("failed to initialize {s}: {s}", .{ mod.name, @errorName(err) });
+    //     };
+    //     std.log.info("Module '{s}'(always run) initialized", .{mod.name});
+    // }
 
     const machine = dt.root().getProperty(.model) orelse @panic("Invalid device tree");
     std.log.info("Machine model: {s}", .{machine});
@@ -90,8 +91,14 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     static_mem_allocator.free(frame_regions);
 
     // find interrupt controllers first
-    devicetree.initDriversFromDeviceTreeEarly(&dt);
-    devicetree.initDriversFromDeviceTree(&dt);
+    // devicetree.initDriversFromDeviceTreeEarly(&dt);
+    devicetree.addDevices(&dt) catch @panic("TODO");
+    device.dumpDevices();
+
+    device.matchDeviceTreeDevices(&dt);
+
+    while (device.matchNonDeviceTreeDevices()) {}
+    device.dumpDevices();
 
     scheduler.init();
 
@@ -99,15 +106,7 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     fs.init();
 
-    var ram_file_system: fs.FileSystem = .{
-        .name = "ramfs",
-        .flags = .{
-            .no_device = true,
-        },
-        .mount_init = ramfs.init,
-    };
-
-    fs.registerFileSystem(&ram_file_system) catch @panic("Failed to register ramfs");
+    // fs.registerFileSystem(&ram_file_system) catch @panic("Failed to register ramfs");
     fs.dumpRegisteredFilesystems();
 
     var mount_table: fs.MountTable = .{

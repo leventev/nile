@@ -3,8 +3,11 @@
 //! https://www.pedestrian.com.cn/_downloads/6610dafab545af8b9f2f2de779c6012c/PCIE_V1.1.pdf
 
 const std = @import("std");
-const devicetree = @import("../dt/devicetree.zig");
-const mm = @import("../mem/mm.zig");
+const devicetree = @import("../../dt/devicetree.zig");
+const mm = @import("../../mem/mm.zig");
+const Module = @import("../../Module.zig");
+const device = @import("../../device.zig");
+const slab_allocator = @import("../../mem/slab_allocator.zig");
 
 /// Common header fields for every PCI device.
 /// All fields are required if not specified otherwise.
@@ -162,20 +165,20 @@ const CommonHeader = extern struct {
 
 inline fn configSpace(
     ecam_base_address: mm.VirtualAddress,
-    bus: u8,
-    device: u5,
-    function: u3,
+    bus_num: u8,
+    device_num: u5,
+    function_num: u3,
 ) []const u8 {
     const config_space_size = 4096;
     const shl = std.math.shl;
 
-    const offset = shl(u64, bus, 20) + shl(u64, device, 15) + shl(u64, function, 12);
+    const offset = shl(u64, bus_num, 20) + shl(u64, device_num, 15) + shl(u64, function_num, 12);
 
     const addr = ecam_base_address.add(offset);
     return @as([*]u8, @ptrFromInt(addr.asInt()))[0..config_space_size];
 }
 
-pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
+fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!void {
     const node = dt.nodes.items[handle];
 
     const ranges = node.getProperty(.ranges) orelse
@@ -187,20 +190,25 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
     const parent_size_cells = node.getSizeCellFromParent(dt);
     // TODO
     std.debug.assert(parent_address_cells <= 2 and parent_size_cells <= 2);
-    var reg_it = try reg.iterator(parent_address_cells, parent_size_cells);
+    var reg_it = reg.iterator(parent_address_cells, parent_size_cells) catch @panic("TODO");
 
-    const first_reg = reg_it.next() orelse return error.InvalidDeviceTre;
+    const first_reg = reg_it.next() orelse return error.InvalidDeviceTree;
 
     const ecam_base_phys = mm.PhysicalAddress.fromInt(@intCast(first_reg.address));
     const ecam_base_virt = mm.physicalToVirtualAddress(ecam_base_phys);
 
+    device.addBus(&pcie_bus);
+
+    device_cache = slab_allocator.createObjectCache(PCIDevice);
+    device_name_cache = slab_allocator.createObjectCache([11]u8);
+
     for (0..256) |bus| {
-        for (0..32) |device| {
+        for (0..32) |dev| {
             for (0..8) |function| {
                 const config_space = configSpace(
                     ecam_base_virt,
                     @intCast(bus),
-                    @intCast(device),
+                    @intCast(dev),
                     @intCast(function),
                 );
 
@@ -209,7 +217,23 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
                 const header = reader.takeStruct(CommonHeader, .little) catch @panic("TODO");
                 if (header.vendor_id == CommonHeader.no_device) continue;
 
-                std.log.debug("{}/{}/{}: {any}", .{ bus, device, function, header });
+                var pci_device = device_cache.alloc() catch @panic("TODO");
+                pci_device.bus_number = @intCast(bus);
+                pci_device.device_number = @intCast(dev);
+                pci_device.function_number = @intCast(function);
+                pci_device.id = .{
+                    .vendor_id = header.vendor_id,
+                    .device_id = header.device_id,
+                };
+                // TODO: allocate names properly
+                pci_device.device.match_table = .{ .bus = &pcie_bus };
+
+                var name_buff = device_name_cache.alloc() catch @panic("TODO");
+                pci_device.device.name = std.fmt.bufPrint(name_buff[0..name_buff.len], "pci/{x:02}:{x:02}.{}", .{ bus, dev, function }) catch @panic("TODO");
+
+                device.addDevice(&pci_device.device) catch @panic("TODO");
+
+                std.log.debug("{}/{}/{}: {any}", .{ bus, dev, function, header });
             }
         }
     }
@@ -218,3 +242,57 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
     _ = ecam_size;
     _ = ranges;
 }
+
+fn pciMatch(dev: *const device.Device, mod: *const Module) bool {
+    const pci_device: *const PCIDevice = @fieldParentPtr("device", dev);
+
+    const bus_info = mod.module_type.device_driver.bus;
+    std.debug.assert(@intFromPtr(bus_info.bus_type) == @intFromPtr(&pcie_bus));
+
+    const device_ids_ptr: [*]const PCIDevice.Id = @ptrCast(@alignCast(bus_info.device_ids));
+    const device_ids: []const PCIDevice.Id = device_ids_ptr[0..bus_info.device_id_count];
+
+    for (device_ids) |mod_dev_id| {
+        std.log.debug("PCI match {}:{} {}:{}", .{ mod_dev_id.vendor_id, mod_dev_id.device_id, pci_device.id.vendor_id, pci_device.id.device_id });
+        const vendor_match = pci_device.id.vendor_id == mod_dev_id.vendor_id;
+        const device_match = pci_device.id.device_id == mod_dev_id.device_id;
+        if (vendor_match and device_match)
+            return true;
+    }
+
+    return false;
+}
+
+pub const pcie_bus = device.Bus{
+    .name = "pcie",
+    .match = pciMatch,
+};
+
+pub const PCIDevice = struct {
+    id: Id,
+    bus_number: u8,
+    device_number: u5,
+    function_number: u3,
+    device: device.Device,
+
+    pub const Id = struct {
+        vendor_id: u16,
+        device_id: u16,
+    };
+};
+
+var device_cache: slab_allocator.ObjectCache(PCIDevice) = undefined;
+// 00:00.0 - 7 chars
+var device_name_cache: slab_allocator.ObjectCache([11]u8) = undefined;
+
+pub const module: Module = .{
+    .name = "pcie",
+    .module_type = .{
+        .device_driver = .{
+            .devicetree = .{
+                .compatible = &.{"pci-host-ecam-generic"},
+                .init = init,
+            },
+        },
+    },
+};

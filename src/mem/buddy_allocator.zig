@@ -228,13 +228,13 @@ pub fn init(regions: []const mm.MemoryRegion) void {
         global_buddy_allocator.addBlocksFromRegion(start_page_index, page_count);
     }
 
-    for (0.., global_buddy_allocator.orders) |i, order| {
-        std.log.info("Order #{}: {} free blocks", .{ i, order.free_block_count });
-        var block_list_node = order.list.first;
-        while (block_list_node) |list_node| : (block_list_node = list_node.next) {
-            std.log.info("addr: {x}", .{@intFromPtr(list_node)});
-        }
-    }
+    // for (0.., global_buddy_allocator.orders) |i, order| {
+    //     std.log.info("Order #{}: {} free blocks", .{ i, order.free_block_count });
+    //     var block_list_node = order.list.first;
+    //     while (block_list_node) |list_node| : (block_list_node = list_node.next) {
+    //         std.log.info("addr: {x}", .{@intFromPtr(list_node)});
+    //     }
+    // }
 
     std.log.info("Buddy allocator allocator initialized with {} frames ({} KiB) available", .{
         total_frames,

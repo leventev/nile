@@ -1,7 +1,8 @@
 const std = @import("std");
-const Path = @import("../Path.zig");
-const slab_allocator = @import("../mem/slab_allocator.zig");
-const fs = @import("../fs.zig");
+const Module = @import("../../Module.zig");
+const Path = @import("../../Path.zig");
+const slab_allocator = @import("../../mem/slab_allocator.zig");
+const fs = @import("../../fs.zig");
 
 // TODO: this is an abysmal solution and i am ashamed of myself. replace this with something nicer
 
@@ -123,3 +124,18 @@ pub fn init(internal_data: *anyopaque) fs.FileSystemError!void {
     const ramfs: *RamFs = @ptrCast(@alignCast(internal_data));
     return ramfs.init();
 }
+
+pub const module: Module = .{
+    .name = "ramfs",
+    .module_type = .{
+        .fs = &ram_file_system,
+    },
+};
+
+var ram_file_system: fs.FileSystem = .{
+    .name = "ramfs",
+    .flags = .{
+        .no_device = true,
+    },
+    .mount_init = init,
+};

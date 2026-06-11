@@ -283,6 +283,18 @@ pub fn deallocBlock(
     global_buddy_allocator.deallocBlock(block_address, block_order);
 }
 
+// TODO: maybe make it comptime T?
+pub fn blockOrderFromSize(size: u64) usize {
+    var order: usize = 0;
+    var s = size;
+    while (s > 4096) {
+        order += 1;
+        s = std.math.shr(u64, s, 1);
+    }
+
+    return order;
+}
+
 test "alloc basic" {
     const gpa = std.testing.allocator;
     const alloced_size = comptime std.math.shl(usize, 1, max_order) * mm.page_size;

@@ -230,9 +230,9 @@ pub const PCICapability = extern struct {
     };
 };
 
-const bar_type_mask: u32 = 0b110;
-const bar_type32 = 0b000;
-const bar_type64 = 0b100;
+pub const bar_type_mask: u32 = 0b110;
+pub const bar_type32 = 0b000;
+pub const bar_type64 = 0b100;
 
 /// Header type for general devices.
 /// All fields are required if not specified otherwise.

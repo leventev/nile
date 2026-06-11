@@ -87,6 +87,11 @@ pub const Sv39PhysicalAddress = packed struct(u64) {
         return fromInt(self.asInt() + offset);
     }
 
+    pub inline fn asPtr(self: Self, comptime T: type) T {
+        if (@typeInfo(T) != .pointer) @compileError("not a pointer");
+        return @ptrFromInt(self.asInt());
+    }
+
     pub inline fn isPageAligned(self: Self) bool {
         return self.offset == 0;
     }
@@ -111,6 +116,11 @@ pub const Sv39VirtualAddress = packed struct(u64) {
 
     pub inline fn add(self: Self, offset: u64) Self {
         return fromInt(self.asInt() + offset);
+    }
+
+    pub inline fn asPtr(self: Self, comptime T: type) T {
+        if (@typeInfo(T) != .pointer) @compileError("not a pointer");
+        return @ptrFromInt(self.asInt());
     }
 
     pub inline fn isPageAligned(self: Self) bool {

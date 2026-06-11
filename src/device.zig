@@ -4,8 +4,15 @@ const property = @import("dt/property.zig");
 const Module = @import("Module.zig");
 const devicetree = @import("dt/devicetree.zig");
 
+/// A bus that devices and drivers are associated with.
 pub const Bus = struct {
+    /// Name of the bus.
     name: []const u8,
+
+    /// Tries to match the device to the module by checking whether the device's ID
+    /// is compatible with the module's. The device must be associated with the bus.
+    /// The Device struct is usually encapsulated in a bigger bus specific struct
+    /// which can be obtained with @fieldParentPtr.
     match: *const fn (dev: *const Device, mod: *const Module) bool,
 };
 
@@ -25,7 +32,7 @@ pub fn addBus(bus: *const Bus) void {
 
 pub const Device = struct {
     name: []const u8,
-    matched: bool,
+    matched: bool = false,
     parent: ?*Device,
     match_table: union(enum) {
         devicetree: struct {
@@ -50,7 +57,7 @@ pub fn dumpDevices() void {
     }
 }
 
-pub fn addDevice(dev: *Device) !void {
+pub fn addDevice(dev: *Device) void {
     var next_ptr = &devices;
 
     while (next_ptr.*) |existing_dev| : (next_ptr = &existing_dev.next) {
@@ -61,7 +68,6 @@ pub fn addDevice(dev: *Device) !void {
 
     next_ptr.* = dev;
     dev.next = null;
-    dev.matched = false;
 }
 
 pub fn matchDeviceTreeDevices(dt: *const devicetree.DeviceTree) void {
@@ -151,7 +157,7 @@ pub fn matchNonDeviceTreeDevices() bool {
             const success = driver_bus_info.bus_type.match(device, module);
             if (!success) continue;
 
-            driver_bus_info.init();
+            driver_bus_info.init(device);
             module.initialized = true;
         }
     }

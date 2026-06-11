@@ -361,10 +361,12 @@ pub fn getFrameRegions(allocator: std.mem.Allocator, dt: *const devicetree.Devic
 const hhdm_start = if (builtin.is_test) 0 else 0xffffffc000000000;
 
 pub fn physicalToVirtualAddress(phys: PhysicalAddress) VirtualAddress {
+    // TODO: check whether the provided physical address is mapped in the HHDM region
     return VirtualAddress.fromInt(hhdm_start + phys.asInt());
 }
 
 pub fn virtualToPhysicalAddress(virt: VirtualAddress) PhysicalAddress {
+    // TODO: check whether the provided virtual address is in the HHDM region
     return PhysicalAddress.fromInt(virt.asInt() - hhdm_start);
 }
 

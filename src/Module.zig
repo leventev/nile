@@ -34,7 +34,9 @@ module_type: union(Type) {
             device_id_count: usize,
 
             /// The function that is called when a driver is successfully matched to a device.
-            init: *const fn () void,
+            /// The Device struct is usually encapsulated in a bigger bus specific struct
+            /// which can be obtained with @fieldParentPtr.
+            init: *const fn (device: *const device.Device) void,
         },
     },
     /// The module is a file system.

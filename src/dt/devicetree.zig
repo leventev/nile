@@ -355,7 +355,7 @@ fn addDevice(
         },
     };
 
-    try device.addDevice(dev);
+    device.addDevice(dev);
 
     // var it = compatible.iterator();
     // while (it.next()) |device_compatible| {

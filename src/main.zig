@@ -18,6 +18,7 @@ pub const fs = @import("fs.zig");
 pub const Module = @import("Module.zig");
 pub const device = @import("device.zig");
 pub const framebuffer = @import("framebuffer.zig");
+pub const pc_font = @import("pc_font.zig");
 
 const test_binary_file = @embedFile("shell");
 const test_archive = @embedFile("root.cpio");
@@ -72,14 +73,6 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     const dt = devicetree.readDeviceTreeBlob(static_mem_allocator, dt_ptr_virt) catch
         @panic("Failed to read device tree blob");
 
-    // inline for (config.modules) |mod| {
-    //     if (!mod.enabled or mod.init_type != .always_run) continue;
-    //     mod.module.init(&dt) catch |err| {
-    //         std.log.err("failed to initialize {s}: {s}", .{ mod.name, @errorName(err) });
-    //     };
-    //     std.log.info("Module '{s}'(always run) initialized", .{mod.name});
-    // }
-
     const machine = dt.root().getProperty(.model) orelse @panic("Invalid device tree");
     std.log.info("Machine model: {s}", .{machine});
 
@@ -92,7 +85,6 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     static_mem_allocator.free(frame_regions);
 
     // find interrupt controllers first
-    // devicetree.initDriversFromDeviceTreeEarly(&dt);
     devicetree.addDevices(&dt) catch @panic("TODO");
     device.dumpDevices();
 
@@ -104,18 +96,24 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     time.init(&dt) catch @panic("Failed to initialize timer");
 
+    pc_font.init();
+
     framebuffer.fillRect(0, 0, 500, 500, .{
         .red = 100,
         .green = 200,
         .blue = 50,
         .alpha = 255,
     });
+
     framebuffer.fillRect(300, 300, 400, 50, .{
         .red = 100,
         .green = 200,
         .blue = 250,
         .alpha = 255,
     });
+
+    // framebuffer.displayCharacter(10, 10, 'A');
+    framebuffer.printText(10, 10, "HELLO world :)");
 
     framebuffer.flush();
 

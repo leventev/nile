@@ -1,4 +1,5 @@
 const std = @import("std");
+const pc_font = @import("pc_font.zig");
 
 const log = std.log.scoped(.framebuffer);
 
@@ -108,6 +109,19 @@ pub fn flush() void {
 
     const fb = &framebuffers[0];
     fb.flush();
+}
+
+pub fn displayCharacter(x: usize, y: usize, ch: u8) void {
+    std.debug.assert(framebuffer_count > 0);
+
+    const fb = &framebuffers[0];
+    pc_font.displayChararcter(fb, x, y, ch);
+}
+
+pub fn printText(x: usize, y: usize, str: []const u8) void {
+    for (str, 0..) |ch, i| {
+        displayCharacter(x + i, y, ch);
+    }
 }
 
 const max_framebuffers = 4;

@@ -94,13 +94,6 @@ const PixelFormat = enum(u32) {
     rgbx = 134,
 };
 
-const RGBA = extern struct {
-    red: u8,
-    green: u8,
-    blue: u8,
-    alpha: u8,
-};
-
 const feature_virgl = 1 << 0;
 const feature_edid = 1 << 1;
 const feature_resource_uuid = 1 << 2;

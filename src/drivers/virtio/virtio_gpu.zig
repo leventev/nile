@@ -10,14 +10,25 @@ const virtio = @import("virtio.zig");
 const VirtioDevice = virtio.VirtioDevice;
 const VirtQueue = virtio.VirtQueue;
 
+/// Fixed sized header that is at the start of every request and response.
 const ControlHeader = extern struct {
+    /// Type of this header.
     header_type: Type,
+
     flags: Flags,
+
+    /// TODO: Fence id.
     fence_id: u64,
+
+    /// Context id. Only relevant in 3D.
     context_idx: u32,
+
+    /// TODO: Ring idx.
     ring_idx: u8,
+
     padding: [3]u8,
 
+    /// Header types.
     const Type = enum(u32) {
         command_get_display_info = 0x100,
         command_resource_create_2d,
@@ -68,70 +79,18 @@ const Rectangle = extern struct {
     height: u32,
 };
 
-const ResponseDisplayInfo = extern struct {
-    header: ControlHeader,
-    display: [max_scanout]extern struct {
-        rectangle: Rectangle,
-        enabled: u32,
-        flags: u32,
-    },
+/// Pixel format used by virtio-gpu
+const PixelFormat = enum(u32) {
+    bgra = 1,
+    bgrx = 2,
+    argb = 3,
+    xrgb = 4,
 
-    const max_scanout = 16;
-};
+    rgba = 67,
+    xbgr = 68,
 
-const ResourceCreate2D = extern struct {
-    header: ControlHeader,
-    resource_id: u32,
-    pixel_format: PixelFormat,
-    width: u32,
-    height: u32,
-
-    const PixelFormat = enum(u32) {
-        b8g8r8a8 = 1,
-        b8g8r8x8 = 2,
-        a8r8g8b8 = 3,
-        x8r8g8b8 = 4,
-
-        r8g8b8a8 = 67,
-        x8b8g8r8 = 68,
-
-        a8b8g8r8 = 121,
-        r8g8b8x8 = 134,
-    };
-};
-
-const ResourceAttachBacking = extern struct {
-    header: ControlHeader,
-    resource_id: u32,
-    memory_entry_count: u32,
-};
-
-const ResourceSetScanout = extern struct {
-    header: ControlHeader,
-    rectangle: Rectangle,
-    scanout_id: u32,
-    resource_id: u32,
-};
-
-const MemoryEntry = extern struct {
-    address: u64,
-    size: u32,
-    padding: u32,
-};
-
-const TransferToHost2D = extern struct {
-    header: ControlHeader,
-    rectangle: Rectangle,
-    offset: u64,
-    resource_id: u32,
-    padding: u32,
-};
-
-const ResourceFlush = extern struct {
-    header: ControlHeader,
-    rectangle: Rectangle,
-    resource_id: u32,
-    padding: u32,
+    abgr = 121,
+    rgbx = 134,
 };
 
 const RGBA = extern struct {
@@ -141,6 +100,13 @@ const RGBA = extern struct {
     alpha: u8,
 };
 
+const feature_virgl = 1 << 0;
+const feature_edid = 1 << 1;
+const feature_resource_uuid = 1 << 2;
+const feature_resource_blob = 1 << 3;
+const feature_context_init = 1 << 4;
+const feature_blob_alignment = 1 << 5;
+
 fn init(dev: *const device.Device) void {
     const pci_dev = pcie.pciDeviceFromDevice(dev);
     std.log.debug("VIRTIO GPU INIT: {x:02}:{x:02}.{}", .{
@@ -149,45 +115,47 @@ fn init(dev: *const device.Device) void {
         pci_dev.address.function,
     });
 
-    var virt_dev: VirtioDevice = undefined;
+    var gpu: VirtioGPU = undefined;
 
-    const init_ok = virtio.initializeVirtioDevice(pci_dev, &virt_dev);
+    const features = virtio.initializeVirtioDevice(pci_dev, &gpu.virtio_device, 0);
 
-    if (!init_ok) @panic("Failed to initialize VirtIO device");
+    gpu.negotiated_features = features orelse @panic("Failed to initialize VirtIO device");
 
     const control_queue_id = 0;
     const cursor_queue_id = 1;
 
-    var virt_queue_control = VirtQueue.setup(
-        virt_dev.common,
+    gpu.control_queue = VirtQueue.setup(
+        gpu.virtio_device.common,
         control_queue_id,
         null,
         .{ .no_interrupt = true },
     ) catch @panic("TODO");
 
-    const virt_queue_cursor = VirtQueue.setup(
-        virt_dev.common,
+    gpu.cursor_queue = VirtQueue.setup(
+        gpu.virtio_device.common,
         cursor_queue_id,
         null,
         .{ .no_interrupt = true },
     ) catch @panic("TODO");
 
-    _ = virt_queue_cursor;
+    gpu.virtio_device.common.device_status.driver_ok = true;
 
-    virt_dev.common.device_status.driver_ok = true;
+    const buffer_phys = buddy_allocator.allocBlock(0) catch unreachable;
+    gpu.builder.address = mm.physicalToVirtualAddress(buffer_phys);
+    gpu.builder.size = arch.page_size;
 
-    // TODO: zero descriptor table, available ring and used ring
+    const display_info_resp = gpu.getDisplayInfo() orelse @panic("Failed to get display info");
+    var display_rect: Rectangle = undefined;
+    var display_found = false;
 
-    // TODO:
-    const tmp_phys = buddy_allocator.allocBlock(0) catch unreachable;
-    const tmp_virt = mm.physicalToVirtualAddress(tmp_phys);
-    const buffer_addr = tmp_virt.asInt();
+    for (display_info_resp.display) |display| {
+        if (display.enabled != 0) {
+            display_rect = display.rectangle;
+            display_found = true;
+        }
+    }
 
-    const display_rect = getDisplayInfo(
-        &virt_queue_control,
-        &virt_dev,
-        buffer_addr,
-    ) orelse @panic("Failed to get display info");
+    if (!display_found) @panic("TODO");
 
     std.log.debug("display: {}x{}", .{ display_rect.width, display_rect.height });
 
@@ -195,12 +163,9 @@ fn init(dev: *const device.Device) void {
     // TODO:
     const scanout_id = 0;
 
-    const resource_ok = createResource2D(
-        &virt_queue_control,
-        &virt_dev,
-        buffer_addr,
+    const resource_ok = gpu.createResource2D(
         resource_id,
-        .r8g8b8a8,
+        .rgba,
         display_rect.width,
         display_rect.height,
     );
@@ -214,21 +179,11 @@ fn init(dev: *const device.Device) void {
     const framebuffer_phys = buddy_allocator.allocBlock(fb_block_order) catch @panic("TODO");
     const framebuffer_virt = mm.physicalToVirtualAddress(framebuffer_phys);
 
-    const attach_ok = attachResourceBacking(
-        &virt_queue_control,
-        &virt_dev,
-        buffer_addr,
-        resource_id,
-        framebuffer_phys.asInt(),
-        framebuffer_size,
-    );
+    const attach_ok = gpu.attachResourceBacking(resource_id, framebuffer_phys.asInt(), framebuffer_size);
 
     if (!attach_ok) @panic("Failed to attach resource backing");
 
-    const set_scanout_ok = setResourceScanout(
-        &virt_queue_control,
-        &virt_dev,
-        buffer_addr,
+    const set_scanout_ok = gpu.setResourceScanout(
         resource_id,
         scanout_id,
         display_rect,
@@ -248,10 +203,7 @@ fn init(dev: *const device.Device) void {
         }
     }
 
-    const transfer_ok = transferToHost2D(
-        &virt_queue_control,
-        &virt_dev,
-        buffer_addr,
+    const transfer_ok = gpu.transferToHost2D(
         resource_id,
         0,
         .{
@@ -264,226 +216,523 @@ fn init(dev: *const device.Device) void {
 
     if (!transfer_ok) @panic("Failed to transfer to host");
 
-    const flush_ok = flushResource(
-        &virt_queue_control,
-        &virt_dev,
-        buffer_addr,
-        resource_id,
-        display_rect,
-    );
+    const flush_ok = gpu.flushResource(resource_id, display_rect);
 
     if (!flush_ok) @panic("Failed to flush resource");
 }
 
-fn getDisplayInfo(
-    control_queue: *VirtQueue,
-    virt_dev: *VirtioDevice,
-    buffer_addr: usize,
-) ?Rectangle {
-    // TODO: check buffer size somehow
-    const request: *ControlHeader = @ptrFromInt(buffer_addr);
-    const response: *ResponseDisplayInfo = @ptrFromInt(buffer_addr + @sizeOf(ControlHeader));
+/// Describes a virtio-gpu device.
+pub const VirtioGPU = struct {
+    /// The underyling virtio-device.
+    virtio_device: VirtioDevice,
 
-    request.* = ControlHeader{
-        .header_type = .command_get_display_info,
-        .fence_id = 0,
-        .context_idx = 0,
-        .ring_idx = 0,
-        .flags = .{ .fence = false },
-        .padding = .{ 0, 0, 0 },
+    /// The control queue where we send requests and repsonses.
+    control_queue: VirtQueue,
+
+    /// Cursor queue for fast-tracking cursor commands.
+    cursor_queue: VirtQueue,
+
+    /// Features that were negotiated with the device.
+    negotiated_features: u128,
+
+    /// Used as a buffer for requests and responses. Allocated by the buddy allocator.
+    /// Basically a bump allocator.
+    builder: struct {
+        /// Virtual address of the buffer.
+        address: mm.VirtualAddress,
+
+        /// Size of the buffer.
+        size: usize,
+
+        /// Counter used when allocating.
+        counter: usize,
+
+        /// Reset counter to 0.
+        inline fn start(self: *@This()) void {
+            self.counter = 0;
+        }
+
+        /// Allocate space for the provided type and return a pointer to it.
+        inline fn get(self: *@This(), comptime T: type) *T {
+            const ptr: *T = @ptrFromInt(self.address.asInt() + self.counter);
+            self.counter += @sizeOf(T);
+            std.debug.assert(self.counter < self.size);
+
+            return ptr;
+        }
+    },
+
+    /// Response of the display info command.
+    pub const DisplayInfoResponse = extern struct {
+        header: ControlHeader,
+
+        /// Array of displays.
+        display: [max_scanout]extern struct {
+            /// Size of the display.
+            rectangle: Rectangle,
+
+            /// Whether the display is enabled.
+            enabled: u32,
+            flags: u32,
+        },
+
+        const max_scanout = 16;
     };
 
-    control_queue.writeNextDescriptor(0, request, @sizeOf(ControlHeader), 1, false);
-    control_queue.writeNextDescriptor(1, response, @sizeOf(ResponseDisplayInfo), null, true);
+    /// Queries information about the displays.
+    /// The return pointer is only valid until the next builder.start() call.
+    pub fn getDisplayInfo(self: *VirtioGPU) ?*DisplayInfoResponse {
+        self.builder.start();
+        const rqst = self.builder.get(ControlHeader);
+        const resp = self.builder.get(DisplayInfoResponse);
 
-    control_queue.queueChain(virt_dev, 0);
+        rqst.* = .{
+            .header_type = .command_get_display_info,
+            .fence_id = 0,
+            .context_idx = 0,
+            .ring_idx = 0,
+            .flags = .{ .fence = false },
+            .padding = .{ 0, 0, 0 },
+        };
 
-    if (response.header.header_type != .response_ok_display_info)
-        return null;
+        self.control_queue.writeDescriptor(0, rqst, @sizeOf(ControlHeader), 1, false);
+        self.control_queue.writeDescriptor(1, resp, @sizeOf(DisplayInfoResponse), null, true);
 
-    for (response.display) |display| {
-        if (display.enabled != 0) return display.rectangle;
+        self.control_queue.queueChain(&self.virtio_device, 0);
+
+        if (resp.header.header_type != .response_ok_display_info)
+            return null;
+
+        return resp;
     }
 
-    return null;
-}
+    /// Get EDID request.
+    const GetEDID = extern struct {
+        header: ControlHeader,
 
-fn createResource2D(
-    control_queue: *VirtQueue,
-    virt_dev: *VirtioDevice,
-    buffer_addr: usize,
-    resource_id: u32,
-    pixel_format: ResourceCreate2D.PixelFormat,
-    width: u32,
-    height: u32,
-) bool {
-    // TODO: check buffer size somehow
-    const request: *ResourceCreate2D = @ptrFromInt(buffer_addr);
-    const response: *ControlHeader = @ptrFromInt(buffer_addr + @sizeOf(ResourceCreate2D));
+        /// Selected display.
+        scanout: u32,
 
-    request.* = .{
-        .header = .{
-            .header_type = .command_resource_create_2d,
-            .fence_id = 0,
-            .context_idx = 0,
-            .ring_idx = 0,
-            .flags = .{ .fence = false },
-            .padding = .{ 0, 0, 0 },
-        },
-        .resource_id = resource_id,
-        .pixel_format = pixel_format,
-        .width = width,
-        .height = height,
+        padding: u32,
     };
 
-    control_queue.writeNextDescriptor(0, request, @sizeOf(ResourceCreate2D), 1, false);
-    control_queue.writeNextDescriptor(1, response, @sizeOf(ControlHeader), null, true);
+    /// Response to a get EDID command.
+    const GetEDIDResponse = extern struct {
+        header: ControlHeader,
+        size: u32,
+        padding: u32,
 
-    control_queue.queueChain(virt_dev, 0);
-
-    return response.header_type == .response_ok_nodata;
-}
-
-fn attachResourceBacking(
-    control_queue: *VirtQueue,
-    virt_dev: *VirtioDevice,
-    buffer_addr: usize,
-    resource_id: u32,
-    framebuffer_phys_addr: u64,
-    framebuffer_size: u32,
-) bool {
-    // TODO: check buffer size somehow
-    const request: *ResourceAttachBacking = @ptrFromInt(buffer_addr);
-    const mem_entry: *MemoryEntry = @ptrFromInt(buffer_addr + @sizeOf(ResourceAttachBacking));
-    const response_off = buffer_addr + @sizeOf(ResourceAttachBacking) + @sizeOf(MemoryEntry);
-    const response: *ControlHeader = @ptrFromInt(response_off);
-
-    request.* = .{
-        .header = .{
-            .header_type = .command_resource_attach_backing,
-            .fence_id = 0,
-            .context_idx = 0,
-            .ring_idx = 0,
-            .flags = .{ .fence = false },
-            .padding = .{ 0, 0, 0 },
-        },
-        .resource_id = resource_id,
-        .memory_entry_count = 1,
+        /// EDID data defined by VESA.
+        edid: [1024]u8,
     };
 
-    mem_entry.address = framebuffer_phys_addr;
-    mem_entry.size = framebuffer_size;
+    /// Queries the EDID information about the provided scanout.
+    /// If the EDID feature was not negotiated or the scanout number is invalid null is returned.
+    /// Otherise returns the successful response.
+    /// The return pointer is only valid until the next builder.start() call.
+    pub fn getEDID(self: *VirtioGPU, scanout: u32) ?*GetEDIDResponse {
+        if (self.negotiated_features & feature_edid == 0)
+            return null;
 
-    control_queue.writeNextDescriptor(0, request, @sizeOf(ResourceAttachBacking), 1, false);
-    control_queue.writeNextDescriptor(1, mem_entry, @sizeOf(MemoryEntry), 2, false);
-    control_queue.writeNextDescriptor(2, response, @sizeOf(ControlHeader), null, true);
+        self.builder.start();
+        const rqst = self.builder.get(GetEDID);
+        const resp = self.builder.get(GetEDIDResponse);
 
-    control_queue.queueChain(virt_dev, 0);
+        rqst.* = .{
+            .header = .{
+                .header_type = .command_get_edid,
+                .fence_id = 0,
+                .context_idx = 0,
+                .ring_idx = 0,
+                .flags = .{ .fence = false },
+                .padding = .{ 0, 0, 0 },
+            },
+            .scanout = scanout,
+            .padding = 0,
+        };
 
-    return response.header_type == .response_ok_nodata;
-}
+        self.control_queue.writeDescriptor(0, rqst, @sizeOf(GetEDID), 1, false);
+        self.control_queue.writeDescriptor(1, resp, @sizeOf(GetEDIDResponse), null, true);
 
-fn setResourceScanout(
-    control_queue: *VirtQueue,
-    virt_dev: *VirtioDevice,
-    buffer_addr: usize,
-    resource_id: u32,
-    scanout_id: u32,
-    rect: Rectangle,
-) bool {
-    // TODO: check buffer size somehow
-    const request: *ResourceSetScanout = @ptrFromInt(buffer_addr);
-    const response: *ControlHeader = @ptrFromInt(buffer_addr + @sizeOf(ResourceSetScanout));
+        self.control_queue.queueChain(&self.virtio_device, 0);
 
-    request.* = .{
-        .header = .{
-            .header_type = .command_set_scanout,
-            .fence_id = 0,
-            .context_idx = 0,
-            .ring_idx = 0,
-            .flags = .{ .fence = false },
-            .padding = .{ 0, 0, 0 },
-        },
-        .resource_id = resource_id,
-        .scanout_id = scanout_id,
-        .rectangle = rect,
+        if (resp.header.header_type != .response_ok_edid)
+            return null;
+
+        return resp;
+    }
+
+    /// 2D resouce create command.
+    const ResourceCreate2D = extern struct {
+        header: ControlHeader,
+
+        /// Requested resource id.
+        resource_id: u32,
+
+        /// Format of the pixel colors.
+        pixel_format: PixelFormat,
+
+        width: u32,
+        height: u32,
     };
 
-    control_queue.writeNextDescriptor(0, request, @sizeOf(ResourceSetScanout), 1, false);
-    control_queue.writeNextDescriptor(1, response, @sizeOf(ControlHeader), null, true);
+    /// Creates a width * height sized pixel_format resource on the device.
+    /// Returns whether the operation succeeded.
+    fn createResource2D(
+        self: *VirtioGPU,
+        resource_id: u32,
+        pixel_format: PixelFormat,
+        width: u32,
+        height: u32,
+    ) bool {
+        self.builder.start();
+        const rqst = self.builder.get(ResourceCreate2D);
+        const resp = self.builder.get(ControlHeader);
 
-    control_queue.queueChain(virt_dev, 0);
+        rqst.* = .{
+            .header = .{
+                .header_type = .command_resource_create_2d,
+                .fence_id = 0,
+                .context_idx = 0,
+                .ring_idx = 0,
+                .flags = .{ .fence = false },
+                .padding = .{ 0, 0, 0 },
+            },
+            .resource_id = resource_id,
+            .pixel_format = pixel_format,
+            .width = width,
+            .height = height,
+        };
 
-    return response.header_type == .response_ok_nodata;
-}
+        self.control_queue.writeDescriptor(0, rqst, @sizeOf(ResourceCreate2D), 1, false);
+        self.control_queue.writeDescriptor(1, resp, @sizeOf(ControlHeader), null, true);
 
-fn transferToHost2D(
-    control_queue: *VirtQueue,
-    virt_dev: *VirtioDevice,
-    buffer_addr: usize,
-    resource_id: u32,
-    offset: u64,
-    rect: Rectangle,
-) bool {
-    // TODO: check buffer size somehow
-    const request: *TransferToHost2D = @ptrFromInt(buffer_addr);
-    const response: *ControlHeader = @ptrFromInt(buffer_addr + @sizeOf(TransferToHost2D));
+        self.control_queue.queueChain(&self.virtio_device, 0);
 
-    request.* = .{
-        .header = .{
-            .header_type = .command_transfer_to_host_2d,
-            .fence_id = 0,
-            .context_idx = 0,
-            .ring_idx = 0,
-            .flags = .{ .fence = false },
-            .padding = .{ 0, 0, 0 },
-        },
-        .offset = offset,
-        .resource_id = resource_id,
-        .rectangle = rect,
-        .padding = 0,
+        return resp.header_type == .response_ok_nodata;
+    }
+
+    /// 2D resource destroy command.
+    const ResourceDestroy = extern struct {
+        header: ControlHeader,
+
+        /// Id of resource to destroy.
+        resource_id: u32,
+
+        padding: u32,
     };
 
-    control_queue.writeNextDescriptor(0, request, @sizeOf(TransferToHost2D), 1, false);
-    control_queue.writeNextDescriptor(1, response, @sizeOf(ControlHeader), null, true);
+    /// Sends a 2D resoure destory command. Returns whether the operation succeeded.
+    fn destroyResource(self: *VirtioGPU, resource_id: u32) bool {
+        self.builder.start();
+        const rqst = self.builder.get(ResourceDestroy);
+        const resp = self.builder.get(ControlHeader);
 
-    control_queue.queueChain(virt_dev, 0);
+        rqst.* = .{
+            .header = .{
+                .header_type = .command_resource_unref,
+                .fence_id = 0,
+                .context_idx = 0,
+                .ring_idx = 0,
+                .flags = .{ .fence = false },
+                .padding = .{ 0, 0, 0 },
+            },
+            .resource_id = resource_id,
+            .padding = 0,
+        };
 
-    return response.header_type == .response_ok_nodata;
-}
+        self.control_queue.writeDescriptor(0, rqst, @sizeOf(ResourceDestroy), 1, false);
+        self.control_queue.writeDescriptor(1, resp, @sizeOf(ControlHeader), null, true);
 
-fn flushResource(
-    control_queue: *VirtQueue,
-    virt_dev: *VirtioDevice,
-    buffer_addr: usize,
-    resource_id: u32,
-    rect: Rectangle,
-) bool {
-    // TODO: check buffer size somehow
-    const request: *ResourceFlush = @ptrFromInt(buffer_addr);
-    const response: *ControlHeader = @ptrFromInt(buffer_addr + @sizeOf(ResourceFlush));
+        self.control_queue.queueChain(&self.virtio_device, 0);
 
-    request.* = .{
-        .header = .{
-            .header_type = .command_resource_flush,
-            .fence_id = 0,
-            .context_idx = 0,
-            .ring_idx = 0,
-            .flags = .{ .fence = false },
-            .padding = .{ 0, 0, 0 },
-        },
-        .resource_id = resource_id,
-        .rectangle = rect,
-        .padding = 0,
+        return resp.header_type == .response_ok_nodata;
+    }
+
+    /// Resoure set scanout commnad.
+    const ResourceSetScanout = extern struct {
+        header: ControlHeader,
+
+        /// Rectangle of the resource.
+        rectangle: Rectangle,
+
+        /// Selected display.
+        scanout_id: u32,
+
+        /// Resource for the scanout to use.
+        resource_id: u32,
     };
 
-    control_queue.writeNextDescriptor(0, request, @sizeOf(ResourceFlush), 1, false);
-    control_queue.writeNextDescriptor(1, response, @sizeOf(ControlHeader), null, true);
+    /// Set which resource the scanout is displaying. Returns whether the operation succeeded.
+    fn setResourceScanout(
+        self: *VirtioGPU,
+        resource_id: u32,
+        scanout_id: u32,
+        rect: Rectangle,
+    ) bool {
+        self.builder.start();
+        const rqst = self.builder.get(ResourceSetScanout);
+        const resp = self.builder.get(ControlHeader);
 
-    control_queue.queueChain(virt_dev, 0);
+        rqst.* = .{
+            .header = .{
+                .header_type = .command_set_scanout,
+                .fence_id = 0,
+                .context_idx = 0,
+                .ring_idx = 0,
+                .flags = .{ .fence = false },
+                .padding = .{ 0, 0, 0 },
+            },
+            .resource_id = resource_id,
+            .scanout_id = scanout_id,
+            .rectangle = rect,
+        };
 
-    return response.header_type == .response_ok_nodata;
-}
+        self.control_queue.writeDescriptor(0, rqst, @sizeOf(ResourceSetScanout), 1, false);
+        self.control_queue.writeDescriptor(1, resp, @sizeOf(ControlHeader), null, true);
+
+        self.control_queue.queueChain(&self.virtio_device, 0);
+
+        return resp.header_type == .response_ok_nodata;
+    }
+
+    /// Transfer to host 2D command .
+    const TransferToHost2D = extern struct {
+        header: ControlHeader,
+
+        /// Part of the resource which is transferred.
+        rectangle: Rectangle,
+
+        /// Destination offset.
+        offset: u64,
+
+        /// The resource to transfer from.
+        resource_id: u32,
+
+        padding: u32,
+    };
+
+    /// Transfers a part (or whole) of the resource to the host.
+    /// Returns whether the operation succeeded.
+    fn transferToHost2D(self: *VirtioGPU, resource_id: u32, offset: u64, rect: Rectangle) bool {
+        self.builder.start();
+        const rqst = self.builder.get(TransferToHost2D);
+        const resp = self.builder.get(ControlHeader);
+
+        rqst.* = .{
+            .header = .{
+                .header_type = .command_transfer_to_host_2d,
+                .fence_id = 0,
+                .context_idx = 0,
+                .ring_idx = 0,
+                .flags = .{ .fence = false },
+                .padding = .{ 0, 0, 0 },
+            },
+            .offset = offset,
+            .resource_id = resource_id,
+            .rectangle = rect,
+            .padding = 0,
+        };
+
+        self.control_queue.writeDescriptor(0, rqst, @sizeOf(TransferToHost2D), 1, false);
+        self.control_queue.writeDescriptor(1, resp, @sizeOf(ControlHeader), null, true);
+
+        self.control_queue.queueChain(&self.virtio_device, 0);
+
+        return resp.header_type == .response_ok_nodata;
+    }
+
+    /// Flush resource command.
+    const ResourceFlush = extern struct {
+        header: ControlHeader,
+
+        /// Size of resource.
+        rectangle: Rectangle,
+
+        /// Resource to flush.
+        resource_id: u32,
+
+        padding: u32,
+    };
+
+    /// Flushes a resource to the scanouts it is associated with.
+    /// Returns whether the operation succeeded.
+    fn flushResource(
+        self: *VirtioGPU,
+        resource_id: u32,
+        rect: Rectangle,
+    ) bool {
+        self.builder.start();
+        const rqst = self.builder.get(ResourceFlush);
+        const resp = self.builder.get(ControlHeader);
+
+        rqst.* = .{
+            .header = .{
+                .header_type = .command_resource_flush,
+                .fence_id = 0,
+                .context_idx = 0,
+                .ring_idx = 0,
+                .flags = .{ .fence = false },
+                .padding = .{ 0, 0, 0 },
+            },
+            .resource_id = resource_id,
+            .rectangle = rect,
+            .padding = 0,
+        };
+
+        self.control_queue.writeDescriptor(0, rqst, @sizeOf(ResourceFlush), 1, false);
+        self.control_queue.writeDescriptor(1, resp, @sizeOf(ControlHeader), null, true);
+
+        self.control_queue.queueChain(&self.virtio_device, 0);
+
+        return resp.header_type == .response_ok_nodata;
+    }
+
+    /// Attach resource backing commnad.
+    const ResourceAttachBacking = extern struct {
+        header: ControlHeader,
+
+        /// Resource which we are attaching a backing to.
+        resource_id: u32,
+
+        /// Number of MemoryEntry-s that follow this struct.
+        memory_entry_count: u32,
+    };
+
+    /// Attaches a framebuffer to a resource. Returns whether the operation succeeded.
+    fn attachResourceBacking(
+        self: *VirtioGPU,
+        resource_id: u32,
+        framebuffer_phys_addr: u64,
+        framebuffer_size: u32,
+    ) bool {
+        const MemoryEntry = extern struct {
+            address: u64,
+            size: u32,
+            padding: u32,
+        };
+
+        self.builder.start();
+        const rqst = self.builder.get(ResourceAttachBacking);
+        const mem_entry = self.builder.get(MemoryEntry);
+        const resp = self.builder.get(ControlHeader);
+
+        rqst.* = .{
+            .header = .{
+                .header_type = .command_resource_attach_backing,
+                .fence_id = 0,
+                .context_idx = 0,
+                .ring_idx = 0,
+                .flags = .{ .fence = false },
+                .padding = .{ 0, 0, 0 },
+            },
+            .resource_id = resource_id,
+            .memory_entry_count = 1,
+        };
+
+        mem_entry.address = framebuffer_phys_addr;
+        mem_entry.size = framebuffer_size;
+
+        self.control_queue.writeDescriptor(0, rqst, @sizeOf(ResourceAttachBacking), 1, false);
+        self.control_queue.writeDescriptor(1, mem_entry, @sizeOf(MemoryEntry), 2, false);
+        self.control_queue.writeDescriptor(2, resp, @sizeOf(ControlHeader), null, true);
+
+        self.control_queue.queueChain(&self.virtio_device, 0);
+
+        return resp.header_type == .response_ok_nodata;
+    }
+
+    /// Detach resource backing command.
+    const ResourceDetachBacking = extern struct {
+        header: ControlHeader,
+        resource_id: u32,
+        padding: u32,
+    };
+
+    /// Detaches the framebuffer attached to a resource. Returns whether the operation scuceeded.
+    fn detachResourceBacking(self: *VirtioGPU, resource_id: u32) bool {
+        self.builder.start();
+        const rqst = self.builder.get(ResourceDetachBacking);
+        const resp = self.builder.get(ControlHeader);
+
+        rqst.* = .{
+            .header = .{
+                .header_type = .command_resource_detach_backing,
+                .fence_id = 0,
+                .context_idx = 0,
+                .ring_idx = 0,
+                .flags = .{ .fence = false },
+                .padding = .{ 0, 0, 0 },
+            },
+            .resource_id = resource_id,
+            .padding = 0,
+        };
+
+        self.control_queue.writeDescriptor(0, rqst, @sizeOf(ResourceDetachBacking), 1, false);
+        self.control_queue.writeDescriptor(1, resp, @sizeOf(ControlHeader), null, true);
+
+        self.control_queue.queueChain(&self.virtio_device, 0);
+
+        return resp.header_type == .response_ok_nodata;
+    }
+
+    // TODO: missing get_capset_info and get_capset
+
+    /// Resource assign UUID command.
+    const ResourceAssignUUID = extern struct {
+        header: ControlHeader,
+
+        /// Which resource to assign a UUID to.
+        resource_id: u32,
+
+        padding: u32,
+    };
+
+    /// Resource assign UUID command response.
+    const ResourceAssignUUIDResponse = extern struct {
+        header: ControlHeader,
+        uuid: [8]u8,
+    };
+
+    /// Assigns a UUID to a resource. Returns the response.
+    /// If the resource UUID feature was not negotiated
+    /// or the scanout number is invalid then null is returned.
+    /// Otherise returns the successful response.
+    /// The return pointer is only valid until the next builder.start() call.
+    fn assignResourceUUID(self: *VirtioGPU, resource_id: u32) ?*ResourceAssignUUIDResponse {
+        if (self.negotiated_features & feature_resource_uuid == 0)
+            return null;
+
+        self.builder.start();
+        const rqst = self.builder.get(ResourceAssignUUID);
+        const resp = self.builder.get(ResourceAssignUUIDResponse);
+
+        rqst.* = .{
+            .header = .{
+                .header_type = .command_resource_assign_uuid,
+                .fence_id = 0,
+                .context_idx = 0,
+                .ring_idx = 0,
+                .flags = .{ .fence = false },
+                .padding = .{ 0, 0, 0 },
+            },
+            .resource_id = resource_id,
+            .padding = 0,
+        };
+
+        self.control_queue.writeDescriptor(0, rqst, @sizeOf(ResourceAssignUUID), 1, false);
+        self.control_queue.writeDescriptor(1, resp, @sizeOf(ResourceAssignUUIDResponse), null, true);
+
+        self.control_queue.queueChain(&self.virtio_device, 0);
+
+        if (resp.header_type != .response_ok_resource_uuid)
+            return null;
+
+        return resp;
+    }
+
+    // TODO: missing resource_create_blob and set_scanout_blob
+};
 
 const device_ids: []const pcie.PCIDevice.Id = &.{
     .{ .vendor_id = 0x1af4, .device_id = 0x1050 },

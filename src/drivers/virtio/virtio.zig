@@ -1,5 +1,5 @@
 //! https://www.redhat.com/en/blog/virtqueues-and-virtio-ring-how-data-travels
-//! https://docs.oasis-open.org/virtio/virtio/v1.4/virtio-v1.4.html
+//! https://docs.oasis-open.org/virtio/virtio/v1.4/virtio-v1.4.pdf
 
 const std = @import("std");
 const pcie = @import("../bus/pcie.zig");
@@ -255,8 +255,26 @@ pub const VirtioDevice = struct {
     const max_vendor_specific_count = 8;
 };
 
-/// Initializes a virtio device on a PCI bus. Returns whether the initialization succeeded.
-pub fn initializeVirtioDevice(pci_dev: *const pcie.PCIDevice, virt_dev: *VirtioDevice) bool {
+pub const feature_indirect_descriptors = 1 << 28;
+pub const feature_event_index = 1 << 29;
+pub const feature_version_1 = 1 << 32;
+pub const feature_access_platform = 1 << 33;
+pub const feature_ring_packed = 1 << 34;
+pub const feature_in_order = 1 << 35;
+pub const feature_order_platform = 1 << 36;
+pub const feature_sr_iov = 1 << 37;
+pub const feature_notification_data = 1 << 38;
+pub const feature_notification_config_data = 1 << 39;
+pub const feature_ring_reset = 1 << 40;
+pub const feature_admin_virtqueue = 1 << 41;
+pub const feature_suspend = 1 << 43;
+
+/// Initializes a virtio device on a PCI bus. Returns the negotiated features.
+pub fn initializeVirtioDevice(
+    pci_dev: *const pcie.PCIDevice,
+    virt_dev: *VirtioDevice,
+    device_feature_bits: u128,
+) ?u128 {
     const cfg_space = pcie.ConfigurationSpace.fromAddress(pci_dev.address);
     const header = cfg_space.generalHeader();
 
@@ -331,29 +349,53 @@ pub fn initializeVirtioDevice(pci_dev: *const pcie.PCIDevice, virt_dev: *VirtioD
 
     if (!common_found) {
         log.err("Common capability not found", .{});
-        return false;
+        return null;
     }
     if (!notify_found) {
         log.err("Notify capability not found", .{});
-        return false;
+        return null;
     }
     if (!isr_found) {
         log.err("ISR capability not found", .{});
-        return false;
+        return null;
     }
+
+    const requested_dev_indep_features = feature_version_1;
+    const requested_features = requested_dev_indep_features | device_feature_bits;
 
     virt_dev.common.device_status = .reset;
     virt_dev.common.device_status.acknowledge = true;
     virt_dev.common.device_status.driver = true;
+
+    const negotiatied_features = negotiateFeatures(virt_dev.common, requested_features);
+
     virt_dev.common.device_status.features_ok = true;
 
-    // TODO: negotiate features
-    virt_dev.common.device_feature_select = 0;
-    virt_dev.common.device_feature = 0;
-
+    // check whether the device accepted the features
     std.debug.assert(virt_dev.common.device_status.features_ok);
 
-    return true;
+    return negotiatied_features;
+}
+
+/// Read the feature bits the device supports then set the feature bits that the
+/// driver requested and the vice supports. Returns the negotiated feature bits.
+fn negotiateFeatures(common: *VirtioPCICommon, requested_features: u128) u128 {
+    var negotiated_total: u128 = 0;
+    for (0..4) |i| {
+        common.device_feature_select = @intCast(i);
+        const offered = common.device_feature;
+
+        const requested_selected: u32 = @truncate(std.math.shr(u128, requested_features, i * 32));
+        const negotiated = requested_selected & offered;
+
+        common.driver_feature_select = @intCast(i);
+        common.driver_feature = negotiated;
+
+        negotiated_total |= negotiated;
+        negotiated_total = std.math.shl(u128, negotiated, 32);
+    }
+
+    return negotiated_total;
 }
 
 /// Note that while the encapsulated structures are defined by the virtio standard,
@@ -407,7 +449,7 @@ pub const VirtQueue = struct {
     }
 
     /// Writes one element of a buffer chain.
-    pub fn writeNextDescriptor(
+    pub fn writeDescriptor(
         self: *VirtQueue,
         descriptor_id: u16,
         ptr: *anyopaque,

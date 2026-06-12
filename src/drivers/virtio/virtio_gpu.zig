@@ -7,7 +7,7 @@ const buddy_allocator = @import("../../mem/buddy_allocator.zig");
 const arch = @import("../../arch/arch.zig");
 const virtio = @import("virtio.zig");
 
-const Capabilities = virtio.Capabilities;
+const VirtioDevice = virtio.VirtioDevice;
 const VirtQueue = virtio.VirtQueue;
 
 const ControlHeader = extern struct {
@@ -149,9 +149,9 @@ fn init(dev: *const device.Device) void {
         pci_dev.address.function,
     });
 
-    var caps: Capabilities = undefined;
+    var virt_dev: VirtioDevice = undefined;
 
-    const init_ok = virtio.initializeVirtioDevice(pci_dev, &caps);
+    const init_ok = virtio.initializeVirtioDevice(pci_dev, &virt_dev);
 
     if (!init_ok) @panic("Failed to initialize VirtIO device");
 
@@ -159,20 +159,22 @@ fn init(dev: *const device.Device) void {
     const cursor_queue_id = 1;
 
     var virt_queue_control = VirtQueue.setup(
-        caps.common,
+        virt_dev.common,
         control_queue_id,
         null,
+        .{ .no_interrupt = true },
     ) catch @panic("TODO");
 
     const virt_queue_cursor = VirtQueue.setup(
-        caps.common,
+        virt_dev.common,
         cursor_queue_id,
         null,
+        .{ .no_interrupt = true },
     ) catch @panic("TODO");
 
     _ = virt_queue_cursor;
 
-    caps.common.device_status.driver_ok = true;
+    virt_dev.common.device_status.driver_ok = true;
 
     // TODO: zero descriptor table, available ring and used ring
 
@@ -183,7 +185,7 @@ fn init(dev: *const device.Device) void {
 
     const display_rect = getDisplayInfo(
         &virt_queue_control,
-        &caps,
+        &virt_dev,
         buffer_addr,
     ) orelse @panic("Failed to get display info");
 
@@ -195,7 +197,7 @@ fn init(dev: *const device.Device) void {
 
     const resource_ok = createResource2D(
         &virt_queue_control,
-        &caps,
+        &virt_dev,
         buffer_addr,
         resource_id,
         .r8g8b8a8,
@@ -214,7 +216,7 @@ fn init(dev: *const device.Device) void {
 
     const attach_ok = attachResourceBacking(
         &virt_queue_control,
-        &caps,
+        &virt_dev,
         buffer_addr,
         resource_id,
         framebuffer_phys.asInt(),
@@ -225,7 +227,7 @@ fn init(dev: *const device.Device) void {
 
     const set_scanout_ok = setResourceScanout(
         &virt_queue_control,
-        &caps,
+        &virt_dev,
         buffer_addr,
         resource_id,
         scanout_id,
@@ -248,7 +250,7 @@ fn init(dev: *const device.Device) void {
 
     const transfer_ok = transferToHost2D(
         &virt_queue_control,
-        &caps,
+        &virt_dev,
         buffer_addr,
         resource_id,
         0,
@@ -264,7 +266,7 @@ fn init(dev: *const device.Device) void {
 
     const flush_ok = flushResource(
         &virt_queue_control,
-        &caps,
+        &virt_dev,
         buffer_addr,
         resource_id,
         display_rect,
@@ -275,7 +277,7 @@ fn init(dev: *const device.Device) void {
 
 fn getDisplayInfo(
     control_queue: *VirtQueue,
-    caps: *Capabilities,
+    virt_dev: *VirtioDevice,
     buffer_addr: usize,
 ) ?Rectangle {
     // TODO: check buffer size somehow
@@ -294,7 +296,7 @@ fn getDisplayInfo(
     control_queue.writeNextDescriptor(0, request, @sizeOf(ControlHeader), 1, false);
     control_queue.writeNextDescriptor(1, response, @sizeOf(ResponseDisplayInfo), null, true);
 
-    control_queue.queueChain(caps, 0);
+    control_queue.queueChain(virt_dev, 0);
 
     if (response.header.header_type != .response_ok_display_info)
         return null;
@@ -308,7 +310,7 @@ fn getDisplayInfo(
 
 fn createResource2D(
     control_queue: *VirtQueue,
-    caps: *Capabilities,
+    virt_dev: *VirtioDevice,
     buffer_addr: usize,
     resource_id: u32,
     pixel_format: ResourceCreate2D.PixelFormat,
@@ -337,14 +339,14 @@ fn createResource2D(
     control_queue.writeNextDescriptor(0, request, @sizeOf(ResourceCreate2D), 1, false);
     control_queue.writeNextDescriptor(1, response, @sizeOf(ControlHeader), null, true);
 
-    control_queue.queueChain(caps, 0);
+    control_queue.queueChain(virt_dev, 0);
 
     return response.header_type == .response_ok_nodata;
 }
 
 fn attachResourceBacking(
     control_queue: *VirtQueue,
-    caps: *Capabilities,
+    virt_dev: *VirtioDevice,
     buffer_addr: usize,
     resource_id: u32,
     framebuffer_phys_addr: u64,
@@ -376,14 +378,14 @@ fn attachResourceBacking(
     control_queue.writeNextDescriptor(1, mem_entry, @sizeOf(MemoryEntry), 2, false);
     control_queue.writeNextDescriptor(2, response, @sizeOf(ControlHeader), null, true);
 
-    control_queue.queueChain(caps, 0);
+    control_queue.queueChain(virt_dev, 0);
 
     return response.header_type == .response_ok_nodata;
 }
 
 fn setResourceScanout(
     control_queue: *VirtQueue,
-    caps: *Capabilities,
+    virt_dev: *VirtioDevice,
     buffer_addr: usize,
     resource_id: u32,
     scanout_id: u32,
@@ -410,14 +412,14 @@ fn setResourceScanout(
     control_queue.writeNextDescriptor(0, request, @sizeOf(ResourceSetScanout), 1, false);
     control_queue.writeNextDescriptor(1, response, @sizeOf(ControlHeader), null, true);
 
-    control_queue.queueChain(caps, 0);
+    control_queue.queueChain(virt_dev, 0);
 
     return response.header_type == .response_ok_nodata;
 }
 
 fn transferToHost2D(
     control_queue: *VirtQueue,
-    caps: *Capabilities,
+    virt_dev: *VirtioDevice,
     buffer_addr: usize,
     resource_id: u32,
     offset: u64,
@@ -445,14 +447,14 @@ fn transferToHost2D(
     control_queue.writeNextDescriptor(0, request, @sizeOf(TransferToHost2D), 1, false);
     control_queue.writeNextDescriptor(1, response, @sizeOf(ControlHeader), null, true);
 
-    control_queue.queueChain(caps, 0);
+    control_queue.queueChain(virt_dev, 0);
 
     return response.header_type == .response_ok_nodata;
 }
 
 fn flushResource(
     control_queue: *VirtQueue,
-    caps: *Capabilities,
+    virt_dev: *VirtioDevice,
     buffer_addr: usize,
     resource_id: u32,
     rect: Rectangle,
@@ -478,7 +480,7 @@ fn flushResource(
     control_queue.writeNextDescriptor(0, request, @sizeOf(ResourceFlush), 1, false);
     control_queue.writeNextDescriptor(1, response, @sizeOf(ControlHeader), null, true);
 
-    control_queue.queueChain(caps, 0);
+    control_queue.queueChain(virt_dev, 0);
 
     return response.header_type == .response_ok_nodata;
 }

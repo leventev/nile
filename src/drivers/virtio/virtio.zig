@@ -7,6 +7,8 @@ const mm = @import("../../mem/mm.zig");
 const arch = @import("../../arch/arch.zig");
 const buddy_allocator = @import("../../mem/buddy_allocator.zig");
 
+const log = std.log.scoped(.virtio);
+
 /// Describes a VIRTIO capability.
 /// Linked list whose head is contained in the PCI general header.
 pub const VirtioPCICapability = extern struct {
@@ -39,11 +41,46 @@ pub const VirtioPCICapability = extern struct {
         shared_memory = 8,
         vendor = 9,
     };
+
+    /// Returns the physical address of bar + offset
+    fn getPhysicalAddress(
+        self: *VirtioPCICapability,
+        general_header: *pcie.GeneralHeaderType,
+    ) mm.PhysicalAddress {
+        // TODO: would this work on 32 bit?
+        const bar32 = general_header.bars[self.bar];
+        const bar32_addr = bar32 & ~@as(u64, 0b1111);
+
+        const bar_addr = if (bar32 & pcie.bar_type_mask == pcie.bar_type32)
+            bar32_addr
+        else if (bar32 & pcie.bar_type_mask == pcie.bar_type64)
+            std.math.shl(u64, general_header.bars[self.bar + 1], 32) + bar32_addr
+        else
+            @panic("Invalid BAR type");
+
+        return .fromInt(bar_addr + self.offset);
+    }
+};
+
+/// 64 bit extension of VirtioPCICapability.
+pub const VirtioPCICapability64 = extern struct {
+    /// Base capability.
+    cap: VirtioPCICapability,
+
+    /// Upper 32 bits of the offset.
+    offset_high: u32,
+
+    /// Upper 32 bits of the size.
+    size_high: u32,
 };
 
 /// Notification capability structure. It immediately follows the PCI capability header.
 pub const VirtioPCINotification = extern struct {
+    /// Base capability.
     pci_capability: VirtioPCICapability,
+
+    /// Size of an entry in the notifications array.
+    /// If zero all virtqueues share the same entry.
     notification_offset_multiplier: u32,
 };
 
@@ -84,7 +121,7 @@ pub const VirtioPCICommon = extern struct {
     /// The size of the selected virtqueue.
     /// On reset it is set to the maximum queue size supported.
     /// A queue size of 0 means the queue is unavabile.
-    queue_size: u16,
+    queue_count: u16,
 
     /// Set by the driver for virtqueue notifications.
     queue_msix_vector: u16,
@@ -94,7 +131,7 @@ pub const VirtioPCICommon = extern struct {
 
     /// Offset in notification_offset_multiplier units
     /// from the start of the Notification structure.
-    queue_notify_off: u16,
+    queue_notify_offset: u16,
 
     /// Physical address of Descriptor Area.
     descriptor_queue: u64,
@@ -130,73 +167,191 @@ pub const VirtioPCICommon = extern struct {
     };
 };
 
-pub const Capabilities = struct {
-    common: *VirtioPCICommon,
-    notification: *const VirtioPCINotification,
-    notification_base_addr: mm.VirtualAddress,
+/// Vendor specific PCI capability. It immediately follows the PCI capability header.
+pub const VirtioPCIVendor = extern struct {
+    /// Base capability.
+    cap: VirtioPCICapability,
+
+    /// Identifies the structure.
+    configuration_type: u8,
+
+    /// Identifies the vendor specific format.
+    /// Uses the PCI-SIG assigned vendor IDs.
+    vendor_id: u16,
 };
 
-pub fn initializeVirtioDevice(pci_dev: *const pcie.PCIDevice, caps: *Capabilities) bool {
+// TODO: support more transport modes other than PCI
+
+/// Describes a Virtio device.
+pub const VirtioDevice = struct {
+    /// The common PCI capability, the data it points to is the main
+    /// configuration structure for a virtio device.
+    common_capability: *const VirtioPCICapability,
+
+    /// Common configuration structure.
+    common: *VirtioPCICommon,
+
+    /// The notification PCI capability, after the capability structure
+    /// is the notification multiplier. The data it points to is an array
+    /// of u16s (but padded to notification multiplier size) and the index
+    /// is the notify_off field of a virtqueue.
+    notification_capability: *const VirtioPCINotification,
+
+    /// Base address of the notification array.
+    notification_base: mm.VirtualAddress,
+
+    // TODO: the specification is very vague and talks about an 8 bit status
+    // while the table they show is 32 bits wide
+    isr_capability: *const VirtioPCICapability,
+
+    // TODO:
+    isr_base: mm.VirtualAddress,
+
+    /// The device specific PCI capability. The data it points to is
+    /// device specific configuration.
+    device_specific: ?struct {
+        /// Capability
+        capability: *const VirtioPCICapability,
+
+        /// Address of device specific structure within the BAR.
+        base: mm.VirtualAddress,
+    },
+
+    /// Shared memory regions allocated by the device.
+    /// They reside in the BAR described by the capability.
+    shared_memory: [max_shared_memory_count]struct {
+        /// Shared memory capability.
+        cap: *const VirtioPCICapability64,
+
+        /// The address inside the BAR.
+        address: mm.VirtualAddress,
+
+        /// The size of the shared memory region.
+        size: u64,
+    },
+
+    /// The number of shared memory regions the device provided.
+    shared_memory_count: usize,
+
+    /// Optional vendor specific capability.
+    /// It can be pointer casted to the vendor specific structure.
+    vendor: [max_vendor_specific_count]struct {
+        /// Vendor capability.
+        capability: *const VirtioPCIVendor,
+
+        /// Address of vendor specific structure within the BAR.
+        address: mm.VirtualAddress,
+    },
+
+    /// The number of vendor specific structure the device provided.
+    vendor_specific_count: usize,
+
+    /// This was chosen arbitrarily, there could possibly be
+    /// more regions than this.
+    const max_shared_memory_count = 8;
+
+    /// This was chosen arbitrarily, there could possibly be more
+    /// vendor specific structures than this.
+    const max_vendor_specific_count = 8;
+};
+
+/// Initializes a virtio device on a PCI bus. Returns whether the initialization succeeded.
+pub fn initializeVirtioDevice(pci_dev: *const pcie.PCIDevice, virt_dev: *VirtioDevice) bool {
     const cfg_space = pcie.ConfigurationSpace.fromAddress(pci_dev.address);
     const header = cfg_space.generalHeader();
 
-    // TODO: check whether we found it
+    var common_found = false;
+    var notify_found = false;
+    var isr_found = false;
+    virt_dev.shared_memory_count = 0;
+    virt_dev.vendor_specific_count = 0;
+    virt_dev.device_specific = null;
 
     var cap_it = pcie.PCICapability.iterator(cfg_space, header.capabilities_pointer);
     while (cap_it.next()) |capability| {
         if (capability.vendor_id != .vendor_specific) continue;
 
         const virtio_cap: *VirtioPCICapability = @ptrCast(@alignCast(capability));
-
-        std.log.debug("{any}", .{virtio_cap});
+        const data_phys = virtio_cap.getPhysicalAddress(header);
+        const data_virt = mm.physicalToVirtualAddress(data_phys);
 
         switch (virtio_cap.configuration_type) {
             .common => {
-                // TODO: support 32 bit arches
-                const bar32 = header.bars[virtio_cap.bar];
-                const bar32_addr = bar32 & ~@as(u64, 0b1111);
-
-                const bar_addr = if (bar32 & pcie.bar_type_mask == pcie.bar_type32)
-                    bar32_addr
-                else if (bar32 & pcie.bar_type_mask == pcie.bar_type64)
-                    std.math.shl(u64, header.bars[virtio_cap.bar + 1], 32) + bar32_addr
-                else
-                    @panic("Invalid BAR type");
-
-                const struct_addr_phys = mm.PhysicalAddress.fromInt(bar_addr + virtio_cap.offset);
-                const struct_addr_virt = mm.physicalToVirtualAddress(struct_addr_phys);
-                caps.common = @ptrFromInt(struct_addr_virt.asInt());
+                virt_dev.common_capability = virtio_cap;
+                virt_dev.common = @ptrFromInt(data_virt.asInt());
+                common_found = true;
             },
             .notify => {
-                caps.notification = @ptrCast(virtio_cap);
-
-                const bar32 = header.bars[virtio_cap.bar];
-                const bar32_addr = bar32 & ~@as(u64, 0b1111);
-
-                const bar_addr = if (bar32 & pcie.bar_type_mask == pcie.bar_type32)
-                    bar32_addr
-                else if (bar32 & pcie.bar_type_mask == pcie.bar_type64)
-                    std.math.shl(u64, header.bars[virtio_cap.bar + 1], 32) + bar32_addr
-                else
-                    @panic("Invalid BAR type");
-
-                const phys = mm.PhysicalAddress.fromInt(bar_addr + virtio_cap.offset);
-                caps.notification_base_addr = mm.physicalToVirtualAddress(phys);
+                virt_dev.notification_capability = @ptrCast(virtio_cap);
+                virt_dev.notification_base = data_virt;
+                notify_found = true;
             },
-            else => {},
+            .isr => {
+                virt_dev.isr_capability = virtio_cap;
+                virt_dev.isr_base = data_virt;
+                isr_found = true;
+            },
+            .device => {
+                virt_dev.device_specific = .{
+                    .capability = virtio_cap,
+                    .base = data_virt,
+                };
+            },
+            .shared_memory => {
+                // TODO: maybe error?
+                if (virt_dev.shared_memory_count == VirtioDevice.max_shared_memory_count)
+                    @panic("Too many virtio shared memory regions");
+
+                const cap64: *VirtioPCICapability64 = @ptrCast(virtio_cap);
+
+                const off_upper: u64 = std.math.shl(u64, cap64.offset_high, 32);
+                const off = off_upper | cap64.cap.offset;
+                const size_upper: u64 = std.math.shl(u64, cap64.size_high, 32);
+                const size = size_upper | cap64.cap.size;
+
+                const address = data_virt.add(off);
+
+                virt_dev.shared_memory[virt_dev.shared_memory_count] = .{
+                    .cap = cap64,
+                    .address = address,
+                    .size = size,
+                };
+
+                virt_dev.shared_memory_count += 1;
+            },
+            .vendor => {
+                virt_dev.vendor[virt_dev.vendor_specific_count] = .{
+                    .capability = @ptrCast(virtio_cap),
+                    .address = data_virt,
+                };
+            },
+            .pci => log.warn("Unsupported alternative PCI configuration capability ignored", .{}),
         }
     }
 
-    caps.common.device_status = .reset;
-    caps.common.device_status.acknowledge = true;
-    caps.common.device_status.driver = true;
-    caps.common.device_status.features_ok = true;
+    if (!common_found) {
+        log.err("Common capability not found", .{});
+        return false;
+    }
+    if (!notify_found) {
+        log.err("Notify capability not found", .{});
+        return false;
+    }
+    if (!isr_found) {
+        log.err("ISR capability not found", .{});
+        return false;
+    }
+
+    virt_dev.common.device_status = .reset;
+    virt_dev.common.device_status.acknowledge = true;
+    virt_dev.common.device_status.driver = true;
+    virt_dev.common.device_status.features_ok = true;
 
     // TODO: negotiate features
-    caps.common.device_feature_select = 0;
-    caps.common.device_feature = 0;
+    virt_dev.common.device_feature_select = 0;
+    virt_dev.common.device_feature = 0;
 
-    std.debug.assert(caps.common.device_status.features_ok);
+    std.debug.assert(virt_dev.common.device_status.features_ok);
 
     return true;
 }
@@ -204,75 +359,99 @@ pub fn initializeVirtioDevice(pci_dev: *const pcie.PCIDevice, caps: *Capabilitie
 /// Note that while the encapsulated structures are defined by the virtio standard,
 /// this struct is not. It only exists for easier access to the virtqueue fields,
 /// to avoid having to do pointer arithmetic every time we wanted to access them.
+/// TODO: some space could be saved if we didnt store both the header and array pointers
 pub const VirtQueue = struct {
+    /// Queue id of the virtqueue that we write to common.queue_select
     queue_id: u16,
-    queue_size: u16,
-    descriptor_table: []Descriptor,
+
+    /// The number of queues.
+    queue_count: u16,
+
+    /// Array of queue descriptors with queue_count elements.
+    descriptor_table: [*]Descriptor,
+
+    /// The header of the available ring.
     available_ring_header: *AvailableRingHeader,
-    available_ring: []u16,
+
+    /// The ring which the driver writes the descriptor id of the head of a
+    /// buffer chain to initiate a transaction. The device only reads this.
+    /// This is directly after the available ring header but we save it for convenience.
+    available_ring: [*]u16,
+
+    /// The header of the used ring.
     used_ring_header: *UsedRingHeader,
-    used_ring: []UsedElement,
 
-    pub fn queueChain(self: *VirtQueue, caps: *Capabilities, chain_descriptor_id: u16) void {
-        std.debug.assert(chain_descriptor_id < self.queue_size);
+    /// The ring which the devices writes to in order to signal that a
+    /// request has been completed. The driver only reads this.
+    /// This is directly after the used ring header but we save it for convenience.
+    used_ring: [*]UsedElement,
 
-        self.available_ring[self.available_ring_header.idx % self.queue_size] = chain_descriptor_id;
-        self.available_ring_header.idx +%= 1;
+    /// Writes the descriptor id of the head of a buffer chain to the available ring
+    /// to start a transaction. Polls until the device advances the used ring index
+    /// until the avaiable ring index, meaning the request's completion.
+    pub fn queueChain(self: *VirtQueue, virt_dev: *VirtioDevice, chain_descriptor_id: u16) void {
+        std.debug.assert(chain_descriptor_id < self.queue_count);
 
-        caps.common.queue_select = self.queue_id;
-        const notify_off = caps.common.queue_notify_off;
-        const multiplier = caps.notification.notification_offset_multiplier;
+        self.available_ring[self.available_ring_header.index % self.queue_count] = chain_descriptor_id;
+        self.available_ring_header.index +%= 1;
 
-        const notif_addr = caps.notification_base_addr.add(multiplier * notify_off);
+        virt_dev.common.queue_select = self.queue_id;
+        const notify_off = virt_dev.common.queue_notify_offset;
+        const multiplier = virt_dev.notification_capability.notification_offset_multiplier;
+
+        const notif_addr = virt_dev.notification_base.add(multiplier * notify_off);
         const notify_ptr: *u16 = notif_addr.asPtr(*u16);
         notify_ptr.* = 0;
 
-        while (self.used_ring_header.idx != self.available_ring_header.idx) {}
+        while (self.used_ring_header.index != self.available_ring_header.index) {}
     }
 
+    /// Writes one element of a buffer chain.
     pub fn writeNextDescriptor(
         self: *VirtQueue,
         descriptor_id: u16,
         ptr: *anyopaque,
-        len: u32,
+        size: u32,
         next_id: ?u16,
         write_only: bool,
     ) void {
-        std.debug.assert(descriptor_id < self.queue_size);
+        std.debug.assert(descriptor_id < self.queue_count);
 
         const phys = mm.virtualToPhysicalAddress(.fromInt(@intFromPtr(ptr)));
 
         self.descriptor_table[descriptor_id].address = phys.asInt();
-        self.descriptor_table[descriptor_id].len = len;
+        self.descriptor_table[descriptor_id].size = size;
         self.descriptor_table[descriptor_id].next = next_id orelse 0;
         self.descriptor_table[descriptor_id].flags = .{
             .has_next = next_id != null,
-            .write_only = write_only,
+            .device_write = write_only,
             .indirect = false,
             .reserved = 0,
         };
     }
 
-    // TODO: maybe pass flags
+    /// Sets up a virtqueue. Allocates the descriptor table, avaiable ring and the used ring.
+    /// Optionally overrides the queue size.
     pub fn setup(
         common_cap: *VirtioPCICommon,
         queue_id: u16,
-        override_queue_size: ?u16,
+        override_queue_count: ?u16,
+        avail_ring_flags: AvailableRingHeader.Flags,
     ) !VirtQueue {
         common_cap.queue_select = queue_id;
-        var queue_size = common_cap.queue_size;
-        std.debug.assert(queue_size != 0);
+        var queue_count = common_cap.queue_count;
+        std.debug.assert(queue_count != 0);
 
-        if (override_queue_size) |override| {
-            if (queue_size < override) @panic("TODO");
+        if (override_queue_count) |override| {
+            if (queue_count < override) return error.InvalidOverride;
 
-            common_cap.queue_size = override;
-            queue_size = override;
+            common_cap.queue_count = override;
+            queue_count = override;
         }
 
-        const avail_ring_size = @as(usize, queue_size) * @sizeOf(u16);
-        const used_ring_size = @as(usize, queue_size) * @sizeOf(UsedElement);
-        const desc_tbl_size = @as(usize, queue_size) * @sizeOf(Descriptor);
+        const avail_ring_size = @as(usize, queue_count) * @sizeOf(u16);
+        const used_ring_size = @as(usize, queue_count) * @sizeOf(UsedElement);
+        const desc_tbl_size = @as(usize, queue_count) * @sizeOf(Descriptor);
 
         var required_size = desc_tbl_size;
 
@@ -290,28 +469,27 @@ pub const VirtQueue = struct {
         const mem_phys = try buddy_allocator.allocBlock(order);
         var mem_virt = mm.physicalToVirtualAddress(mem_phys);
 
-        const desc_tbl = mem_virt.asPtr([*]Descriptor)[0..queue_size];
+        const desc_tbl = mem_virt.asPtr([*]Descriptor);
         mem_virt = mem_virt.add(desc_tbl_size);
 
         const avail_ring_header = mem_virt.asPtr(*AvailableRingHeader);
         mem_virt = mem_virt.add(@sizeOf(AvailableRingHeader));
-        const avail_ring = mem_virt.asPtr([*]u16)[0..queue_size];
+        const avail_ring = mem_virt.asPtr([*]u16);
         mem_virt = mem_virt.add(avail_ring_total_size - @sizeOf(AvailableRingHeader));
 
         const used_ring_header = mem_virt.asPtr(*UsedRingHeader);
         mem_virt = mem_virt.add(@sizeOf(UsedRingHeader));
-        const used_ring = mem_virt.asPtr([*]UsedElement)[0..queue_size];
+        const used_ring = mem_virt.asPtr([*]UsedElement);
 
-        std.debug.assert(@intFromPtr(desc_tbl.ptr) % arch.page_size == 0);
+        std.debug.assert(@intFromPtr(desc_tbl) % arch.page_size == 0);
         std.debug.assert(@intFromPtr(used_ring_header) % arch.page_size == 0);
 
-        avail_ring_header.idx = 0;
-        avail_ring_header.flags = .{ .no_interrupt = true, .reserved = 0 };
-        used_ring_header.idx = 0;
-        used_ring_header.flags = .{ .no_notify = false, .reserved = 0 };
+        avail_ring_header.index = 0;
+        avail_ring_header.flags = avail_ring_flags;
+        used_ring_header.index = 0;
 
         common_cap.descriptor_queue = mm.virtualToPhysicalAddress(
-            .fromInt(@intFromPtr(desc_tbl.ptr)),
+            .fromInt(@intFromPtr(desc_tbl)),
         ).asInt();
         common_cap.driver_queue = mm.virtualToPhysicalAddress(
             .fromInt(@intFromPtr(avail_ring_header)),
@@ -324,7 +502,7 @@ pub const VirtQueue = struct {
 
         return .{
             .queue_id = queue_id,
-            .queue_size = queue_size,
+            .queue_count = queue_count,
             .descriptor_table = desc_tbl,
             .available_ring_header = avail_ring_header,
             .available_ring = avail_ring,
@@ -333,50 +511,82 @@ pub const VirtQueue = struct {
         };
     }
 
-    const Descriptor = extern struct {
+    /// Descriptor for a buffer.
+    pub const Descriptor = extern struct {
+        /// Physical address of the buffer.
         address: u64,
 
-        len: u32,
+        /// Size of the buffer.
+        size: u32,
 
+        /// Buffer flags.
         flags: Flags,
 
+        /// Descriptor id of the next buffer in a chain.
+        /// Set to 0 if this is the tail of the chain
         next: u16,
 
+        /// Buffer flags.
         const Flags = packed struct(u16) {
+            /// Whether there is a next buffer in the chain after this.
             has_next: bool,
-            write_only: bool,
+
+            /// Whether the device can write to this (the driver can not).
+            device_write: bool,
+
+            /// Whether this buffer describes another descriptor table.
             indirect: bool,
 
             reserved: u13 = 0,
         };
     };
 
-    const AvailableRingHeader = extern struct {
+    /// The available ring header which the driver writes to in order to initiate transactions.
+    /// It is a ring buffer that wraps around and the device reads.
+    pub const AvailableRingHeader = extern struct {
+        /// Flags.
         flags: Flags,
 
-        idx: u16,
+        /// The index of the next entry in the available ring the driver would write to.
+        /// Starts from 0 and wraps around. When the driver wants to queue a buffer chain
+        /// it advances this by one.
+        index: u16,
 
+        /// Flags.
         const Flags = packed struct(u16) {
+            /// The device should not send an interrupt when it consumes a buffer.
             no_interrupt: bool,
 
             reserved: u15 = 0,
         };
     };
 
-    const UsedRingHeader = extern struct {
+    /// The used ring header which the device writes to when it completed a request.
+    /// It is a ring buffer that wraps around and the driver reads.
+    pub const UsedRingHeader = extern struct {
+        /// Flags.
         flags: Flags,
 
-        idx: u16,
+        /// The index of the next entry in the used ring that the device would write to.
+        /// Starts from 0 and wraps around. When the device completes a requests it
+        /// advances this by one.
+        index: u16,
 
-        const Flags = packed struct(u16) {
+        /// Flags.
+        pub const Flags = packed struct(u16) {
+            /// The driver should not notify the device when it queues a transaction.
             no_notify: bool,
 
             reserved: u15 = 0,
         };
     };
 
-    const UsedElement = extern struct {
-        idx: u32,
-        len: u32,
+    /// The element of the used ring, describes a completed request.
+    pub const UsedElement = extern struct {
+        /// The descriptor index of the head of the buffer chain.
+        descriptor_index: u32,
+
+        /// The number of bytes written into the buffer chain.
+        size: u32,
     };
 };

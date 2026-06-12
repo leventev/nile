@@ -6,6 +6,7 @@ const mm = @import("../../mem/mm.zig");
 const buddy_allocator = @import("../../mem/buddy_allocator.zig");
 const arch = @import("../../arch/arch.zig");
 const virtio = @import("virtio.zig");
+const framebuffer = @import("../../framebuffer.zig");
 
 const VirtioDevice = virtio.VirtioDevice;
 const VirtQueue = virtio.VirtQueue;
@@ -107,16 +108,110 @@ const feature_resource_blob = 1 << 3;
 const feature_context_init = 1 << 4;
 const feature_blob_alignment = 1 << 5;
 
+// TODO: allocate properly + deallocate
+var gpu: VirtioGPU = undefined;
+
+const log = std.log.scoped(.virtio_gpu);
+
+fn setupFramebuffer(
+    private_data: *anyopaque,
+    fb_disp_data: *framebuffer.Framebuffer.Display,
+) bool {
+    var virtio_gpu: *VirtioGPU = @ptrCast(@alignCast(private_data));
+
+    const display_info_resp = virtio_gpu.getDisplayInfo() orelse @panic("Failed to get display info");
+    var display_found = false;
+
+    for (display_info_resp.display, 0..) |display, i| {
+        if (display.enabled != 0) {
+            virtio_gpu.rectangle = display.rectangle;
+            virtio_gpu.scanout_id = @intCast(i);
+            display_found = true;
+            break;
+        }
+    }
+
+    if (!display_found) {
+        log.warn("No enabled displays", .{});
+        return false;
+    }
+
+    // arbitrarily chosen
+    virtio_gpu.resource_id = 1;
+
+    const resource_ok = virtio_gpu.createResource2D(
+        virtio_gpu.resource_id,
+        .rgba,
+        virtio_gpu.rectangle.width,
+        virtio_gpu.rectangle.height,
+    );
+
+    if (!resource_ok) {
+        log.warn("Failed to create {}x{} 2D resource on host", .{
+            virtio_gpu.rectangle.width,
+            virtio_gpu.rectangle.height,
+        });
+        return false;
+    }
+
+    const pixel_count = virtio_gpu.rectangle.width * virtio_gpu.rectangle.height;
+    const framebuffer_size = pixel_count * @sizeOf(u32);
+
+    const fb_block_order = buddy_allocator.blockOrderFromSize(framebuffer_size);
+    const framebuffer_phys = buddy_allocator.allocBlock(fb_block_order) catch @panic("TODO");
+    const framebuffer_virt = mm.physicalToVirtualAddress(framebuffer_phys);
+
+    const attach_ok = virtio_gpu.attachResourceBacking(
+        virtio_gpu.resource_id,
+        framebuffer_phys.asInt(),
+        framebuffer_size,
+    );
+
+    if (!attach_ok) {
+        log.warn("Failed to attach framebuffer to resource {}", .{virtio_gpu.resource_id});
+        return false;
+    }
+
+    const set_scanout_ok = virtio_gpu.setResourceScanout(
+        virtio_gpu.resource_id,
+        virtio_gpu.scanout_id,
+        virtio_gpu.rectangle,
+    );
+
+    if (!set_scanout_ok) {
+        log.warn("Failed to set scanout {} to resource {}", .{
+            virtio_gpu.scanout_id,
+            virtio_gpu.resource_id,
+        });
+        return false;
+    }
+
+    fb_disp_data.format = .rgba;
+    fb_disp_data.width = virtio_gpu.rectangle.width;
+    fb_disp_data.height = virtio_gpu.rectangle.height;
+    fb_disp_data.memory = framebuffer_virt.asPtr(*anyopaque);
+
+    return true;
+}
+
+fn flushScreen(private_data: *anyopaque) void {
+    var virtio_gpu: *VirtioGPU = @ptrCast(@alignCast(private_data));
+
+    const transfer_ok = virtio_gpu.transferToHost2D(virtio_gpu.resource_id, virtio_gpu.scanout_id, virtio_gpu.rectangle);
+    if (!transfer_ok) {
+        log.warn("Failed to transfer framebuffer data to the host", .{});
+        return;
+    }
+
+    const flush_ok = virtio_gpu.flushResource(virtio_gpu.resource_id, virtio_gpu.rectangle);
+    if (!flush_ok) {
+        log.warn("Failed to flush the resource", .{});
+        return;
+    }
+}
+
 fn init(dev: *const device.Device) void {
     const pci_dev = pcie.pciDeviceFromDevice(dev);
-    std.log.debug("VIRTIO GPU INIT: {x:02}:{x:02}.{}", .{
-        pci_dev.address.bus,
-        pci_dev.address.device,
-        pci_dev.address.function,
-    });
-
-    var gpu: VirtioGPU = undefined;
-
     const features = virtio.initializeVirtioDevice(pci_dev, &gpu.virtio_device, 0);
 
     gpu.negotiated_features = features orelse @panic("Failed to initialize VirtIO device");
@@ -144,81 +239,13 @@ fn init(dev: *const device.Device) void {
     gpu.builder.address = mm.physicalToVirtualAddress(buffer_phys);
     gpu.builder.size = arch.page_size;
 
-    const display_info_resp = gpu.getDisplayInfo() orelse @panic("Failed to get display info");
-    var display_rect: Rectangle = undefined;
-    var display_found = false;
-
-    for (display_info_resp.display) |display| {
-        if (display.enabled != 0) {
-            display_rect = display.rectangle;
-            display_found = true;
-        }
-    }
-
-    if (!display_found) @panic("TODO");
-
-    std.log.debug("display: {}x{}", .{ display_rect.width, display_rect.height });
-
-    const resource_id = 1;
-    // TODO:
-    const scanout_id = 0;
-
-    const resource_ok = gpu.createResource2D(
-        resource_id,
-        .rgba,
-        display_rect.width,
-        display_rect.height,
-    );
-
-    if (!resource_ok) @panic("Failed to create 2D framebuffer on host");
-
-    const pixel_count = display_rect.width * display_rect.height;
-    const framebuffer_size = pixel_count * @sizeOf(u32);
-
-    const fb_block_order = buddy_allocator.blockOrderFromSize(framebuffer_size);
-    const framebuffer_phys = buddy_allocator.allocBlock(fb_block_order) catch @panic("TODO");
-    const framebuffer_virt = mm.physicalToVirtualAddress(framebuffer_phys);
-
-    const attach_ok = gpu.attachResourceBacking(resource_id, framebuffer_phys.asInt(), framebuffer_size);
-
-    if (!attach_ok) @panic("Failed to attach resource backing");
-
-    const set_scanout_ok = gpu.setResourceScanout(
-        resource_id,
-        scanout_id,
-        display_rect,
-    );
-
-    if (!set_scanout_ok) @panic("Failed to set resource scanout");
-
-    const framebuffer: []RGBA = framebuffer_virt.asPtr([*]RGBA)[0..pixel_count];
-    for (0..display_rect.height) |y| {
-        for (0..display_rect.width) |x| {
-            framebuffer[y * display_rect.width + x] = .{
-                .red = 127,
-                .blue = 255,
-                .green = 127,
-                .alpha = 255,
-            };
-        }
-    }
-
-    const transfer_ok = gpu.transferToHost2D(
-        resource_id,
-        0,
+    _ = framebuffer.addFramebuffer(
         .{
-            .x = 0,
-            .y = 0,
-            .width = display_rect.width,
-            .height = display_rect.height,
+            .setup = setupFramebuffer,
+            .flush = flushScreen,
         },
+        &gpu,
     );
-
-    if (!transfer_ok) @panic("Failed to transfer to host");
-
-    const flush_ok = gpu.flushResource(resource_id, display_rect);
-
-    if (!flush_ok) @panic("Failed to flush resource");
 }
 
 /// Describes a virtio-gpu device.
@@ -261,6 +288,15 @@ pub const VirtioGPU = struct {
             return ptr;
         }
     },
+
+    /// The resource the framebuffer is attached to.
+    resource_id: u32,
+
+    /// The display the resource is associated with.
+    scanout_id: u32,
+
+    /// The size of the display/scanout.
+    rectangle: Rectangle,
 
     /// Response of the display info command.
     pub const DisplayInfoResponse = extern struct {

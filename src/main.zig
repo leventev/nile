@@ -17,6 +17,7 @@ pub const cpio = @import("cpio.zig");
 pub const fs = @import("fs.zig");
 pub const Module = @import("Module.zig");
 pub const device = @import("device.zig");
+pub const framebuffer = @import("framebuffer.zig");
 
 const test_binary_file = @embedFile("shell");
 const test_archive = @embedFile("root.cpio");
@@ -98,11 +99,25 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     device.matchDeviceTreeDevices(&dt);
 
     while (device.matchNonDeviceTreeDevices()) {}
-    device.dumpDevices();
 
     scheduler.init();
 
     time.init(&dt) catch @panic("Failed to initialize timer");
+
+    framebuffer.fillRect(0, 0, 500, 500, .{
+        .red = 100,
+        .green = 200,
+        .blue = 50,
+        .alpha = 255,
+    });
+    framebuffer.fillRect(300, 300, 400, 50, .{
+        .red = 100,
+        .green = 200,
+        .blue = 250,
+        .alpha = 255,
+    });
+
+    framebuffer.flush();
 
     fs.init();
 

@@ -327,7 +327,7 @@ pub const VirtioGPU = struct {
         self.control_queue.writeDescriptor(0, rqst, @sizeOf(ControlHeader), 1, false);
         self.control_queue.writeDescriptor(1, resp, @sizeOf(DisplayInfoResponse), null, true);
 
-        self.control_queue.queueChain(&self.virtio_device, 0);
+        self.control_queue.queueChainSingle(&self.virtio_device, 0);
 
         if (resp.header.header_type != .response_ok_display_info)
             return null;
@@ -383,7 +383,7 @@ pub const VirtioGPU = struct {
         self.control_queue.writeDescriptor(0, rqst, @sizeOf(GetEDID), 1, false);
         self.control_queue.writeDescriptor(1, resp, @sizeOf(GetEDIDResponse), null, true);
 
-        self.control_queue.queueChain(&self.virtio_device, 0);
+        self.control_queue.queueChainSingle(&self.virtio_device, 0);
 
         if (resp.header.header_type != .response_ok_edid)
             return null;
@@ -436,7 +436,7 @@ pub const VirtioGPU = struct {
         self.control_queue.writeDescriptor(0, rqst, @sizeOf(ResourceCreate2D), 1, false);
         self.control_queue.writeDescriptor(1, resp, @sizeOf(ControlHeader), null, true);
 
-        self.control_queue.queueChain(&self.virtio_device, 0);
+        self.control_queue.queueChainSingle(&self.virtio_device, 0);
 
         return resp.header_type == .response_ok_nodata;
     }
@@ -473,7 +473,7 @@ pub const VirtioGPU = struct {
         self.control_queue.writeDescriptor(0, rqst, @sizeOf(ResourceDestroy), 1, false);
         self.control_queue.writeDescriptor(1, resp, @sizeOf(ControlHeader), null, true);
 
-        self.control_queue.queueChain(&self.virtio_device, 0);
+        self.control_queue.queueChainSingle(&self.virtio_device, 0);
 
         return resp.header_type == .response_ok_nodata;
     }
@@ -520,7 +520,7 @@ pub const VirtioGPU = struct {
         self.control_queue.writeDescriptor(0, rqst, @sizeOf(ResourceSetScanout), 1, false);
         self.control_queue.writeDescriptor(1, resp, @sizeOf(ControlHeader), null, true);
 
-        self.control_queue.queueChain(&self.virtio_device, 0);
+        self.control_queue.queueChainSingle(&self.virtio_device, 0);
 
         return resp.header_type == .response_ok_nodata;
     }
@@ -566,7 +566,7 @@ pub const VirtioGPU = struct {
         self.control_queue.writeDescriptor(0, rqst, @sizeOf(TransferToHost2D), 1, false);
         self.control_queue.writeDescriptor(1, resp, @sizeOf(ControlHeader), null, true);
 
-        self.control_queue.queueChain(&self.virtio_device, 0);
+        self.control_queue.queueChainSingle(&self.virtio_device, 0);
 
         return resp.header_type == .response_ok_nodata;
     }
@@ -612,7 +612,7 @@ pub const VirtioGPU = struct {
         self.control_queue.writeDescriptor(0, rqst, @sizeOf(ResourceFlush), 1, false);
         self.control_queue.writeDescriptor(1, resp, @sizeOf(ControlHeader), null, true);
 
-        self.control_queue.queueChain(&self.virtio_device, 0);
+        self.control_queue.queueChainSingle(&self.virtio_device, 0);
 
         return resp.header_type == .response_ok_nodata;
     }
@@ -666,7 +666,7 @@ pub const VirtioGPU = struct {
         self.control_queue.writeDescriptor(1, mem_entry, @sizeOf(MemoryEntry), 2, false);
         self.control_queue.writeDescriptor(2, resp, @sizeOf(ControlHeader), null, true);
 
-        self.control_queue.queueChain(&self.virtio_device, 0);
+        self.control_queue.queueChainSingle(&self.virtio_device, 0);
 
         return resp.header_type == .response_ok_nodata;
     }
@@ -700,7 +700,7 @@ pub const VirtioGPU = struct {
         self.control_queue.writeDescriptor(0, rqst, @sizeOf(ResourceDetachBacking), 1, false);
         self.control_queue.writeDescriptor(1, resp, @sizeOf(ControlHeader), null, true);
 
-        self.control_queue.queueChain(&self.virtio_device, 0);
+        self.control_queue.queueChainSingle(&self.virtio_device, 0);
 
         return resp.header_type == .response_ok_nodata;
     }
@@ -752,7 +752,7 @@ pub const VirtioGPU = struct {
         self.control_queue.writeDescriptor(0, rqst, @sizeOf(ResourceAssignUUID), 1, false);
         self.control_queue.writeDescriptor(1, resp, @sizeOf(ResourceAssignUUIDResponse), null, true);
 
-        self.control_queue.queueChain(&self.virtio_device, 0);
+        self.control_queue.queueChainSingle(&self.virtio_device, 0);
 
         if (resp.header_type != .response_ok_resource_uuid)
             return null;

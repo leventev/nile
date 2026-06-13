@@ -209,13 +209,10 @@ pub const VirtioDevice = struct {
 
     /// The device specific PCI capability. The data it points to is
     /// device specific configuration.
-    device_specific: ?struct {
-        /// Capability
-        capability: *const VirtioPCICapability,
+    device_capability: *const VirtioPCICapability,
 
-        /// Address of device specific structure within the BAR.
-        base: mm.VirtualAddress,
-    },
+    /// Address of device specific structure within the BAR.
+    device_base: mm.VirtualAddress,
 
     /// Shared memory regions allocated by the device.
     /// They reside in the BAR described by the capability.
@@ -281,9 +278,9 @@ pub fn initializeVirtioDevice(
     var common_found = false;
     var notify_found = false;
     var isr_found = false;
+    var device_specific_found = false;
     virt_dev.shared_memory_count = 0;
     virt_dev.vendor_specific_count = 0;
-    virt_dev.device_specific = null;
 
     var cap_it = pcie.PCICapability.iterator(cfg_space, header.capabilities_pointer);
     while (cap_it.next()) |capability| {
@@ -310,10 +307,9 @@ pub fn initializeVirtioDevice(
                 isr_found = true;
             },
             .device => {
-                virt_dev.device_specific = .{
-                    .capability = virtio_cap,
-                    .base = data_virt,
-                };
+                virt_dev.device_capability = virtio_cap;
+                virt_dev.device_base = data_virt;
+                device_specific_found = true;
             },
             .shared_memory => {
                 // TODO: maybe error?
@@ -357,6 +353,10 @@ pub fn initializeVirtioDevice(
     }
     if (!isr_found) {
         log.err("ISR capability not found", .{});
+        return null;
+    }
+    if (!device_specific_found) {
+        log.err("Device specific capability not found", .{});
         return null;
     }
 
@@ -431,11 +431,39 @@ pub const VirtQueue = struct {
     /// Writes the descriptor id of the head of a buffer chain to the available ring
     /// to start a transaction. Polls until the device advances the used ring index
     /// until the avaiable ring index, meaning the request's completion.
-    pub fn queueChain(self: *VirtQueue, virt_dev: *VirtioDevice, chain_descriptor_id: u16) void {
+    pub fn queueChainSingle(self: *VirtQueue, virt_dev: *VirtioDevice, chain_descriptor_id: u16) void {
         std.debug.assert(chain_descriptor_id < self.queue_count);
 
         self.available_ring[self.available_ring_header.index % self.queue_count] = chain_descriptor_id;
         self.available_ring_header.index +%= 1;
+
+        virt_dev.common.queue_select = self.queue_id;
+        const notify_off = virt_dev.common.queue_notify_offset;
+        const multiplier = virt_dev.notification_capability.notification_offset_multiplier;
+
+        const notif_addr = virt_dev.notification_base.add(multiplier * notify_off);
+        const notify_ptr: *u16 = notif_addr.asPtr(*u16);
+        notify_ptr.* = 0;
+
+        while (self.used_ring_header.index != self.available_ring_header.index) {}
+    }
+
+    /// Writes the descriptor id of the head of a buffer chain to the available ring
+    /// to start a transaction. Polls until the device advances the used ring index
+    /// until the avaiable ring index, meaning the request's completion.
+    pub fn queueChainMultiple(
+        self: *VirtQueue,
+        virt_dev: *VirtioDevice,
+        descriptor_chain_ids: []const u16,
+    ) void {
+        var new_index = self.available_ring_header.index;
+        for (descriptor_chain_ids) |descriptor_id| {
+            std.debug.assert(descriptor_id < self.queue_count);
+
+            self.available_ring[new_index % self.queue_count] = descriptor_id;
+            new_index +%= 1;
+        }
+        self.available_ring_header.index = new_index;
 
         virt_dev.common.queue_select = self.queue_id;
         const notify_off = virt_dev.common.queue_notify_offset;

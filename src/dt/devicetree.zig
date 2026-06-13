@@ -360,7 +360,6 @@ pub fn addDevices(dt: *const DeviceTree) !void {
     // TODO: dont use objectcache
     device_cache = slab_allocator.createObjectCache(device.Device);
     for (dt.nodes.items, 0..) |*node, handle| {
-        if (node.getProperty(.interrupt_controller) != null) continue;
         try addDevice(dt, node, @intCast(handle));
     }
 }

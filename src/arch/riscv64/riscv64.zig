@@ -109,5 +109,7 @@ export fn initRiscv64(
     CSR.sscratch.write(@intFromPtr(&init_scratch_registers));
 
     riscv64_mm.setupPaging(root_page_table);
+
+    trap.init();
     root.init(root_page_table, dt_ptr_virt);
 }

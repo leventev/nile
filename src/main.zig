@@ -20,6 +20,9 @@ pub const device = @import("device.zig");
 pub const framebuffer = @import("framebuffer.zig");
 pub const pc_font = @import("pc_font.zig");
 
+pub const virtio_input = @import("drivers/virtio/virtio_input.zig");
+pub const pcie = @import("drivers/bus/pcie.zig");
+
 const test_binary_file = @embedFile("shell");
 const test_archive = @embedFile("root.cpio");
 
@@ -92,11 +95,20 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     while (device.matchNonDeviceTreeDevices()) {}
 
-    scheduler.init();
+    std.log.debug("HALLO", .{});
+    // devicetree.printDeviceTree(&dt, 0, 0);
+    device.enableInterrupts();
 
-    time.init(&dt) catch @panic("Failed to initialize timer");
+    std.log.debug("WHAT", .{});
+    // arch.enableInterrupts();
+
+    // while (true) {
+    //     std.log.debug("dumping: ", .{});
+    //     interrupt.dumpPendingInterrupts();
+    // }
 
     pc_font.init();
+    std.log.debug("WHAT 2", .{});
 
     framebuffer.fillRect(0, 0, 500, 500, .{
         .red = 100,
@@ -111,41 +123,61 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
         .blue = 250,
         .alpha = 255,
     });
+    std.log.debug("WHAT 3", .{});
 
-    // framebuffer.displayCharacter(10, 10, 'A');
+    framebuffer.displayCharacter(10, 10, 'A');
     framebuffer.printText(10, 10, "HELLO world :)");
 
+    std.log.debug("WHAT 4", .{});
     framebuffer.flush();
+    std.log.debug("WHAT 5", .{});
 
-    fs.init();
+    scheduler.init();
 
-    // fs.registerFileSystem(&ram_file_system) catch @panic("Failed to register ramfs");
-    fs.dumpRegisteredFilesystems();
+    // time.init(&dt) catch @panic("Failed to initialize timer");
 
-    var mount_table: fs.MountTable = .{
-        .mount_count = 0,
-        .mounts = null,
-        .lock = .{},
-    };
+    // arch.enableInterrupts();
 
-    fs.mountFileSystem(&mount_table, "/", "ramfs", null) catch @panic("Failed to mount /");
-    fs.createDirectory(&mount_table, "/test_dir") catch @panic("Failed to create file");
-    fs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
-    fs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");
-    fs.createRegularFile(&mount_table, "/test_dir/a/test_file", "burger") catch @panic("Failed to create file");
-    mount_table.dump();
-    fs.dumpTree(&mount_table);
+    // while (true) {}
+    // const cfg = pcie.ConfigurationSpace.fromAddress(virtio_input.input.pci_device.address);
+    // const header = cfg.commonHeader();
+    // interrupt.dumpPendingInterrupts();
+    // std.log.debug("INTERRUPT STATUS: {} {} {}", .{
+    //     header.status.interrupt_status,
+    //     virtio_input.input.event_queue.available_ring_header.index,
+    //     virtio_input.input.event_queue.used_ring_header.index,
+    // });
+    // }
 
-    // TODO
-    // var initramfs: ramfs.RamFs = undefined;
-    // initramfs.init() catch unreachable;
+    // fs.init();
     //
-    // cpio.readArchive(test_archive, &initramfs) catch |err| {
-    //     std.log.err("Failed to read CPIO archive: {s}", .{@errorName(err)});
-    //     @panic("");
+    // // fs.registerFileSystem(&ram_file_system) catch @panic("Failed to register ramfs");
+    // fs.dumpRegisteredFilesystems();
+    //
+    // var mount_table: fs.MountTable = .{
+    //     .mount_count = 0,
+    //     .mounts = null,
+    //     .lock = .{},
     // };
     //
-    // initramfs.dumpTree();
+    // fs.mountFileSystem(&mount_table, "/", "ramfs", null) catch @panic("Failed to mount /");
+    // fs.createDirectory(&mount_table, "/test_dir") catch @panic("Failed to create file");
+    // fs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
+    // fs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");
+    // fs.createRegularFile(&mount_table, "/test_dir/a/test_file", "burger") catch @panic("Failed to create file");
+    // mount_table.dump();
+    // fs.dumpTree(&mount_table);
+    //
+    // // TODO
+    // // var initramfs: ramfs.RamFs = undefined;
+    // // initramfs.init() catch unreachable;
+    // //
+    // // cpio.readArchive(test_archive, &initramfs) catch |err| {
+    // //     std.log.err("Failed to read CPIO archive: {s}", .{@errorName(err)});
+    // //     @panic("");
+    // // };
+    // //
+    // // initramfs.dumpTree();
 
     const idle_process_thread = processes.init();
     _ = processes.spawnInitProcess(root_page_table, null, test_binary_file) catch @panic("TODO");
@@ -156,6 +188,8 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     arch.enableInterrupts();
 
     while (true) {
+        interrupt.dumpPendingInterrupts();
+        // interrupt.dumpEnabledInterrupts();
         asm volatile ("wfi");
     }
 }

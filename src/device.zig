@@ -3,6 +3,7 @@ const slab_allocator = @import("mem/slab_allocator.zig");
 const property = @import("dt/property.zig");
 const Module = @import("Module.zig");
 const devicetree = @import("dt/devicetree.zig");
+const interrupt = @import("interrupt.zig");
 
 /// A bus that devices and drivers are associated with.
 pub const Bus = struct {
@@ -33,6 +34,7 @@ pub fn addBus(bus: *const Bus) void {
 pub const Device = struct {
     name: []const u8,
     matched: bool = false,
+    interrupt_number: ?u32 = null,
     parent: ?*Device,
     match_table: union(enum) {
         devicetree: struct {
@@ -159,8 +161,24 @@ pub fn matchNonDeviceTreeDevices() bool {
 
             driver_bus_info.init(device);
             module.initialized = true;
+            device.matched = true;
         }
     }
 
     return prev_bus_count != bus_count;
+}
+
+pub fn enableInterrupts() void {
+    var device_ptr = devices;
+    while (device_ptr) |device| : (device_ptr = device.next) {
+        std.log.debug("->NOT MATCHED {s}", .{device.name});
+        if (!device.matched) continue;
+        std.log.debug("->{s}", .{device.name});
+
+        if (device.interrupt_number) |int_num| {
+            std.log.debug("enable interrut #{} for {s}", .{ int_num, device.name });
+            interrupt.enableInterrupt(int_num) catch @panic("Failed to enable interrupt");
+            interrupt.setPriority(int_num, 1) catch @panic("Failed to set priority");
+        }
+    }
 }

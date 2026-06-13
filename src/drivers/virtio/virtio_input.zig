@@ -9,6 +9,7 @@ const mm = @import("../../mem/mm.zig");
 const buddy_allocator = @import("../../mem/buddy_allocator.zig");
 const arch = @import("../../arch/arch.zig");
 const virtio = @import("virtio.zig");
+const interrupt = @import("../../interrupt.zig");
 
 const VirtQueue = virtio.VirtQueue;
 const VirtioDevice = virtio.VirtioDevice;
@@ -16,6 +17,7 @@ const VirtioDevice = virtio.VirtioDevice;
 const log = std.log.scoped(.virtio_input);
 
 const VirtioInput = struct {
+    pci_device: *const pcie.PCIDevice,
     virtio_device: VirtioDevice,
     negotiated_features: u128,
     event_queue: VirtQueue,
@@ -65,7 +67,7 @@ const VirtioInput = struct {
     }
 };
 
-var input: VirtioInput = undefined;
+pub var input: VirtioInput = undefined;
 
 const VirtioInputDevice = extern struct {
     select: ConfigSelect,
@@ -162,6 +164,10 @@ fn init(dev: *const device.Device) void {
 
     // std.log.debug("VIRTIO INPUT {any}", .{input.virtio_device.device_specific});
 
+    input.pci_device = pci_dev;
+    header.common_header.command.bus_master_enable = true;
+    header.common_header.command.interrupt_disable = false;
+
     const device_name = input.readName();
     log.debug("device name: {s}", .{device_name});
 
@@ -206,6 +212,8 @@ fn init(dev: *const device.Device) void {
     const virt_addr = mm.physicalToVirtualAddress(buffer_phys);
     const arr = virt_addr.asPtr([*]VirtioInputEvent);
 
+    std.log.debug("0 {}", .{input.virtio_device.common.device_status.driver_ok});
+
     const count = 10;
     for (0..count) |i| {
         input.event_queue.writeDescriptor(
@@ -216,8 +224,8 @@ fn init(dev: *const device.Device) void {
             true,
         );
     }
-    input.event_queue.queueChainMultiple(&input.virtio_device, &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 });
-    std.log.debug("{any}", .{arr[0..count]});
+
+    input.event_queue.queueChainMultiple(&input.virtio_device, &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 }, false);
 }
 
 const device_ids: []const pcie.PCIDevice.Id = &.{

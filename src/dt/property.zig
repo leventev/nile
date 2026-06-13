@@ -428,10 +428,10 @@ pub const InterruptMap = struct {
             ) orelse unreachable;
 
             try writer.print("0x{x} 0x{x} &{s} 0x{x} 0x{x}", .{
-                mapping.child_unit_address,
+                mapping.child_address,
                 mapping.child_interrupt_specifier,
                 parent_name,
-                mapping.parent_unit_address,
+                mapping.parent_address,
                 mapping.parent_interrupt_specifier,
             });
         }
@@ -474,20 +474,20 @@ pub const InterruptMap = struct {
             const parent_interrupt_specifier = readCells(self.buff, &self.idx, parent_int_cells);
 
             return .{
-                .child_unit_address = child_address,
+                .child_address = child_address,
                 .child_interrupt_specifier = child_int_specifier,
                 .interrupt_parent_handle = int_parent_handle,
-                .parent_unit_address = parent_address,
+                .parent_address = parent_address,
                 .parent_interrupt_specifier = parent_interrupt_specifier,
             };
         }
     };
 
     pub const Entry = struct {
-        child_unit_address: u128,
+        child_address: u128,
         child_interrupt_specifier: u128,
         interrupt_parent_handle: u32,
-        parent_unit_address: u128,
+        parent_address: u128,
         parent_interrupt_specifier: u128,
     };
 };

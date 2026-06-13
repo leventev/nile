@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const devicetree = @import("../../dt/devicetree.zig");
+const property = @import("../../dt/property.zig");
 const mm = @import("../../mem/mm.zig");
 const Module = @import("../../Module.zig");
 const device = @import("../../device.zig");
@@ -423,7 +424,7 @@ pub const ConfigurationSpace = struct {
 
 var ecam_base_address: mm.VirtualAddress = undefined;
 
-const DTRangeChildAddress = packed struct(u96) {
+const DTChildAddress = packed struct(u96) {
     low: u32,
     high: u32,
     register: u8,
@@ -537,7 +538,15 @@ const PCIMemory = struct {
 /// Bridges are added as devices which have been matched to a driver.
 /// Returns the number of buses behind the bridge,
 /// for the root bus it is the total number of buses in the system.
-fn enumerateBus(bus_id_counter: *u8, mem_pool: *PCIMemory) u8 {
+fn enumerateBus(
+    bus_id_counter: *u8,
+    mem_pool: *PCIMemory,
+    // TODO: dont pass this many parameters
+    dt: *const devicetree.DeviceTree,
+    int_map: *const property.InterruptMap,
+    child_address_cells: u32,
+    child_interrupt_cells: u32,
+) u8 {
     const bus_id = bus_id_counter.*;
     var child_bus_counter: u8 = 0;
 
@@ -580,6 +589,29 @@ fn enumerateBus(bus_id_counter: *u8, mem_pool: *PCIMemory) u8 {
 
             mem_pool.fillBars(config_space);
 
+            if (common_header.header_type.header_type == .general_device) {
+                const general_header = config_space.generalHeader();
+
+                var int_map_it = int_map.iterator(child_address_cells, child_interrupt_cells);
+                while (int_map_it.next(dt)) |mapping| {
+                    const addr: DTChildAddress = @bitCast(
+                        @as(u96, @intCast(mapping.child_address)),
+                    );
+
+                    const bus_match = addr.bus == dev_addr.bus;
+                    const device_match = addr.device == dev_addr.device;
+                    const function_match = addr.function == dev_addr.function;
+                    if (!bus_match or !device_match or !function_match)
+                        continue;
+
+                    if (mapping.child_interrupt_specifier != general_header.interrupt_pin)
+                        continue;
+
+                    // TODO: make sure its a u32
+                    pci_device.device.interrupt_number = @intCast(mapping.parent_interrupt_specifier);
+                }
+            }
+
             if (common_header.header_type.header_type != .pci_to_pci_bridge)
                 continue;
 
@@ -594,7 +626,14 @@ fn enumerateBus(bus_id_counter: *u8, mem_pool: *PCIMemory) u8 {
             // memory transactions are forwarded in case the child bus also has child buses
             bridge_header.secondary_bus_number = child_bus_id;
             bridge_header.subordinate_bus_number = 0xFF;
-            const child_bus_count = enumerateBus(bus_id_counter, mem_pool);
+            const child_bus_count = enumerateBus(
+                bus_id_counter,
+                mem_pool,
+                dt,
+                int_map,
+                child_address_cells,
+                child_interrupt_cells,
+            );
 
             // after we know how many buses are behind the bridge we can
             // set its subordinate_bus_number to its actual value
@@ -625,11 +664,6 @@ fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!
     const interrupt_map = node.getProperty(.interrupt_map) orelse
         @panic("Devicetree PCI node does not have .interrupt_map field");
 
-    var int_map_it = interrupt_map.iterator(child_address_cells, child_interrupt_cells);
-    while (int_map_it.next(dt)) |mapping| {
-        log.debug("{any}", .{mapping});
-    }
-
     // TODO
     std.debug.assert(parent_address_cells <= 2 and parent_size_cells <= 2);
 
@@ -646,7 +680,7 @@ fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!
     var found_bridge_memory32 = false;
 
     while (ranges_it.next()) |range| {
-        const child: DTRangeChildAddress = @bitCast(@as(u96, @intCast(range.child_address)));
+        const child: DTChildAddress = @bitCast(@as(u96, @intCast(range.child_address)));
         if (child.space_code == .memory_space64) {
             bridge_memory_start64 = @intCast(range.parent_address);
             bridge_memory_size64 = @intCast(range.size);
@@ -683,7 +717,14 @@ fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!
     device_name_cache = slab_allocator.createObjectCache([11]u8);
 
     var bus_id_counter: u8 = 0;
-    const bus_count_total = enumerateBus(&bus_id_counter, &pci_memory);
+    const bus_count_total = enumerateBus(
+        &bus_id_counter,
+        &pci_memory,
+        dt,
+        &interrupt_map,
+        child_address_cells,
+        child_interrupt_cells,
+    );
     std.log.debug("{} buses in total", .{bus_count_total});
 
     // const ecam_size = first_reg.size;
@@ -724,6 +765,8 @@ pub const PCIDevice = struct {
     id: Id,
     address: Address,
     device: device.Device,
+    // TODO: maybe not u32
+    platform_interrupt: ?u32,
 
     pub const Id = struct {
         vendor_id: u16,

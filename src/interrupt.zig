@@ -6,6 +6,8 @@ pub const InterruptController = struct {
     setPriority: *const fn (int_num: usize, priority: usize) Error!void,
     getPriority: *const fn (int_num: usize) Error!usize,
     setHandler: *const fn (int_num: usize, handler: *const fn () void) Error!void,
+    dumpPendingInterrupts: *const fn () void,
+    dumpEnabledInterrupts: *const fn () void,
 
     pub const Error = error{
         NoController,
@@ -51,4 +53,16 @@ pub fn setHandler(int_num: usize, handler: *const fn () void) InterruptControlle
         return error.NoController;
 
     return controller.setHandler(int_num, handler);
+}
+
+pub fn dumpPendingInterrupts() void {
+    const controller = interruptController orelse @panic("TODO");
+
+    controller.dumpPendingInterrupts();
+}
+
+pub fn dumpEnabledInterrupts() void {
+    const controller = interruptController orelse @panic("TODO");
+
+    controller.dumpEnabledInterrupts();
 }

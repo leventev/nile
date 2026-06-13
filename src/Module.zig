@@ -59,6 +59,7 @@ const module_source_files: []const type = &.{
     @import("drivers/bus/pcie.zig"),
     @import("drivers/virtio/virtio_gpu.zig"),
     @import("drivers/virtio/virtio_input.zig"),
+    @import("drivers/int_controller/plic.zig"),
 };
 
 pub var modules = blk: {

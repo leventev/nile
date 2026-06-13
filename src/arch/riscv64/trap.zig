@@ -1,6 +1,6 @@
 const std = @import("std");
 const kio = @import("../../kio.zig");
-const csr = @import("csr.zig").CSR;
+const CSR = @import("csr.zig").CSR;
 const sbi = @import("sbi.zig");
 const timer = @import("timer.zig");
 const devicetree = @import("root").devicetree;
@@ -183,26 +183,26 @@ pub const SStatus = packed struct(u64) {
 };
 
 pub fn enableInterrupts() void {
-    csr.sstatus.setBits(1 << @bitOffsetOf(SStatus, "supervisor_interrupt_enable"));
+    CSR.sstatus.setBits(1 << @bitOffsetOf(SStatus, "supervisor_interrupt_enable"));
 }
 
 pub fn disableInterrupts() void {
-    csr.sstatus.clearBits(1 << @bitOffsetOf(SStatus, "supervisor_interrupt_enable"));
+    CSR.sstatus.clearBits(1 << @bitOffsetOf(SStatus, "supervisor_interrupt_enable"));
 }
 
 pub fn enableInterrupt(id: usize) void {
     std.debug.assert(id < 64);
-    csr.sie.setBits(std.math.shl(u64, 1, id));
+    CSR.sie.setBits(std.math.shl(u64, 1, id));
 }
 
 pub fn disableInterrupt(id: usize) void {
     std.debug.assert(id < 64);
-    csr.sie.clearBits(std.math.shl(u64, 1, id));
+    CSR.sie.clearBits(std.math.shl(u64, 1, id));
 }
 
 pub fn clearPendingInterrupt(id: usize) void {
     std.debug.assert(id < 64);
-    csr.sip.clearBits(std.math.shl(u64, 1, id));
+    CSR.sip.clearBits(std.math.shl(u64, 1, id));
 }
 
 fn genericExceptionHandler(code: ExceptionCode, tval: u64, regs: *Registers) void {
@@ -302,14 +302,12 @@ export fn handleTrap(
     }
 }
 
-pub fn initDriver(dt: *const devicetree.DeviceTree, handle: usize) !void {
-    _ = dt;
-    _ = handle;
+pub fn init() void {
     const stvec = TrapVectorBaseAddr.make(
         @intFromPtr(&trapHandlerSupervisor),
         TrapVectorBaseAddr.Mode.direct,
     );
 
-    csr.stvec.write(@bitCast(stvec));
+    CSR.stvec.write(@bitCast(stvec));
     trap_stack_bottom = @intFromPtr(&trap_stack) + trap_stack_size;
 }

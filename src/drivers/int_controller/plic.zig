@@ -1,13 +1,14 @@
+//! https://github.com/riscv/riscv-plic-spec
+
 const std = @import("std");
 const root = @import("root");
-const mm = root.mm;
+const mm = @import("../../mem/mm.zig");
 const devicetree = root.devicetree;
 const kio = root.kio;
 const interrupt = root.interrupt;
-const riscv_int = @import("trap.zig");
-
-// https://github.com/riscv/riscv-plic-spec
-// https://www.starfivetech.com/uploads/sifive-interrupt-cookbook-v1p2.pdf
+const riscv_int = @import("../../arch/riscv64/trap.zig");
+const Module = @import("../../Module.zig");
+const CSR = @import("../../arch/riscv64/csr.zig").CSR;
 
 /// Priorities are u32 values, interrupt source 0 does not exist
 const priorities_base_off = 0x0;
@@ -43,7 +44,7 @@ const PLICError = error{
 
 var plic: ?PLIC = null;
 
-pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
+fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!void {
     if (plic != null) {
         @panic("PLIC is already initialized");
     }
@@ -58,27 +59,30 @@ pub fn initDriver(dt: *const devicetree.DeviceTree, handle: u32) !void {
 
     const reg = node.getProperty(.reg) orelse
         return error.InvalidDeviceTree;
-    var reg_it = try reg.iterator(address_cells, 0);
+    var reg_it = reg.iterator(address_cells, 0) catch @panic("TODO");
     const base_addr: u64 = @intCast((reg_it.next() orelse return error.InvalidDeviceTree).address);
     const phys_addr = mm.PhysicalAddress.fromInt(base_addr);
     const virt_addr = mm.physicalToVirtualAddress(phys_addr);
 
+    std.log.debug("virt: 0x{x} phys: 0x{x}", .{ virt_addr.asInt(), phys_addr.asInt() });
     plic = .{
         .base_ptr = virt_addr,
         .max_interrupts = max_interrupts,
     };
 
-    try setThreshold(0, 0);
+    setThreshold(0, 0) catch @panic("TODO");
 
-    try interrupt.registerInterruptController(interrupt.InterruptController{
+    interrupt.registerInterruptController(interrupt.InterruptController{
         .enableInterrupt = enableInterruptWrapper,
         .disableInterrupt = disableInterruptWrapper,
         .setPriority = setPriorityWrapper,
         .getPriority = getPriorityWrapper,
         .setHandler = setHandlerWrapper,
-    });
+        .dumpPendingInterrupts = dumpPendingInterrupts,
+        .dumpEnabledInterrupts = dumpEnabledInterrupts,
+    }) catch @panic("Failed to register interrupt controller");
 
-    riscv_int.enableInterrupt(@intCast(@intFromEnum(riscv_int.InterruptCode.machine_external)));
+    // riscv_int.enableInterrupt(@intCast(@intFromEnum(riscv_int.InterruptCode.machine_external)));
     riscv_int.enableInterrupt(@intCast(@intFromEnum(riscv_int.InterruptCode.supervisor_external)));
 }
 
@@ -87,26 +91,6 @@ fn enableInterruptWrapper(int_num: usize) interrupt.InterruptController.Error!vo
     // TODO: contexts
     const context = 0;
     enableInterrupt(context, int) catch |err| {
-        return switch (err) {
-            PLICError.DriverUninitialized => error.ControllerInternalError,
-            PLICError.InvalidInterruptID => error.InvalidInterruptID,
-            PLICError.InvalidPriority => error.InvalidPriority,
-            PLICError.InvalidContext => @panic("invalid context"),
-            PLICError.InvalidThreshold => @panic("invalid threshold"),
-        };
-    };
-
-    enableInterrupt(1, int) catch |err| {
-        return switch (err) {
-            PLICError.DriverUninitialized => error.ControllerInternalError,
-            PLICError.InvalidInterruptID => error.InvalidInterruptID,
-            PLICError.InvalidPriority => error.InvalidPriority,
-            PLICError.InvalidContext => @panic("invalid context"),
-            PLICError.InvalidThreshold => @panic("invalid threshold"),
-        };
-    };
-
-    enableInterrupt(2, int) catch |err| {
         return switch (err) {
             PLICError.DriverUninitialized => error.ControllerInternalError,
             PLICError.InvalidInterruptID => error.InvalidInterruptID,
@@ -204,19 +188,34 @@ fn getPending(id: u32) PLICError!bool {
 fn enableInterrupt(context: u32, id: u32) PLICError!void {
     const inner = plic orelse return error.DriverUninitialized;
     // TODO: locking
+    //
+    std.log.debug("ENABLE INTERRUPT #{}", .{id});
 
     if (context > context_count) return error.InvalidContext;
     if (id == 0 or id > inner.max_interrupts) return error.InvalidInterruptID;
 
-    const word = id / @sizeOf(u32);
-    const bit = id % @sizeOf(u32);
+    const idx = id / @bitSizeOf(u32);
+    const bit = id % @bitSizeOf(u32);
 
-    const bytes_per_context = max_interrupt_count / @sizeOf(u32);
-    const base = inner.base_ptr.asInt() + pending_bits_base_off;
+    const base = inner.base_ptr.add(enable_bits_base_off);
+    const bytes_per_context = max_interrupt_count / @sizeOf(u8);
     const context_off = context * bytes_per_context;
 
-    const enable_bits: [*]u32 = @ptrFromInt(base + context_off);
-    enable_bits[word] |= std.math.shl(u32, 1, bit);
+    const addr = base.add(context_off);
+
+    const enable_bits = addr.asPtr([*]u32);
+    std.log.debug("ctx: {} id: {} base: 0x{x} bpc: 0x{x} off: 0x{x} enable bits: 0x{x} idx: {} bit: {}", .{
+        context,
+        id,
+        base.asInt(),
+        bytes_per_context,
+        context_off,
+        @intFromPtr(enable_bits),
+        idx,
+        bit,
+    });
+    enable_bits[idx] |= std.math.shl(u32, 1, bit);
+    std.log.debug("0x{x} {b} {b}", .{ @intFromPtr(&enable_bits[idx]), enable_bits[idx], std.math.shl(u32, 1, bit) });
 }
 
 fn disableInterrupt(context: u32, id: u32) PLICError!void {
@@ -226,15 +225,61 @@ fn disableInterrupt(context: u32, id: u32) PLICError!void {
     if (context > context_count) return error.InvalidContext;
     if (id == 0 or id > inner.max_interrupts) return error.InvalidInterruptID;
 
-    const word = id / @sizeOf(u32);
+    const idx = id / @sizeOf(u32);
     const bit = id % @sizeOf(u32);
 
-    const bytes_per_context = max_interrupt_count / @sizeOf(u32);
-    const base = inner.base_ptr.asInt() + pending_bits_base_off;
+    const bytes_per_context = max_interrupt_count / @sizeOf(u8);
+    const base = inner.base_ptr.asInt() + enable_bits_base_off;
     const context_off = context * bytes_per_context;
 
     const enable_bits: [*]u32 = @ptrFromInt(base + context_off);
-    enable_bits[word] &= ~std.math.shl(u32, 1, bit);
+    enable_bits[idx] &= ~std.math.shl(u32, 1, bit);
+}
+
+fn dumpPendingInterrupts() void {
+    const inner = plic orelse @panic("TODO");
+
+    const base = inner.base_ptr.add(pending_bits_base_off);
+    const pending_bits = base.asPtr([*]u32);
+
+    const dwords = inner.max_interrupts / @sizeOf(u32);
+
+    for (0..dwords) |dword_idx| {
+        std.log.debug("0x{x}: {b:032}", .{ @intFromPtr(&pending_bits[dword_idx]), pending_bits[dword_idx] });
+    }
+    // for (0..inner.max_interrupts) |id| {
+    //     const idx = id / @sizeOf(u32);
+    //     const bit = id % @sizeOf(u32);
+    //
+    //     std.log.debug("{}", .{pending_bits[idx]});
+    //
+    //     // if (pending_bits[idx] & std.math.shl(u32, 1, bit) > 0) {
+    //     //     std.log.debug("Interrupt #{} is pending", .{id});
+    //     // }
+    // }
+}
+
+fn dumpEnabledInterrupts() void {
+    const inner = plic orelse @panic("TODO");
+
+    const base = inner.base_ptr.add(enable_bits_base_off);
+    const enabled_bits = base.asPtr([*]u32);
+
+    const dwords = inner.max_interrupts / @sizeOf(u32);
+
+    for (0..dwords) |dword_idx| {
+        std.log.debug("0x{x}: {b:032}", .{ @intFromPtr(&enabled_bits[dword_idx]), enabled_bits[dword_idx] });
+    }
+    // for (0..inner.max_interrupts) |id| {
+    //     const idx = id / @sizeOf(u32);
+    //     const bit = id % @sizeOf(u32);
+    //
+    //     std.log.debug("{}", .{pending_bits[idx]});
+    //
+    //     // if (pending_bits[idx] & std.math.shl(u32, 1, bit) > 0) {
+    //     //     std.log.debug("Interrupt #{} is pending", .{id});
+    //     // }
+    // }
 }
 
 fn setThreshold(context: u32, threshold: u32) PLICError!void {
@@ -277,3 +322,16 @@ fn complete(context: u32, id: u32) PLICError!void {
     const context_complete: *u32 = @ptrFromInt(base + context_off);
     context_complete.* = id;
 }
+
+pub const module: Module = .{
+    .name = "plic",
+    .module_type = .{
+        .device_driver = .{
+            .devicetree = .{
+                // TODO: way more compatible than this
+                .compatible = &.{ "riscv,plic0", "sifive,plic-1.0.0" },
+                .init = init,
+            },
+        },
+    },
+};

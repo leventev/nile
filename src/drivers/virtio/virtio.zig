@@ -443,7 +443,7 @@ pub const VirtQueue = struct {
 
         const notif_addr = virt_dev.notification_base.add(multiplier * notify_off);
         const notify_ptr: *u16 = notif_addr.asPtr(*u16);
-        notify_ptr.* = 0;
+        notify_ptr.* = self.queue_id;
 
         while (self.used_ring_header.index != self.available_ring_header.index) {}
     }
@@ -455,7 +455,9 @@ pub const VirtQueue = struct {
         self: *VirtQueue,
         virt_dev: *VirtioDevice,
         descriptor_chain_ids: []const u16,
+        poll: bool,
     ) void {
+        std.log.debug("3 {}", .{virt_dev.common.device_status.driver_ok});
         var new_index = self.available_ring_header.index;
         for (descriptor_chain_ids) |descriptor_id| {
             std.debug.assert(descriptor_id < self.queue_count);
@@ -463,17 +465,26 @@ pub const VirtQueue = struct {
             self.available_ring[new_index % self.queue_count] = descriptor_id;
             new_index +%= 1;
         }
+        std.log.debug("4 {}", .{virt_dev.common.device_status.driver_ok});
         self.available_ring_header.index = new_index;
+        std.log.debug("5 {}", .{virt_dev.common.device_status.driver_ok});
 
+        std.log.debug("6 {}", .{virt_dev.common.device_status.driver_ok});
         virt_dev.common.queue_select = self.queue_id;
+
+        std.log.debug("7 {}", .{virt_dev.common.device_status.driver_ok});
         const notify_off = virt_dev.common.queue_notify_offset;
         const multiplier = virt_dev.notification_capability.notification_offset_multiplier;
 
+        std.log.debug("8 {}", .{virt_dev.common.device_status.driver_ok});
         const notif_addr = virt_dev.notification_base.add(multiplier * notify_off);
         const notify_ptr: *u16 = notif_addr.asPtr(*u16);
-        notify_ptr.* = 0;
+        notify_ptr.* = self.queue_id;
+        std.log.debug("9 {}", .{virt_dev.common.device_status.driver_ok});
 
-        while (self.used_ring_header.index != self.available_ring_header.index) {}
+        if (poll) {
+            while (self.used_ring_header.index != self.available_ring_header.index) {}
+        }
     }
 
     /// Writes one element of a buffer chain.

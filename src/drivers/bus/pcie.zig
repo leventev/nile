@@ -13,6 +13,8 @@ const device = @import("../../device.zig");
 const slab_allocator = @import("../../mem/slab_allocator.zig");
 const arch = @import("../../arch/arch.zig");
 
+const log = std.log.scoped(.pcie);
+
 /// Common header fields for every PCI device.
 /// All fields are required if not specified otherwise.
 pub const CommonHeader = extern struct {
@@ -614,11 +616,20 @@ fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!
     const reg = node.getProperty(.reg) orelse
         @panic("Devicetree PCI node is required to contain .reg field");
 
-    devicetree.printDeviceTree("/", dt, handle, 0);
     const parent_address_cells = node.getAddressCellFromParent(dt);
     const parent_size_cells = node.getSizeCellFromParent(dt);
     const child_address_cells = node.getAddressCell();
     const child_size_cells = node.getSizeCell();
+    const child_interrupt_cells = node.getProperty(.interrupt_cells) orelse @panic("TODO: child interrupt cells");
+
+    const interrupt_map = node.getProperty(.interrupt_map) orelse
+        @panic("Devicetree PCI node does not have .interrupt_map field");
+
+    var int_map_it = interrupt_map.iterator(child_address_cells, child_interrupt_cells);
+    while (int_map_it.next(dt)) |mapping| {
+        log.debug("{any}", .{mapping});
+    }
+
     // TODO
     std.debug.assert(parent_address_cells <= 2 and parent_size_cells <= 2);
 

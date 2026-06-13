@@ -155,6 +155,9 @@ const VirtioInputEvent = extern struct {
 
 fn init(dev: *const device.Device) void {
     const pci_dev = pcie.pciDeviceFromDevice(dev);
+    const cfg_space = pcie.ConfigurationSpace.fromAddress(pci_dev.address);
+    const header = cfg_space.generalHeader();
+    log.debug("INT PIN: {}", .{header.interrupt_pin});
     const features = virtio.initializeVirtioDevice(pci_dev, &input.virtio_device, 0);
 
     // std.log.debug("VIRTIO INPUT {any}", .{input.virtio_device.device_specific});
@@ -187,7 +190,7 @@ fn init(dev: *const device.Device) void {
         input.virtio_device.common,
         event_queue_id,
         null,
-        .{ .no_interrupt = true },
+        .{ .no_interrupt = false },
     ) catch @panic("TODO");
 
     input.status_queue = VirtQueue.setup(

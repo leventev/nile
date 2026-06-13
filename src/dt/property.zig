@@ -61,7 +61,7 @@ pub const Property = union(PropertyType) {
     interrupts_extended: InterruptsExtended,
     interrupt_cells: u32,
     interrupt_controller: void,
-    interrupt_map: []const u8, // TODO
+    interrupt_map: InterruptMap, // TODO
     interrupt_map_mask: []const u8, // TODO
     clock_frequency: u64,
     timebase_frequency: u64,
@@ -90,6 +90,14 @@ pub const Property = union(PropertyType) {
             },
             .size_cells => |val| {
                 try writer.print("size_cells = {}", .{val});
+            },
+            .interrupt_map => |val| {
+                const node = dt.nodes.items[handle];
+                const child_address_cells = node.getAddressCell();
+                const child_interrupt_cells = node.getProperty(.interrupt_cells) orelse unreachable;
+
+                _ = try writer.write("interrupt_map = ");
+                try val.print(writer, dt, child_address_cells, child_interrupt_cells);
             },
             .ranges => |val| {
                 const node = dt.nodes.items[handle];
@@ -390,5 +398,96 @@ pub const Range = struct {
         child_address: u128,
         parent_address: u128,
         size: u128,
+    };
+};
+
+pub const InterruptMap = struct {
+    buff: []const u8,
+
+    pub fn print(
+        self: InterruptMap,
+        writer: *std.Io.Writer,
+        dt: *const devicetree.DeviceTree,
+        child_address_cells: u32,
+        child_interrupt_cells: u32,
+    ) !void {
+        var it = self.iterator(child_address_cells, child_interrupt_cells);
+        var first = true;
+        _ = try writer.writeByte('<');
+        while (it.next(dt)) |mapping| {
+            if (first) {
+                first = false;
+            } else {
+                _ = try writer.writeByte(' ');
+            }
+
+            const parent = dt.nodes.items[mapping.interrupt_parent_handle];
+            const grand_parent = dt.nodes.items[parent.parent_handle];
+            const parent_name = grand_parent.getChildNameFromHandle(
+                mapping.interrupt_parent_handle,
+            ) orelse unreachable;
+
+            try writer.print("0x{x} 0x{x} &{s} 0x{x} 0x{x}", .{
+                mapping.child_unit_address,
+                mapping.child_interrupt_specifier,
+                parent_name,
+                mapping.parent_unit_address,
+                mapping.parent_interrupt_specifier,
+            });
+        }
+        _ = try writer.writeByte('>');
+    }
+
+    pub fn iterator(
+        self: InterruptMap,
+        child_address_cells: u32,
+        child_interrupt_cells: u32,
+    ) Iterator {
+        return .{
+            .buff = self.buff,
+            .child_address_cells = child_address_cells,
+            .child_interrupt_cells = child_interrupt_cells,
+            .idx = 0,
+        };
+    }
+
+    pub const Iterator = struct {
+        buff: []const u8,
+        child_address_cells: u32,
+        child_interrupt_cells: u32,
+        idx: u32,
+
+        pub fn next(self: *Iterator, dt: *const devicetree.DeviceTree) ?Entry {
+            if (self.idx == self.buff.len) return null;
+
+            const child_address = readCells(self.buff, &self.idx, self.child_address_cells);
+            const child_int_specifier = readCells(self.buff, &self.idx, self.child_interrupt_cells);
+            const int_phandle: u32 = @intCast(readCells(self.buff, &self.idx, 1));
+            const int_parent_handle = dt.phandle_table.get(int_phandle) orelse @panic("TODO");
+
+            const parent_node = dt.nodes.items[int_parent_handle];
+
+            const parent_address_cells = parent_node.getAddressCell();
+            const parent_int_cells = parent_node.getProperty(.interrupt_cells) orelse @panic("TODO: parent interrupt cells");
+
+            const parent_address = readCells(self.buff, &self.idx, parent_address_cells);
+            const parent_interrupt_specifier = readCells(self.buff, &self.idx, parent_int_cells);
+
+            return .{
+                .child_unit_address = child_address,
+                .child_interrupt_specifier = child_int_specifier,
+                .interrupt_parent_handle = int_parent_handle,
+                .parent_unit_address = parent_address,
+                .parent_interrupt_specifier = parent_interrupt_specifier,
+            };
+        }
+    };
+
+    pub const Entry = struct {
+        child_unit_address: u128,
+        child_interrupt_specifier: u128,
+        interrupt_parent_handle: u32,
+        parent_unit_address: u128,
+        parent_interrupt_specifier: u128,
     };
 };

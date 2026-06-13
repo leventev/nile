@@ -134,8 +134,6 @@ fn writeBytes(buf: []const u8) ?usize {
 pub fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!void {
     const uart = dt.nodes.items[handle];
 
-    devicetree.printDeviceTree("/", dt, handle, 0);
-
     const freq = uart.getProperty(.clock_frequency) orelse
         return error.InvalidDeviceTree;
     _ = freq;

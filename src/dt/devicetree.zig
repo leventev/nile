@@ -224,7 +224,7 @@ fn readProperty(blob: []const u32, ptr: [*]u32) PropertyRead {
     } else if (std.mem.eql(u8, name_slice, "interrupt-controller")) {
         prop = .{ .interrupt_controller = {} };
     } else if (std.mem.eql(u8, name_slice, "interrupt-map")) {
-        prop = .{ .interrupt_map = value };
+        prop = .{ .interrupt_map = .{ .buff = value } };
     } else if (std.mem.eql(u8, name_slice, "interrupt-map-mask")) {
         prop = .{ .interrupt_map_mask = value };
     } else if (std.mem.eql(u8, name_slice, "clock-frequency")) {
@@ -302,7 +302,6 @@ fn readNode(allocator: std.mem.Allocator, dt: *DeviceTree, node_handle: u32, ptr
 }
 
 pub fn printDeviceTree(
-    path: []const u8,
     dt_root: *const DeviceTree,
     handle: u32,
     depth: usize,
@@ -315,8 +314,6 @@ pub fn printDeviceTree(
         space_buf[i] = ' ';
     }
 
-    std.log.info("{s}{s}:", .{ space_buf[0..space_count], path });
-
     // TODO: determine a good buffer size
     var prop_buff: [4096]u8 = undefined;
     var writer = std.Io.Writer.fixed(prop_buff[0..]);
@@ -324,11 +321,12 @@ pub fn printDeviceTree(
         writer.end = 0;
         prop.print(handle, dt_root, &writer) catch @panic("buffer too small");
         const str = writer.buffered();
-        std.log.info("{s}{s}", .{ space_buf[0..space_count], str });
+        std.log.info("{s}.{s}", .{ space_buf[0..space_count], str });
     }
 
     for (node.children.items) |child| {
-        printDeviceTree(child.name, dt_root, child.handle, depth + 1);
+        std.log.info("{s}{s}:", .{ space_buf[0..space_count], child.name });
+        printDeviceTree(dt_root, child.handle, depth + 1);
     }
 }
 
@@ -356,46 +354,7 @@ fn addDevice(
     };
 
     device.addDevice(dev);
-
-    // var it = compatible.iterator();
-    // while (it.next()) |device_compatible| {
-    //     for (Module.modules) |mod| {
-    //         if (mod.initialized or mod.module.module_type != .device_driver) continue;
-    //         switch (mod.module.module_type.device_driver) {
-    //             .devicetree => |dt_mod| {
-    //                 for (dt_mod.compatible) |driver_compatible| {
-    //                     if (!std.mem.eql(u8, driver_compatible, device_compatible)) continue;
-    //
-    //                     dt_mod.init(dt, handle) catch |err| {
-    //                         std.log.err("failed to initialize {s}: {s}", .{ mod.module.name, @errorName(err) });
-    //                     };
-    //                     std.log.info("Module '{s}'({s}) initialized", .{ mod.module.name, node_name });
-    //
-    //                     return;
-    //                 }
-    //             },
-    //             else => {},
-    //         }
-    //     }
-    // }
-    //
-    // var compBuff: [256]u8 = undefined;
-    // var writer = std.Io.Writer.fixed(compBuff[0..]);
-    // compatible.print(&writer) catch @panic("compatible string too long");
-    // const allCompString = writer.buffered();
-    //
-    // std.log.warn(
-    //     "Compatible driver not found for '{s}' compatible: '{s}'",
-    //     .{ node_name, allCompString },
-    // );
 }
-
-// pub fn initDriversFromDeviceTreeEarly(dt: *const DeviceTree) void {
-//     for (dt.nodes.items, 0..) |*node, handle| {
-//         if (node.getProperty(.interrupt_controller) == null) continue;
-//         initDriverFromDeviceTree(dt, node, @intCast(handle));
-//     }
-// }
 
 pub fn addDevices(dt: *const DeviceTree) !void {
     // TODO: dont use objectcache

@@ -54,8 +54,8 @@ pub const SlabAllocator = struct {
     }
 
     /// Create an object cache
-    pub fn createObjectCache(self: *SlabAllocator, comptime T: type) ObjectCache(T) {
-        var cache = ObjectCache(T){};
+    pub fn createObjectCache(self: *SlabAllocator, comptime T: type) FixedSizedCache(T) {
+        var cache = FixedSizedCache(T){};
         cache.init(self);
         return cache;
     }
@@ -347,7 +347,101 @@ pub const SlabAllocator = struct {
     }
 };
 
-/// An object specific allocator, objects are preallocated resulting in faster allocations.
+/// An allocator for fixed sized buffers, these are preallocated resulting in faster allocations.
+/// More space is reserved if the cache runs out of available buffers.
+pub const FixedSizedCache = struct {
+    const Self = @This();
+
+    /// Internal slab allocator, this struct is used as a wrapper around it
+    /// for nicer interface. Should not be accessed outside.
+    __slab_backing: *SlabAllocator.Cache = undefined,
+
+    /// The sized of the buffer. MUST NOT be changed.
+    size: usize,
+
+    initialized: bool = false,
+
+    /// On init the formatted name of the cache is written to this.
+    name_buffer: [64]u8,
+
+    /// Allocate a single buffer.
+    pub fn alloc(self: Self) BuddyAllocator.Error!*anyopaque {
+        std.debug.assert(self.initialized);
+        const addr: VirtualAddress = try self.__slab_backing.alloc();
+        return addr.asPtr(*anyopaque);
+    }
+
+    /// Free a single buffer.
+    pub fn free(self: Self, ptr: *anyopaque) void {
+        std.debug.assert(self.initialized);
+        const addr: VirtualAddress = .fromInt(@intFromPtr(ptr));
+        self.__slab_backing.free(addr);
+    }
+
+    /// The total number of buffers reserved, the sum of free and allocated buffers.
+    pub fn totalCount(self: Self) usize {
+        std.debug.assert(self.initialized);
+        return self.__slab_backing.total_object_count;
+    }
+
+    /// The number of free buffers.
+    pub fn freeCount(self: Self) usize {
+        std.debug.assert(self.initialized);
+        return self.__slab_backing.free_object_count;
+    }
+
+    /// The number of allocated buffers.
+    pub fn allocatedCount(self: Self) usize {
+        std.debug.assert(self.initialized);
+        return self.totalCount() - self.freeCount();
+    }
+
+    /// Initializes the cache.
+    fn init(self: *Self, slab_allocator: *SlabAllocator, size: usize) void {
+        std.debug.assert(!self.initialized);
+
+        self.initialized = true;
+        self.size = size;
+        self.__slab_backing = slab_allocator.meta_cache.alloc() catch @panic("Unable to allocate new cache");
+
+        const name = std.fmt.bufPrint(
+            &self.name_buffer,
+            "fixed-cache-{}",
+            .{self.size},
+        ) catch @panic("Name buffer is too small");
+
+        // TODO: come up with some kind of logic for assigning higher block orders
+        var slab_block_order = buddy_allocator.blockOrderFromSize(size);
+        // TODO: fix this hack
+        if (size == std.math.shl(usize, 1, 12 + slab_block_order))
+            slab_block_order += 1;
+
+        const alignment = if (size < 16) size else 16;
+        const alignment_log = std.math.log2_int(u5, @intCast(alignment));
+        self.__slab_backing.* = .{
+            .name = name,
+            .slab_block_order = slab_block_order,
+            .unused_slabs = .{},
+            .partial_slabs = .{},
+            .full_slabs = .{},
+            .free_object_count = 0,
+            .total_object_count = 0,
+            .list_node = .{},
+            .object_size = self.size,
+            .alignment_log = alignment_log,
+            .objects_per_slab = SlabAllocator.objectsPerSlab(
+                slab_block_order,
+                self.size,
+                alignment_log,
+            ),
+        };
+
+        slab_allocator.caches.append(&self.__slab_backing.list_node);
+        slab_allocator.cache_count += 1;
+    }
+};
+
+/// An specific allocator, objects are preallocated resulting in faster allocations.
 /// More space is reserved if the cache runs out of available objects.
 pub fn ObjectCache(comptime T: type) type {
     return struct {
@@ -431,6 +525,10 @@ pub fn createObjectCache(comptime T: type) ObjectCache(T) {
     var cache = ObjectCache(T){};
     cache.init(&global_slab_allocator);
     return cache;
+}
+
+pub fn initFixedBufferCache(buffer_cache: *FixedSizedCache, size: usize) void {
+    buffer_cache.init(&global_slab_allocator, size);
 }
 
 pub fn init() void {

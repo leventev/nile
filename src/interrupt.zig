@@ -27,19 +27,24 @@ const InterruptHandler = struct {
     interrupt_number: usize,
     handle: *const fn (dev: *Device) void,
     call_count: usize,
-    next: ?*InterruptHandler,
 };
 
 // TODO: very temporary solution until we get the GPA working
-var interrupt_handlers: ?*InterruptHandler = null;
-var interrupt_handler_cache: slab_allocator.ObjectCache(InterruptHandler) = undefined;
+var interrupt_handlers: []InterruptHandler = &.{};
+// var interrupt_handler_cache: slab_allocator.ObjectCache(InterruptHandler) = undefined;
+
+pub fn setupHandlers(gpa: std.mem.Allocator) !void {
+    const controller = interrupt_controller orelse
+        return error.NoController;
+
+    interrupt_handlers = try gpa.alloc(InterruptHandler, controller.max_interrupt + 1);
+}
 
 pub fn registerInterruptController(controller: InterruptController) InterruptController.Error!void {
     if (interrupt_controller != null)
         return error.AlreadyRegistered;
 
     interrupt_controller = controller;
-    interrupt_handler_cache = slab_allocator.createObjectCache(InterruptHandler);
 }
 
 pub fn enableInterrupt(int_num: usize) InterruptController.Error!void {
@@ -75,25 +80,16 @@ pub fn dumpEnabledInterrupts() void {
 }
 
 pub fn setHandler(int_num: usize, handle: *const fn (dev: *Device) void, dev: *Device) void {
-    var next_ptr = &interrupt_handlers;
-    while (next_ptr.*) |handler| : (next_ptr = &handler.next) {}
-
-    var new_handler = interrupt_handler_cache.alloc() catch @panic("Failed to alloc");
-    new_handler.interrupt_number = int_num;
-    new_handler.handle = handle;
-    new_handler.owner = dev;
-    new_handler.call_count = 0;
-    new_handler.next = null;
-
-    next_ptr.* = new_handler;
+    interrupt_handlers[int_num] = .{
+        .interrupt_number = int_num,
+        .handle = handle,
+        .owner = dev,
+        .call_count = 0,
+    };
 }
 
 pub fn dispatchInterruipt(int_num: usize) void {
-    var next_ptr = &interrupt_handlers;
-    while (next_ptr.*) |handler| : (next_ptr = &handler.next) {
-        if (handler.interrupt_number == int_num) {
-            handler.handle(handler.owner);
-            handler.call_count += 1;
-        }
-    }
+    const handler: *InterruptHandler = &interrupt_handlers[int_num];
+    handler.handle(handler.owner);
+    handler.call_count += 1;
 }

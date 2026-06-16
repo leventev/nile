@@ -171,7 +171,9 @@ pub fn matchNonDeviceTreeDevices() bool {
     return prev_bus_count != bus_count;
 }
 
-pub fn enableInterrupts() void {
+pub fn enableInterrupts(gpa: std.mem.Allocator) void {
+    interrupt.setupHandlers(gpa) catch @panic("Failed to allocate space for interrupt handlers");
+
     var device_ptr = devices;
     while (device_ptr) |device| : (device_ptr = device.next) {
         if (!device.matched) continue;

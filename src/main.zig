@@ -19,9 +19,7 @@ pub const Module = @import("Module.zig");
 pub const device = @import("device.zig");
 pub const framebuffer = @import("framebuffer.zig");
 pub const pc_font = @import("pc_font.zig");
-
-pub const virtio_input = @import("drivers/virtio/virtio_input.zig");
-pub const pcie = @import("drivers/bus/pcie.zig");
+pub const kernel_gpa = @import("mem/kernel_gpa.zig");
 
 const test_binary_file = @embedFile("shell");
 const test_archive = @embedFile("root.cpio");
@@ -90,6 +88,10 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     static_mem_allocator.free(frame_regions);
 
+    var allocator: kernel_gpa.KernelGPA = undefined;
+    allocator.init();
+    const gpa = allocator.allocator();
+
     // find interrupt controllers first
     devicetree.addDevices(&dt) catch @panic("TODO");
 
@@ -97,7 +99,7 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     while (device.matchNonDeviceTreeDevices()) {}
 
-    device.enableInterrupts();
+    device.enableInterrupts(gpa);
 
     Module.registerFsModules();
 

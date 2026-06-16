@@ -99,6 +99,8 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     device.enableInterrupts();
 
+    Module.registerFsModules();
+
     pc_font.init();
 
     framebuffer.fillRect(0, 0, 300, 500, .{
@@ -123,7 +125,6 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     fs.init();
 
-    // fs.registerFileSystem(&ram_file_system) catch @panic("Failed to register ramfs");
     fs.dumpRegisteredFilesystems();
 
     var mount_table: fs.MountTable = .{

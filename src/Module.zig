@@ -82,3 +82,13 @@ pub var modules = blk: {
 
     break :blk mods;
 };
+
+pub fn registerFsModules() void {
+    for (modules) |mod| {
+        switch (mod.module_type) {
+            .device_driver => continue,
+            .fs => |fs_type| fs.registerFileSystem(fs_type) catch
+                @panic("TODO: Failed to register fs"),
+        }
+    }
+}

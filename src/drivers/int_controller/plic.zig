@@ -119,7 +119,7 @@ const PLIC = struct {
         const base = self.base_ptr.add(pending_bits_base_off);
         const pending_bits = base.asPtr([*]u32);
 
-        const dwords = self.interrupt_count / @sizeOf(u32);
+        const dwords = self.interrupt_count / @bitSizeOf(u32);
 
         for (0..dwords) |dword_idx| {
             log.debug("0x{x}({}-{}): {b:032}", .{
@@ -138,7 +138,7 @@ const PLIC = struct {
         const offset = enable_bits_base_off + context_off;
         const enabled_bits = self.base_ptr.add(offset).asPtr([*]u32);
 
-        const dwords = self.interrupt_count / @sizeOf(u32);
+        const dwords = self.interrupt_count / @bitSizeOf(u32);
 
         for (0..dwords) |dword_idx| {
             log.debug("0x{x}({}-{}): {b:032}", .{

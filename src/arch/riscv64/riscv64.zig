@@ -30,9 +30,9 @@ pub const entries_per_table = riscv64_mm.entries_per_table;
 
 extern const __global_pointer: ?void;
 
-const KERNEL_PHYS_ADDRESS = 0x80200000;
-const KERNEL_VIRT_ADDRESS = 0xffffffffc0200000;
-const KERNEL_OFFSET = KERNEL_VIRT_ADDRESS - KERNEL_PHYS_ADDRESS;
+const kernel_physical_address = 0x80200000;
+const kernel_virtual_address = 0xffffffffc0200000;
+pub const kernel_virtual_offset = kernel_virtual_address - kernel_physical_address;
 
 pub fn setupNewThread(thread: *Thread, entry_point_addr: usize, stack_top: usize, user: bool) void {
     if (config.debug_scheduler) {
@@ -65,7 +65,7 @@ pub fn scheduleNextThread(thread: *Thread) void {
 pub const clock_source = timer.riscv_clock_source;
 
 fn sbiWriteBytes(bytes: []const u8) ?usize {
-    const phys_ptr: usize = @intFromPtr(bytes.ptr) - KERNEL_OFFSET;
+    const phys_ptr: usize = @intFromPtr(bytes.ptr) - kernel_virtual_offset;
     sbi.debugConsoleWrite(phys_ptr, bytes.len) catch return null;
     return bytes.len;
 }
@@ -99,8 +99,8 @@ export fn initRiscv64(
     std.log.info("SBI specification version: {}.{}", .{ sbi_version_major, sbi_version_minor });
     std.log.info("SBI implementation: {s} (ID={x}) version: 0x{x}", .{ sbi_impl_str, sbi_impl_id, sbi_implementation_version });
 
-    const dt_ptr_virt: *void = @ptrFromInt(dt_phys + KERNEL_OFFSET);
-    const root_page_table_virt: usize = root_page_table_phys + KERNEL_OFFSET;
+    const dt_ptr_virt: *void = @ptrFromInt(dt_phys + kernel_virtual_offset);
+    const root_page_table_virt: usize = root_page_table_phys + kernel_virtual_offset;
 
     const root_page_table = PageTable{ .entries = @ptrFromInt(root_page_table_virt) };
 

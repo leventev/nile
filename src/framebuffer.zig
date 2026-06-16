@@ -29,6 +29,8 @@ pub const Framebuffer = struct {
         height: usize,
         color: PixelRGBA,
     ) void {
+        std.debug.assert(start_x + width < self.active_display.width);
+        std.debug.assert(start_y + height < self.active_display.height);
         // TODO: format
 
         const pixels: [*]PixelRGBA = @ptrCast(@alignCast(self.active_display.memory));
@@ -36,6 +38,7 @@ pub const Framebuffer = struct {
         while (y < start_y + height) : (y += 1) {
             var x = start_x;
             while (x < start_x + width) : (x += 1) {
+                // log.debug("x: {} y: {} idx: {}", .{ x, y, y * self.active_display.width + x });
                 pixels[y * self.active_display.width + x] = color;
             }
         }
@@ -68,6 +71,7 @@ pub const Framebuffer = struct {
     };
 };
 
+const max_framebuffers = 4;
 var framebuffers: [max_framebuffers]Framebuffer = undefined;
 var framebuffer_count: usize = 0;
 
@@ -83,6 +87,12 @@ pub fn addFramebuffer(ops: Framebuffer.Operations, private_data: *anyopaque) boo
         log.warn("Failed to add framebuffer", .{});
         return false;
     }
+
+    log.debug("added framebuffer with {}x{} size, {} format", .{
+        fb.active_display.width,
+        fb.active_display.height,
+        fb.active_display.format,
+    });
 
     framebuffer_count += 1;
 
@@ -123,5 +133,3 @@ pub fn printText(x: usize, y: usize, str: []const u8) void {
         displayCharacter(x + i, y, ch);
     }
 }
-
-const max_framebuffers = 4;

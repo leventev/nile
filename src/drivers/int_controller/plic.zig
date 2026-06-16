@@ -3,324 +3,274 @@
 const std = @import("std");
 const root = @import("root");
 const mm = @import("../../mem/mm.zig");
-const devicetree = root.devicetree;
-const kio = root.kio;
-const interrupt = root.interrupt;
+const devicetree = @import("../../dt/devicetree.zig");
+const interrupt = @import("../../interrupt.zig");
 const riscv_int = @import("../../arch/riscv64/trap.zig");
 const Module = @import("../../Module.zig");
 const CSR = @import("../../arch/riscv64/csr.zig").CSR;
 
-/// Priorities are u32 values, interrupt source 0 does not exist
+const log = std.log.scoped(.plic);
+
+/// Priorities are u32 values, interrupt source 0 does not exist.
 const priorities_base_off = 0x0;
 
-/// Pending bits are bitfields organized in u32 values
+/// Pending bits are bitfields organized in u32 values.
 const pending_bits_base_off = 0x1000;
 
-/// Enable bits are bitfields organized in u32 values
+/// Enable bits are bitfields organized in u32 values.
+/// Unlike the pending bits, these are per context.
 const enable_bits_base_off = 0x2000;
 
-/// Contexts are each 0x1000 bytes apart but only the first two u32s are used, other bytes are reserved
+/// Each context has a threshhold, claim and complete register.
+/// They are each 0x1000 bytes apart, all other bytes are reserved.
 const context_base_off = 0x200000;
+
+/// Offset of the threshhold register from the base address of a context's registers.
 const context_priority_threshold_off = 0x0;
+
+/// Offset of the claim register from the base address of a context's registers.
 const context_claim_off = 0x4;
+
+/// Offset of the complete register from the base address of a context's registers.
 const context_complete_off = 0x4;
+
+/// Size of a context's registers.
 const context_size = 0x1000;
 
+/// Maximum number of interrupts possible, the actual number is read from the device tree.
 const max_interrupt_count = 1024;
-const context_count = 15872;
+
+/// Maximum number of contexts possible, the actual number is read from the device tree.
+const max_context_count = 15872;
 
 const PLIC = struct {
     base_ptr: mm.VirtualAddress,
-    max_interrupts: u32,
-};
+    interrupt_count: u32,
+    context_count: u32,
+    used_context: u32,
 
-const PLICError = error{
-    DriverUninitialized,
-    InvalidInterruptID,
-    InvalidPriority,
-    InvalidContext,
-    InvalidThreshold,
-};
+    fn setPriority(self: *const PLIC, id: u32, priority: u32) void {
+        std.debug.assert(id > 0 and id < self.interrupt_count);
+        std.debug.assert(priority < 7);
 
-var plic: ?PLIC = null;
+        // TODO: locking
 
-fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!void {
-    if (plic != null) {
-        @panic("PLIC is already initialized");
+        const priorities = self.base_ptr.add(priorities_base_off).asPtr([*]u32);
+        priorities[id] = priority;
     }
 
+    fn getPriority(self: *const PLIC, id: u32) usize {
+        std.debug.assert(id > 0 and id < self.interrupt_count);
+
+        // TODO: locking
+
+        const priorities = self.base_ptr.add(priorities_base_off).asPtr([*]u32);
+        return priorities[id];
+    }
+
+    fn getPending(self: *const PLIC, id: u32) bool {
+        std.debug.assert(id > 0 and id < self.interrupt_count);
+
+        // TODO: locking
+
+        const word = id / @sizeOf(u32);
+        const bit = id % @sizeOf(u32);
+
+        const pending_bits = self.base_ptr.add(pending_bits_base_off).asPtr([*]u32);
+        const pending = pending_bits[word] & std.math.shl(u32, 1, bit);
+        return pending > 0;
+    }
+
+    fn enableInterrupt(self: *const PLIC, context: u32, id: u32) void {
+        std.debug.assert(id > 0 and id < self.interrupt_count);
+        std.debug.assert(context < self.context_count);
+
+        // TODO: locking
+
+        const idx = id / @bitSizeOf(u32);
+        const bit = id % @bitSizeOf(u32);
+
+        const bytes_per_context = max_interrupt_count / @bitSizeOf(u8);
+        const context_off = context * bytes_per_context;
+
+        const offset = enable_bits_base_off + context_off;
+        const enable_bits = self.base_ptr.add(offset).asPtr([*]u32);
+        enable_bits[idx] |= std.math.shl(u32, 1, bit);
+    }
+
+    fn disableInterrupt(self: *const PLIC, context: u32, id: u32) void {
+        std.debug.assert(id > 0 and id < self.interrupt_count);
+        std.debug.assert(context < self.context_count);
+
+        // TODO: locking
+
+        const idx = id / @bitSizeOf(u32);
+        const bit = id % @bitSizeOf(u32);
+
+        const bytes_per_context = max_interrupt_count / @bitSizeOf(u8);
+        const context_off = context * bytes_per_context;
+
+        const offset = enable_bits_base_off + context_off;
+        const enable_bits = self.base_ptr.add(offset).asPtr([*]u32);
+        enable_bits[idx] &= ~std.math.shl(u32, 1, bit);
+    }
+
+    fn dumpPendingInterrupts(self: *const PLIC) void {
+        const base = self.base_ptr.add(pending_bits_base_off);
+        const pending_bits = base.asPtr([*]u32);
+
+        const dwords = self.interrupt_count / @sizeOf(u32);
+
+        for (0..dwords) |dword_idx| {
+            log.debug("0x{x}({}-{}): {b:032}", .{
+                @intFromPtr(&pending_bits[dword_idx]),
+                dword_idx * 32,
+                (dword_idx + 1) * 32 - 1,
+                pending_bits[dword_idx],
+            });
+        }
+    }
+
+    fn dumpEnabledInterrupts(self: *const PLIC) void {
+        const bytes_per_context = max_interrupt_count / @bitSizeOf(u8);
+        const context_off = self.used_context * bytes_per_context;
+
+        const offset = enable_bits_base_off + context_off;
+        const enabled_bits = self.base_ptr.add(offset).asPtr([*]u32);
+
+        const dwords = self.interrupt_count / @sizeOf(u32);
+
+        for (0..dwords) |dword_idx| {
+            log.debug("0x{x}({}-{}): {b:032}", .{
+                @intFromPtr(&enabled_bits[dword_idx]),
+                dword_idx * 32,
+                (dword_idx + 1) * 32 - 1,
+                enabled_bits[dword_idx],
+            });
+        }
+    }
+
+    fn setThreshold(self: *const PLIC, context: u32, threshold: u32) void {
+        std.debug.assert(threshold < 7);
+        std.debug.assert(context < self.context_count);
+
+        // TODO: locking
+
+        const offset = context_base_off + context * context_size + context_priority_threshold_off;
+
+        const context_threshold = self.base_ptr.add(offset).asPtr(*u32);
+        context_threshold.* = threshold;
+    }
+
+    fn claim(self: *const PLIC, context: u32) u32 {
+        std.debug.assert(context < self.context_count);
+
+        // TODO: locking
+
+        const offset = context_base_off + context * context_size + context_claim_off;
+        const context_claim = self.base_ptr.add(offset).asPtr(*u32);
+
+        const interrupt_id = context_claim.*;
+        return interrupt_id;
+    }
+
+    fn complete(self: *const PLIC, context: u32, id: u32) void {
+        std.debug.assert(context < self.context_count);
+        std.debug.assert(id < self.interrupt_count);
+
+        // TODO: locking
+
+        const offset = context_base_off + context * context_size + context_claim_off;
+        const context_complete = self.base_ptr.add(offset).asPtr(*u32);
+
+        context_complete.* = id;
+    }
+};
+
+var plic: PLIC = undefined;
+
+fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!void {
     const node = dt.nodes.items[handle];
 
-    const max_interrupts = node.getPropertyOtherU32("riscv,ndev") orelse
+    const interrupt_count = node.getPropertyOtherU32("riscv,ndev") orelse
         return error.InvalidDeviceTree;
 
     const address_cells = node.getAddressCellFromParent(dt);
-    if (address_cells > 2) @panic("address-cells must not be bigger than 2");
+    std.debug.assert(address_cells <= 2);
 
-    const reg = node.getProperty(.reg) orelse
-        return error.InvalidDeviceTree;
-    var reg_it = reg.iterator(address_cells, 0) catch @panic("TODO");
-    const base_addr: u64 = @intCast((reg_it.next() orelse return error.InvalidDeviceTree).address);
-    const phys_addr = mm.PhysicalAddress.fromInt(base_addr);
+    const reg = node.getProperty(.reg) orelse return error.InvalidDeviceTree;
+    var reg_it = reg.iterator(address_cells, 0) catch return error.InvalidDeviceTree;
+    const first_reg = reg_it.next() orelse return error.InvalidDeviceTree;
+
+    const phys_addr_int: u64 = @intCast(first_reg.address);
+    const phys_addr = mm.PhysicalAddress.fromInt(phys_addr_int);
     const virt_addr = mm.physicalToVirtualAddress(phys_addr);
 
-    std.log.debug("virt: 0x{x} phys: 0x{x}", .{ virt_addr.asInt(), phys_addr.asInt() });
+    const interrupts_extended = node.getProperty(.interrupts_extended) orelse
+        return error.InvalidDeviceTree;
+    var int_ext_it = interrupts_extended.iterator(dt);
+
+    var context_count: u32 = 0;
+    var used_context: ?u32 = null;
+    while (int_ext_it.next()) |int_ext| : (context_count += 1) {
+        if (int_ext.interrupt_specifier == std.math.maxInt(u32))
+            continue;
+
+        if (used_context == null)
+            used_context = context_count
+        else
+            log.warn("#{} context is used but ignored", .{context_count});
+    }
+
     plic = .{
         .base_ptr = virt_addr,
-        .max_interrupts = max_interrupts,
+        .interrupt_count = interrupt_count,
+        .context_count = context_count,
+        .used_context = used_context orelse return error.InvalidDeviceTree,
     };
 
-    setThreshold(0, 0) catch @panic("TODO");
-
     interrupt.registerInterruptController(interrupt.InterruptController{
+        .max_interrupt = interrupt_count - 1,
         .enableInterrupt = enableInterruptWrapper,
         .disableInterrupt = disableInterruptWrapper,
-        .setPriority = setPriorityWrapper,
-        .getPriority = getPriorityWrapper,
-        .setHandler = setHandlerWrapper,
         .dumpPendingInterrupts = dumpPendingInterrupts,
         .dumpEnabledInterrupts = dumpEnabledInterrupts,
     }) catch @panic("Failed to register interrupt controller");
 
-    // riscv_int.enableInterrupt(@intCast(@intFromEnum(riscv_int.InterruptCode.machine_external)));
+    // we set the threshhold to 0 and the individual priorities to 1
+    // to essentially disable the threshhold mechanism
+    plic.setThreshold(plic.used_context, 0);
+
     riscv_int.enableInterrupt(@intCast(@intFromEnum(riscv_int.InterruptCode.supervisor_external)));
 }
 
-fn enableInterruptWrapper(int_num: usize) interrupt.InterruptController.Error!void {
-    const int: u32 = @intCast(int_num);
-    // TODO: contexts
-    const context = 0;
-    enableInterrupt(context, int) catch |err| {
-        return switch (err) {
-            PLICError.DriverUninitialized => error.ControllerInternalError,
-            PLICError.InvalidInterruptID => error.InvalidInterruptID,
-            PLICError.InvalidPriority => error.InvalidPriority,
-            PLICError.InvalidContext => @panic("invalid context"),
-            PLICError.InvalidThreshold => @panic("invalid threshold"),
-        };
-    };
+fn enableInterruptWrapper(int_num: usize) void {
+    const id: u32 = @intCast(int_num);
+    plic.enableInterrupt(plic.used_context, id);
+    plic.setPriority(id, 1);
 }
 
-fn disableInterruptWrapper(int_num: usize) interrupt.InterruptController.Error!void {
-    const int: u32 = @intCast(int_num);
-    // TODO: contexts
-    const context = 0;
-    disableInterrupt(context, int) catch |err| {
-        return switch (err) {
-            PLICError.DriverUninitialized => interrupt.InterruptController.Error.ControllerInternalError,
-            PLICError.InvalidInterruptID => interrupt.InterruptController.Error.InvalidInterruptID,
-            PLICError.InvalidPriority => interrupt.InterruptController.Error.InvalidPriority,
-            PLICError.InvalidContext => @panic("invalid context"),
-            PLICError.InvalidThreshold => @panic("invalid threshold"),
-        };
-    };
-}
-
-fn setPriorityWrapper(int_num: usize, priority: usize) interrupt.InterruptController.Error!void {
-    // TODO: better cast
-    const int: u32 = @intCast(int_num);
-    const prio: u32 = @intCast(priority);
-
-    setPriority(int, prio) catch |err| {
-        return switch (err) {
-            PLICError.DriverUninitialized => interrupt.InterruptController.Error.ControllerInternalError,
-            PLICError.InvalidInterruptID => interrupt.InterruptController.Error.InvalidInterruptID,
-            PLICError.InvalidPriority => interrupt.InterruptController.Error.InvalidPriority,
-            PLICError.InvalidContext => @panic("invalid context"),
-            PLICError.InvalidThreshold => @panic("invalid threshold"),
-        };
-    };
-}
-
-fn getPriorityWrapper(int_num: usize) interrupt.InterruptController.Error!usize {
-    // TODO: better cast
-    const int: u32 = @intCast(int_num);
-
-    return getPriority(int) catch |err| {
-        return switch (err) {
-            PLICError.DriverUninitialized => interrupt.InterruptController.Error.ControllerInternalError,
-            PLICError.InvalidInterruptID => interrupt.InterruptController.Error.InvalidInterruptID,
-            PLICError.InvalidPriority => interrupt.InterruptController.Error.InvalidPriority,
-            PLICError.InvalidContext => @panic("invalid context"),
-            PLICError.InvalidThreshold => @panic("invalid threshold"),
-        };
-    };
-}
-
-fn setHandlerWrapper(int_num: usize, handler: *const fn () void) interrupt.InterruptController.Error!void {
-    _ = int_num;
-    _ = handler;
-}
-
-fn setPriority(id: u32, priority: u32) PLICError!void {
-    const inner = plic orelse return error.DriverUninitialized;
-    // TODO: locking
-
-    if (priority > 7) return error.InvalidPriority;
-
-    if (id == 0 or id > inner.max_interrupts) return error.InvalidInterruptID;
-    const priorities: [*]u32 = @ptrFromInt(inner.base_ptr.asInt() + priorities_base_off);
-    priorities[id] = priority;
-}
-
-fn getPriority(id: u32) PLICError!usize {
-    const inner = plic orelse return error.DriverUninitialized;
-    // TODO: locking
-
-    if (id == 0 or id > inner.max_interrupts) return error.InvalidInterruptID;
-    const priorities: [*]u32 = @ptrFromInt(inner.base_ptr.asInt() + priorities_base_off);
-    return priorities[id];
-}
-
-fn getPending(id: u32) PLICError!bool {
-    const inner = plic orelse return error.DriverUninitialized;
-    // TODO: locking
-
-    if (id == 0 or id > inner.max_interrupts) return error.InvalidInterruptID;
-    const word = id / @sizeOf(u32);
-    const bit = id % @sizeOf(u32);
-
-    const pending_bits: [*]u32 = @ptrFromInt(inner.base_ptr.asInt() + pending_bits_base_off);
-    const pending = pending_bits[word] & std.math.shl(u32, 1, bit);
-    return pending > 0;
-}
-
-fn enableInterrupt(context: u32, id: u32) PLICError!void {
-    const inner = plic orelse return error.DriverUninitialized;
-    // TODO: locking
-    //
-    std.log.debug("ENABLE INTERRUPT #{}", .{id});
-
-    if (context > context_count) return error.InvalidContext;
-    if (id == 0 or id > inner.max_interrupts) return error.InvalidInterruptID;
-
-    const idx = id / @bitSizeOf(u32);
-    const bit = id % @bitSizeOf(u32);
-
-    const base = inner.base_ptr.add(enable_bits_base_off);
-    const bytes_per_context = max_interrupt_count / @sizeOf(u8);
-    const context_off = context * bytes_per_context;
-
-    const addr = base.add(context_off);
-
-    const enable_bits = addr.asPtr([*]u32);
-    std.log.debug("ctx: {} id: {} base: 0x{x} bpc: 0x{x} off: 0x{x} enable bits: 0x{x} idx: {} bit: {}", .{
-        context,
-        id,
-        base.asInt(),
-        bytes_per_context,
-        context_off,
-        @intFromPtr(enable_bits),
-        idx,
-        bit,
-    });
-    enable_bits[idx] |= std.math.shl(u32, 1, bit);
-    std.log.debug("0x{x} {b} {b}", .{ @intFromPtr(&enable_bits[idx]), enable_bits[idx], std.math.shl(u32, 1, bit) });
-}
-
-fn disableInterrupt(context: u32, id: u32) PLICError!void {
-    const inner = plic orelse return error.DriverUninitialized;
-    // TODO: locking
-
-    if (context > context_count) return error.InvalidContext;
-    if (id == 0 or id > inner.max_interrupts) return error.InvalidInterruptID;
-
-    const idx = id / @sizeOf(u32);
-    const bit = id % @sizeOf(u32);
-
-    const bytes_per_context = max_interrupt_count / @sizeOf(u8);
-    const base = inner.base_ptr.asInt() + enable_bits_base_off;
-    const context_off = context * bytes_per_context;
-
-    const enable_bits: [*]u32 = @ptrFromInt(base + context_off);
-    enable_bits[idx] &= ~std.math.shl(u32, 1, bit);
+fn disableInterruptWrapper(int_num: usize) void {
+    const id: u32 = @intCast(int_num);
+    plic.disableInterrupt(plic.used_context, id);
 }
 
 fn dumpPendingInterrupts() void {
-    const inner = plic orelse @panic("TODO");
-
-    const base = inner.base_ptr.add(pending_bits_base_off);
-    const pending_bits = base.asPtr([*]u32);
-
-    const dwords = inner.max_interrupts / @sizeOf(u32);
-
-    for (0..dwords) |dword_idx| {
-        std.log.debug("0x{x}: {b:032}", .{ @intFromPtr(&pending_bits[dword_idx]), pending_bits[dword_idx] });
-    }
-    // for (0..inner.max_interrupts) |id| {
-    //     const idx = id / @sizeOf(u32);
-    //     const bit = id % @sizeOf(u32);
-    //
-    //     std.log.debug("{}", .{pending_bits[idx]});
-    //
-    //     // if (pending_bits[idx] & std.math.shl(u32, 1, bit) > 0) {
-    //     //     std.log.debug("Interrupt #{} is pending", .{id});
-    //     // }
-    // }
+    plic.dumpPendingInterrupts();
 }
 
 fn dumpEnabledInterrupts() void {
-    const inner = plic orelse @panic("TODO");
-
-    const base = inner.base_ptr.add(enable_bits_base_off);
-    const enabled_bits = base.asPtr([*]u32);
-
-    const dwords = inner.max_interrupts / @sizeOf(u32);
-
-    for (0..dwords) |dword_idx| {
-        std.log.debug("0x{x}: {b:032}", .{ @intFromPtr(&enabled_bits[dword_idx]), enabled_bits[dword_idx] });
-    }
-    // for (0..inner.max_interrupts) |id| {
-    //     const idx = id / @sizeOf(u32);
-    //     const bit = id % @sizeOf(u32);
-    //
-    //     std.log.debug("{}", .{pending_bits[idx]});
-    //
-    //     // if (pending_bits[idx] & std.math.shl(u32, 1, bit) > 0) {
-    //     //     std.log.debug("Interrupt #{} is pending", .{id});
-    //     // }
-    // }
+    plic.dumpEnabledInterrupts();
 }
 
-fn setThreshold(context: u32, threshold: u32) PLICError!void {
-    const inner = plic orelse return error.DriverUninitialized;
-    // TODO: locking
+// TODO: handle interrutps nicely instead of directly calling this
+// from the riscv interrupt handler
+pub fn handleInterrupt() void {
+    const int_num = plic.claim(plic.used_context);
 
-    if (threshold > 7) return error.InvalidThreshold;
+    interrupt.dispatchInterruipt(int_num);
 
-    const base = inner.base_ptr.asInt() + context_base_off;
-    const context_off = context * context_size + context_priority_threshold_off;
-
-    const context_threshold: *u32 = @ptrFromInt(base + context_off);
-    context_threshold.* = threshold;
-}
-
-fn claim(context: u32) PLICError!u32 {
-    const inner = plic orelse return error.DriverUninitialized;
-    // TODO: locking
-
-    if (context > context_count) return error.InvalidContext;
-
-    const base = inner.base_ptr.asInt() + context_base_off;
-    const context_off = context * context_size + context_claim_off;
-
-    const context_claim: *u32 = @ptrFromInt(base + context_off);
-    const interrupt_id = context_claim.*;
-
-    return interrupt_id;
-}
-
-fn complete(context: u32, id: u32) PLICError!void {
-    const inner = plic orelse return error.DriverUninitialized;
-    // TODO: locking
-
-    if (context > context_count) return error.InvalidContext;
-
-    const base = inner.base_ptr.asInt() + context_base_off;
-    const context_off = context * context_size + context_complete_off;
-
-    const context_complete: *u32 = @ptrFromInt(base + context_off);
-    context_complete.* = id;
+    plic.complete(plic.used_context, int_num);
 }
 
 pub const module: Module = .{

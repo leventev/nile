@@ -1,11 +1,15 @@
 // TODO: maybe support multiple interrupt controllers?
 
+const std = @import("std");
+const device = @import("device.zig");
+const slab_allocator = @import("mem/slab_allocator.zig");
+
+const Device = device.Device;
+
 pub const InterruptController = struct {
-    enableInterrupt: *const fn (int_num: usize) Error!void,
-    disableInterrupt: *const fn (int_num: usize) Error!void,
-    setPriority: *const fn (int_num: usize, priority: usize) Error!void,
-    getPriority: *const fn (int_num: usize) Error!usize,
-    setHandler: *const fn (int_num: usize, handler: *const fn () void) Error!void,
+    max_interrupt: usize,
+    enableInterrupt: *const fn (int_num: usize) void,
+    disableInterrupt: *const fn (int_num: usize) void,
     dumpPendingInterrupts: *const fn () void,
     dumpEnabledInterrupts: *const fn () void,
 
@@ -13,56 +17,83 @@ pub const InterruptController = struct {
         NoController,
         AlreadyRegistered,
         InvalidInterruptID,
-        InvalidPriority,
-        ControllerInternalError,
     };
 };
 
-var interruptController: ?InterruptController = null;
+var interrupt_controller: ?InterruptController = null;
+
+const InterruptHandler = struct {
+    owner: *Device,
+    interrupt_number: usize,
+    handle: *const fn (dev: *Device) void,
+    call_count: usize,
+    next: ?*InterruptHandler,
+};
+
+// TODO: very temporary solution until we get the GPA working
+var interrupt_handlers: ?*InterruptHandler = null;
+var interrupt_handler_cache: slab_allocator.ObjectCache(InterruptHandler) = undefined;
 
 pub fn registerInterruptController(controller: InterruptController) InterruptController.Error!void {
-    if (interruptController != null)
+    if (interrupt_controller != null)
         return error.AlreadyRegistered;
 
-    interruptController = controller;
+    interrupt_controller = controller;
+    interrupt_handler_cache = slab_allocator.createObjectCache(InterruptHandler);
 }
 
 pub fn enableInterrupt(int_num: usize) InterruptController.Error!void {
-    const controller = interruptController orelse
+    const controller = interrupt_controller orelse
         return error.NoController;
 
-    return controller.enableInterrupt(int_num);
+    if (int_num > controller.max_interrupt)
+        return error.InvalidInterruptID;
+
+    controller.enableInterrupt(int_num);
 }
 
 pub fn disableInterrupt(int_num: usize) InterruptController.Error!void {
-    const controller = interruptController orelse
+    const controller = interrupt_controller orelse
         return error.NoController;
 
-    return controller.disableInterrupt(int_num);
-}
+    if (int_num > controller.max_interrupt)
+        return error.InvalidInterruptID;
 
-pub fn setPriority(int_num: usize, priority: usize) InterruptController.Error!void {
-    const controller = interruptController orelse
-        return error.NoController;
-
-    return controller.setPriority(int_num, priority);
-}
-
-pub fn setHandler(int_num: usize, handler: *const fn () void) InterruptController.Error!void {
-    const controller = interruptController orelse
-        return error.NoController;
-
-    return controller.setHandler(int_num, handler);
+    controller.disableInterrupt(int_num);
 }
 
 pub fn dumpPendingInterrupts() void {
-    const controller = interruptController orelse @panic("TODO");
+    const controller = interrupt_controller orelse @panic("TODO");
 
     controller.dumpPendingInterrupts();
 }
 
 pub fn dumpEnabledInterrupts() void {
-    const controller = interruptController orelse @panic("TODO");
+    const controller = interrupt_controller orelse @panic("TODO");
 
     controller.dumpEnabledInterrupts();
+}
+
+pub fn setHandler(int_num: usize, handle: *const fn (dev: *Device) void, dev: *Device) void {
+    var next_ptr = &interrupt_handlers;
+    while (next_ptr.*) |handler| : (next_ptr = &handler.next) {}
+
+    var new_handler = interrupt_handler_cache.alloc() catch @panic("Failed to alloc");
+    new_handler.interrupt_number = int_num;
+    new_handler.handle = handle;
+    new_handler.owner = dev;
+    new_handler.call_count = 0;
+    new_handler.next = null;
+
+    next_ptr.* = new_handler;
+}
+
+pub fn dispatchInterruipt(int_num: usize) void {
+    var next_ptr = &interrupt_handlers;
+    while (next_ptr.*) |handler| : (next_ptr = &handler.next) {
+        if (handler.interrupt_number == int_num) {
+            handler.handle(handler.owner);
+            handler.call_count += 1;
+        }
+    }
 }

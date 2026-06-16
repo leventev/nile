@@ -145,7 +145,7 @@ pub fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTr
 
     if (address_cells > 2) @panic("address-cells must not be bigger than 2");
 
-    var regs_it = regs.iterator(address_cells, 0) catch @panic("TODO");
+    var regs_it = regs.iterator(address_cells, 0) catch @panic("TODO: regs_it");
 
     // TODO: parse all provided addresses?
     const baseAddr: u64 = @intCast((regs_it.next() orelse return error.InvalidDeviceTree).address);

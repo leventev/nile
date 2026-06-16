@@ -4,9 +4,11 @@ const builtin = @import("builtin");
 const arch = @import("../arch/arch.zig");
 const mm = @import("mm.zig");
 
+const log = std.log.scoped(.buddy_allocator);
+
 const PhysicalAddress = arch.PhysicalAddress;
 
-pub const order_count = 11;
+pub const order_count = 12;
 pub const max_order = order_count - 1;
 
 /// Allocates contiguous physical blocks with 2^n frames, where n is called the order.
@@ -223,7 +225,7 @@ pub fn init(regions: []const mm.MemoryRegion) void {
         total_frames += frame_count;
 
         // TODO: convert the fields of mm.MemoryRegion to be page indices instead of absolute addresses
-        const start_page_index: usize = region.start / arch.page_size;
+        const start_page_index: usize = region.start.asInt() / arch.page_size;
         const page_count: usize = region.size / arch.page_size;
         global_buddy_allocator.addBlocksFromRegion(start_page_index, page_count);
     }

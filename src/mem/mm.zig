@@ -30,17 +30,19 @@ pub const PhysicalAddress = arch.PhysicalAddress;
 
 // TODO: move all device tree specific code to devicetree.zig
 pub const MemoryRegion = struct {
-    start: u64,
+    start: PhysicalAddress,
     size: u64,
 
     const Self = @This();
 
-    fn end(self: Self) u64 {
-        return self.start + self.size;
+    fn end(self: Self) PhysicalAddress {
+        return self.start.add(self.size);
     }
 
     fn intersects(self: Self, other: MemoryRegion) bool {
-        return !(other.start >= self.end() or other.end() <= self.start);
+        const other_after = other.start.asInt() >= self.end().asInt();
+        const other_before = other.end().asInt() <= self.start.asInt();
+        return !(other_after or other_before);
     }
 };
 
@@ -64,7 +66,7 @@ fn readMemoryPair(buff: []const u8, idx: usize, entrySize: usize) MemoryRegion {
     const addr = std.mem.readInt(u64, entry[0..8], .big);
     const size = std.mem.readInt(u64, entry[8..16], .big);
 
-    return MemoryRegion{ .start = addr, .size = size };
+    return MemoryRegion{ .start = .fromInt(addr), .size = size };
 }
 
 fn parseMemoryRegions(
@@ -92,7 +94,7 @@ fn parseMemoryRegions(
         while (it.next()) |entry| {
             try regions.append(allocator, PhysicalMemoryRegion{
                 .range = .{
-                    .start = @intCast(entry.address),
+                    .start = .fromInt(@intCast(entry.address)),
                     .size = @intCast(entry.size),
                 },
             });
@@ -129,7 +131,7 @@ fn parseReservedMemoryRegions(
         while (it.next()) |entry| {
             try regions.append(allocator, ReservedMemoryRegion{
                 .range = .{
-                    .start = @intCast(entry.address),
+                    .start = .fromInt(@intCast(entry.address)),
                     .size = @intCast(entry.size),
                 },
                 .name = region.name,
@@ -151,13 +153,13 @@ fn processRegion(
     region: PhysicalMemoryRegion,
     reserved_regions: []const ReservedMemoryRegion,
 ) !void {
-    std.debug.assert(region.range.start % arch.page_size == 0);
+    std.debug.assert(region.range.start.isPageAligned());
     std.debug.assert(region.range.size % arch.page_size == 0);
 
     var range = region.range;
 
     for (reserved_regions) |resv| {
-        std.debug.assert(resv.range.start % arch.page_size == 0);
+        std.debug.assert(resv.range.start.isPageAligned());
         std.debug.assert(resv.range.size % arch.page_size == 0);
 
         if (!range.intersects(resv.range))
@@ -169,30 +171,30 @@ fn processRegion(
         const resv_end = resv_range.end();
 
         // the reserved region starts before or at the same address as the physical region
-        if (resv_range.start <= region.range.start) {
+        if (resv_range.start.asInt() <= region.range.start.asInt()) {
             // cut off the interescting part at the beginning of the region
             range.start = resv_end;
-            range.size = end - range.start;
+            range.size = end.asInt() - range.start.asInt();
 
             continue;
         }
 
         // the reserved region ends after or at the same address as the physical region
-        if (resv_end >= end) {
+        if (resv_end.asInt() >= end.asInt()) {
             // cut off the interescting part at the end of the region
-            range.size = resv_range.start - range.start;
+            range.size = resv_range.start.asInt() - range.start.asInt();
 
             continue;
         }
 
         // the reserved region is inside the physical region
-        range.size = resv_range.start - range.start;
+        range.size = resv_range.start.asInt() - range.start.asInt();
 
         // do the same process for the region on the right side of the reserved region
         const other_region = PhysicalMemoryRegion{
             .range = MemoryRegion{
                 .start = resv_end,
-                .size = end - resv_end,
+                .size = end.asInt() - resv_end.asInt(),
             },
         };
 
@@ -256,7 +258,7 @@ fn addKernelReservedMemory(
         .reusable = false,
         .system = true,
         .range = MemoryRegion{
-            .start = kernel_start,
+            .start = .fromInt(kernel_start - arch.kernel_virtual_offset),
             .size = kernel_size,
         },
     });
@@ -277,7 +279,7 @@ fn addDeviceTreeReservedMemory(
         .reusable = false,
         .system = false,
         .range = MemoryRegion{
-            .start = dt_start,
+            .start = .fromInt(dt_start - arch.kernel_virtual_offset),
             .size = dt_end - dt_start,
         },
     };
@@ -291,7 +293,7 @@ fn printPhysicalRegions(physical_regions: []const PhysicalMemoryRegion) void {
         const sizeInKiB = range.size / 1024;
         std.log.info(
             "    [0x{x:0>16}-0x{x:0>16}] ({} KiB)",
-            .{ range.start, range.end() - 1, sizeInKiB },
+            .{ range.start.asInt(), range.end().asInt() - 1, sizeInKiB },
         );
     }
 }
@@ -303,8 +305,8 @@ fn printReservedRegions(reserved_regions: []const ReservedMemoryRegion) void {
         const size_in_kib = range.size / 1024;
         if (reg.system) {
             std.log.info("    [0x{x:0>16}-0x{x:0>16}] <{s}> ({} KiB) system", .{
-                range.start,
-                range.end() - 1,
+                range.start.asInt(),
+                range.end().asInt() - 1,
                 reg.name,
                 size_in_kib,
             });
@@ -312,8 +314,8 @@ fn printReservedRegions(reserved_regions: []const ReservedMemoryRegion) void {
             const no_map_string = if (reg.no_map) "no-map" else "map";
             const reusable_string = if (reg.reusable) "reusable" else "non-reusable";
             std.log.info("    [0x{x:0>16}-0x{x:0>16}] <{s}> ({} KiB) {s} {s}", .{
-                range.start,
-                range.end() - 1,
+                range.start.asInt(),
+                range.end().asInt() - 1,
                 reg.name,
                 size_in_kib,
                 no_map_string,
@@ -329,12 +331,15 @@ fn printUsableRegions(regions: []const MemoryRegion) void {
         const size_in_kib = reg.size / 1024;
         std.log.info(
             "    [0x{x:0>16}-0x{x:0>16}] ({} KiB)",
-            .{ reg.start, reg.end() - 1, size_in_kib },
+            .{ reg.start.asInt(), reg.end().asInt() - 1, size_in_kib },
         );
     }
 }
 
-pub fn getFrameRegions(allocator: std.mem.Allocator, dt: *const devicetree.DeviceTree) ![]const MemoryRegion {
+pub fn getFrameRegions(
+    allocator: std.mem.Allocator,
+    dt: *const devicetree.DeviceTree,
+) ![]const MemoryRegion {
     var phyiscal_regions = try parseMemoryRegions(allocator, dt, dt.root());
     defer phyiscal_regions.deinit(allocator);
 

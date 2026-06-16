@@ -61,7 +61,7 @@ pub const Property = union(PropertyType) {
     interrupts_extended: InterruptsExtended,
     interrupt_cells: u32,
     interrupt_controller: void,
-    interrupt_map: InterruptMap, // TODO
+    interrupt_map: InterruptMap,
     interrupt_map_mask: []const u8, // TODO
     clock_frequency: u64,
     timebase_frequency: u64,
@@ -72,9 +72,9 @@ pub const Property = union(PropertyType) {
 
     pub fn print(self: Property, handle: u32, dt: *const DeviceTree, writer: *std.Io.Writer) !void {
         switch (self) {
-            .compatible => {
-                _ = try writer.write("compatible = ");
-                try self.compatible.print(writer);
+            .compatible => |compatible| {
+                _ = try writer.print("compatible = 0x{x} ", .{@intFromPtr(compatible.buff.ptr)});
+                try compatible.print(writer);
             },
             .model => |val| {
                 try writer.print("model = {s}", .{val});
@@ -138,7 +138,6 @@ pub const Property = union(PropertyType) {
             },
             .interrupts_extended => {
                 _ = try writer.write("interrupts_extended = ");
-                try self.interrupts_extended.print(dt, writer);
             },
             .interrupt_parent => |val| {
                 const parent_handle = dt.phandle_table.get(val) orelse
@@ -171,17 +170,22 @@ pub const Property = union(PropertyType) {
 pub const InterruptsExtended = struct {
     buff: []const u8,
 
-    pub fn iterator(self: InterruptsExtended, dt: *const DeviceTree) Iterator {
+    pub fn iterator(
+        self: InterruptsExtended,
+        dt: *const DeviceTree,
+    ) Iterator {
         return Iterator{
             .buff = self.buff,
             .idx = 0,
-            // TODO: interrupt-cells?
-            .size_cells = 1,
             .dt = dt,
         };
     }
 
-    pub fn print(self: InterruptsExtended, dt: *const DeviceTree, writer: *std.Io.Writer) !void {
+    pub fn print(
+        self: InterruptsExtended,
+        dt: *const DeviceTree,
+        writer: *std.Io.Writer,
+    ) !void {
         var it = self.iterator(dt);
         var first = true;
         while (it.next()) |int| {
@@ -192,34 +196,39 @@ pub const InterruptsExtended = struct {
             }
 
             const name = dt.getNodeName(int.handle);
-            try writer.print("<&{s} 0x{x}>", .{ name, int.int_specifier });
+            try writer.print("<&{s} 0x{x}>", .{ name, int.interrupt_specifier });
         }
     }
 
     pub const Iterator = struct {
         buff: []const u8,
         idx: u32,
-        size_cells: u32,
         dt: *const DeviceTree,
 
         pub fn next(self: *Iterator) ?Interrupt {
             if (self.idx == self.buff.len) return null;
 
-            const phandle = std.mem.readInt(u32, @ptrCast(&self.buff[self.idx]), .big);
-            self.idx += 4;
-
-            // TODO: better error handling
+            const phandle: u32 = @intCast(readCells(self.buff, &self.idx, 1));
+            const int_cont_handle = self.dt.phandle_table.get(phandle) orelse
+                @panic("Invalid phandle");
+            const int_cont_node = self.dt.nodes.items[int_cont_handle];
+            const interrupt_cells = int_cont_node.getProperty(.interrupt_cells) orelse
+                @panic("Interrupt controller does not have .interrupt_cells");
 
             return Interrupt{
-                .handle = self.dt.phandle_table.get(phandle) orelse @panic("invalid phandle"),
-                .int_specifier = @intCast(readCells(self.buff, &self.idx, self.size_cells)),
+                .handle = int_cont_handle,
+                .interrupt_specifier = @intCast(readCells(
+                    self.buff,
+                    &self.idx,
+                    interrupt_cells,
+                )),
             };
         }
     };
 
     const Interrupt = struct {
         handle: u32,
-        int_specifier: u64,
+        interrupt_specifier: u64,
     };
 };
 

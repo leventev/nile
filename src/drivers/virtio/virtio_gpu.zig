@@ -203,7 +203,7 @@ fn flushScreen(private_data: *anyopaque) void {
     }
 }
 
-fn init(dev: *const device.Device) void {
+fn init(dev: *device.Device) void {
     const pci_dev = pcie.pciDeviceFromDevice(dev);
     const features = virtio.initializeVirtioDevice(pci_dev, &gpu.virtio_device, 0);
 

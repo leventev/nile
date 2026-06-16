@@ -6,6 +6,7 @@ const timer = @import("timer.zig");
 const devicetree = @import("root").devicetree;
 const registers = @import("registers.zig");
 const syscalls = @import("syscalls.zig");
+const plic = @import("../../drivers/int_controller/plic.zig");
 
 const Registers = registers.Registers;
 
@@ -19,7 +20,7 @@ const TrapVectorBaseAddr = packed struct(u64) {
         direct = 0,
         vectored = 1,
     };
-    // 0x80200228
+
     fn make(addr: u64, mode: Mode) TrapVectorBaseAddr {
         std.debug.assert(addr & 0b11 == 0);
         return .{
@@ -268,9 +269,10 @@ fn handleInterrupt(
             @panic("Machine timer interrupt");
         },
         .supervisor_external => {
-            regs.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{regs.pc});
-            @panic("Supervisor external interrupt");
+            // regs.printGPRs(.err);
+            // std.log.err("PC=0x{x}", .{regs.pc});
+            // @panic("Supervisor external interrupt");
+            plic.handleInterrupt();
         },
         .machine_external => {
             regs.printGPRs(.err);

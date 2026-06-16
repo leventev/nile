@@ -569,7 +569,7 @@ fn enumerateBus(
             if (function_id == 0 and !common_header.header_type.multiple_function)
                 check_functions = false;
 
-            var pci_device = device_cache.alloc() catch @panic("TODO");
+            var pci_device = device_cache.alloc() catch @panic("TODO: failed to alloc device cache");
             pci_device.address = dev_addr;
             pci_device.id = .{
                 .vendor_id = common_header.vendor_id,
@@ -578,12 +578,12 @@ fn enumerateBus(
             pci_device.device.match_table = .{ .bus = &pcie_bus };
             pci_device.device.matched = common_header.header_type.header_type != .general_device;
 
-            var name_buff = device_name_cache.alloc() catch @panic("TODO");
+            var name_buff = device_name_cache.alloc() catch @panic("TODO: failed to alloc device name cache");
             pci_device.device.name = std.fmt.bufPrint(
                 name_buff[0..name_buff.len],
                 "pci/{x:02}:{x:02}.{}",
                 .{ bus_id, device_id, function_id },
-            ) catch @panic("TODO");
+            ) catch @panic("TODO: failed to format name");
 
             device.addDevice(&pci_device.device);
 
@@ -607,8 +607,7 @@ fn enumerateBus(
                     if (mapping.child_interrupt_specifier != general_header.interrupt_pin)
                         continue;
 
-                    // TODO: make sure its a u32
-                    pci_device.device.interrupt_number = @intCast(mapping.parent_interrupt_specifier);
+                    pci_device.interrupt_number = @intCast(mapping.parent_interrupt_specifier);
                 }
             }
 
@@ -667,7 +666,7 @@ fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!
     // TODO
     std.debug.assert(parent_address_cells <= 2 and parent_size_cells <= 2);
 
-    var ranges_it = ranges.iterator(parent_address_cells, child_address_cells, child_size_cells) catch @panic("TODO");
+    var ranges_it = ranges.iterator(parent_address_cells, child_address_cells, child_size_cells) catch @panic("TODO: pci ranges_it");
     // TODO: figure out how to handle this. the spec is very vague and i noticed that
     // all bus, device, function, register numbers are zero. and why is there an io_space defined?
     // im assuming this region is global to all PCI devices
@@ -704,7 +703,7 @@ fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!
 
     if (!(found_bridge_memory64 and found_bridge_memory32)) @panic("PCI bridge memory not found");
 
-    var reg_it = reg.iterator(parent_address_cells, parent_size_cells) catch @panic("TODO");
+    var reg_it = reg.iterator(parent_address_cells, parent_size_cells) catch @panic("TODO: pci reg_it");
 
     const first_reg = reg_it.next() orelse return error.InvalidDeviceTree;
 
@@ -731,13 +730,18 @@ fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!
     // _ = ecam_size;
 }
 
-pub inline fn pciDeviceFromDevice(dev: *const device.Device) *const PCIDevice {
+pub inline fn pciDeviceFromDevice(dev: *device.Device) *PCIDevice {
+    const pci_device: *PCIDevice = @fieldParentPtr("device", dev);
+    return pci_device;
+}
+
+pub inline fn pciDeviceFromDeviceConst(dev: *const device.Device) *const PCIDevice {
     const pci_device: *const PCIDevice = @fieldParentPtr("device", dev);
     return pci_device;
 }
 
 fn pciMatch(dev: *const device.Device, mod: *const Module) bool {
-    const pci_device = pciDeviceFromDevice(dev);
+    const pci_device = pciDeviceFromDeviceConst(dev);
 
     const bus_info = mod.module_type.device_driver.bus;
     std.debug.assert(@intFromPtr(bus_info.bus_type) == @intFromPtr(&pcie_bus));
@@ -746,7 +750,6 @@ fn pciMatch(dev: *const device.Device, mod: *const Module) bool {
     const device_ids: []const PCIDevice.Id = device_ids_ptr[0..bus_info.device_id_count];
 
     for (device_ids) |mod_dev_id| {
-        std.log.debug("PCI match {}:{} {}:{}", .{ mod_dev_id.vendor_id, mod_dev_id.device_id, pci_device.id.vendor_id, pci_device.id.device_id });
         const vendor_match = pci_device.id.vendor_id == mod_dev_id.vendor_id;
         const device_match = pci_device.id.device_id == mod_dev_id.device_id;
         if (vendor_match and device_match)
@@ -765,8 +768,10 @@ pub const PCIDevice = struct {
     id: Id,
     address: Address,
     device: device.Device,
-    // TODO: maybe not u32
-    platform_interrupt: ?u32,
+
+    /// Which (system-wide) IRQ the interrupt in the interrupt pin field
+    /// corresponds to.
+    interrupt_number: ?usize,
 
     pub const Id = struct {
         vendor_id: u16,

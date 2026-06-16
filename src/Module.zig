@@ -36,7 +36,7 @@ module_type: union(Type) {
             /// The function that is called when a driver is successfully matched to a device.
             /// The Device struct is usually encapsulated in a bigger bus specific struct
             /// which can be obtained with @fieldParentPtr.
-            init: *const fn (device: *const device.Device) void,
+            init: *const fn (device: *device.Device) void,
         },
     },
     /// The module is a file system.

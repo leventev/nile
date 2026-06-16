@@ -53,8 +53,8 @@ pub fn build(b: *std.Build) void {
         "-serial",  "stdio",
         "-m",       "128M",
         "-device",  "virtio-gpu",
-        // "-d",       "int",
-        // "-d",       "guest_errors",
+        "-d",       "int",
+        "-d",       "guest_errors",
         "-device",
         "virtio-keyboard",
 

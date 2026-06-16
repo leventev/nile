@@ -34,7 +34,10 @@ pub fn addBus(bus: *const Bus) void {
 pub const Device = struct {
     name: []const u8,
     matched: bool = false,
-    interrupt_number: ?u32 = null,
+    interrupt: ?struct {
+        number: usize,
+        handler: *const fn (dev: *Device) void,
+    } = null,
     parent: ?*Device,
     match_table: union(enum) {
         devicetree: struct {
@@ -102,7 +105,7 @@ pub fn matchDeviceTreeDevices(dt: *const devicetree.DeviceTree) void {
                     if (!std.mem.eql(u8, driver_compatible, device_compatible)) continue;
 
                     driver_dt_info.init(dt, dev_dt_info.handle) catch |err| {
-                        std.log.err("failed to initialize {s}: {s}", .{
+                        std.log.err("Failed to initialize {s}: {s}", .{
                             module.name,
                             @errorName(err),
                         });
@@ -171,14 +174,12 @@ pub fn matchNonDeviceTreeDevices() bool {
 pub fn enableInterrupts() void {
     var device_ptr = devices;
     while (device_ptr) |device| : (device_ptr = device.next) {
-        std.log.debug("->NOT MATCHED {s}", .{device.name});
         if (!device.matched) continue;
-        std.log.debug("->{s}", .{device.name});
 
-        if (device.interrupt_number) |int_num| {
-            std.log.debug("enable interrut #{} for {s}", .{ int_num, device.name });
-            interrupt.enableInterrupt(int_num) catch @panic("Failed to enable interrupt");
-            interrupt.setPriority(int_num, 1) catch @panic("Failed to set priority");
+        if (device.interrupt) |int| {
+            std.log.debug("enable interrut #{} for {s}", .{ int.number, device.name });
+            interrupt.enableInterrupt(int.number) catch @panic("Failed to enable interrupt");
+            interrupt.setHandler(int.number, int.handler, device);
         }
     }
 }

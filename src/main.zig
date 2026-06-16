@@ -49,6 +49,8 @@ pub fn panic(
     error_return_trace: ?*std.builtin.StackTrace,
     ret_addr: ?usize,
 ) noreturn {
+    arch.disableInterrupts();
+
     _ = ret_addr;
     _ = error_return_trace;
 
@@ -82,6 +84,7 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     const frame_regions = mm.getFrameRegions(static_mem_allocator, &dt) catch
         @panic("Failed to get physical memory regions");
 
+    // devicetree.printDeviceTree(&dt, 0, 0);
     buddy_allocator.init(frame_regions);
     slab_allocator.init();
 
@@ -89,28 +92,16 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     // find interrupt controllers first
     devicetree.addDevices(&dt) catch @panic("TODO");
-    device.dumpDevices();
 
     device.matchDeviceTreeDevices(&dt);
 
     while (device.matchNonDeviceTreeDevices()) {}
 
-    std.log.debug("HALLO", .{});
-    // devicetree.printDeviceTree(&dt, 0, 0);
     device.enableInterrupts();
 
-    std.log.debug("WHAT", .{});
-    // arch.enableInterrupts();
-
-    // while (true) {
-    //     std.log.debug("dumping: ", .{});
-    //     interrupt.dumpPendingInterrupts();
-    // }
-
     pc_font.init();
-    std.log.debug("WHAT 2", .{});
 
-    framebuffer.fillRect(0, 0, 500, 500, .{
+    framebuffer.fillRect(0, 0, 300, 500, .{
         .red = 100,
         .green = 200,
         .blue = 50,
@@ -123,50 +114,32 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
         .blue = 250,
         .alpha = 255,
     });
-    std.log.debug("WHAT 3", .{});
 
-    framebuffer.displayCharacter(10, 10, 'A');
-    framebuffer.printText(10, 10, "HELLO world :)");
-
-    std.log.debug("WHAT 4", .{});
     framebuffer.flush();
-    std.log.debug("WHAT 5", .{});
 
     scheduler.init();
 
-    // time.init(&dt) catch @panic("Failed to initialize timer");
+    time.init(&dt) catch @panic("Failed to initialize timer");
 
-    // arch.enableInterrupts();
+    fs.init();
 
-    // while (true) {}
-    // const cfg = pcie.ConfigurationSpace.fromAddress(virtio_input.input.pci_device.address);
-    // const header = cfg.commonHeader();
-    // interrupt.dumpPendingInterrupts();
-    // std.log.debug("INTERRUPT STATUS: {} {} {}", .{
-    //     header.status.interrupt_status,
-    //     virtio_input.input.event_queue.available_ring_header.index,
-    //     virtio_input.input.event_queue.used_ring_header.index,
-    // });
-    // }
+    // fs.registerFileSystem(&ram_file_system) catch @panic("Failed to register ramfs");
+    fs.dumpRegisteredFilesystems();
 
-    // fs.init();
-    //
-    // // fs.registerFileSystem(&ram_file_system) catch @panic("Failed to register ramfs");
-    // fs.dumpRegisteredFilesystems();
-    //
-    // var mount_table: fs.MountTable = .{
-    //     .mount_count = 0,
-    //     .mounts = null,
-    //     .lock = .{},
-    // };
-    //
-    // fs.mountFileSystem(&mount_table, "/", "ramfs", null) catch @panic("Failed to mount /");
-    // fs.createDirectory(&mount_table, "/test_dir") catch @panic("Failed to create file");
-    // fs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
-    // fs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");
-    // fs.createRegularFile(&mount_table, "/test_dir/a/test_file", "burger") catch @panic("Failed to create file");
-    // mount_table.dump();
-    // fs.dumpTree(&mount_table);
+    var mount_table: fs.MountTable = .{
+        .mount_count = 0,
+        .mounts = null,
+        .lock = .{},
+    };
+
+    fs.mountFileSystem(&mount_table, "/", "ramfs", null) catch @panic("Failed to mount /");
+    fs.createDirectory(&mount_table, "/test_dir") catch @panic("Failed to create file");
+    fs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
+    fs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");
+    fs.createRegularFile(&mount_table, "/test_dir/a/test_file", "burger") catch @panic("Failed to create file");
+    mount_table.dump();
+    fs.dumpTree(&mount_table);
+
     //
     // // TODO
     // // var initramfs: ramfs.RamFs = undefined;

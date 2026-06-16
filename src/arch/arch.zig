@@ -6,6 +6,10 @@ const Arch = enum {
 
 const target = Arch.riscv64;
 
+pub const kernel_virtual_offset = switch (target) {
+    Arch.riscv64 => riscv64.kernel_virtual_offset,
+};
+
 pub const enableInterrupts = switch (target) {
     Arch.riscv64 => riscv64.enableInterrupts,
 };

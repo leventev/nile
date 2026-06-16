@@ -1,4 +1,4 @@
-// documentation: https://github.com/devicetree-org/devicetree-specification
+//! https://github.com/devicetree-org/devicetree-specification
 
 const std = @import("std");
 const root = @import("root");
@@ -371,7 +371,7 @@ pub fn readDeviceTreeBlob(allocator: std.mem.Allocator, blobPtr: *void) !DeviceT
         return error.MagicMismatch;
     }
 
-    const blob_size = std.math.divCeil(u32, bigToNative(u32, blob[total_size_idx]), @sizeOf(u32)) catch unreachable;
+    const blob_size = bigToNative(u32, blob[total_size_idx]);
 
     const struct_block_offset = bigToNative(u32, blob[dt_structs_offset_idx]);
     const struct_block_start = @as([*]u8, @ptrCast(blob)) + @as(usize, struct_block_offset);
@@ -389,7 +389,7 @@ pub fn readDeviceTreeBlob(allocator: std.mem.Allocator, blobPtr: *void) !DeviceT
 
     var dt = DeviceTree{
         .nodes = std.ArrayList(DeviceTreeNode).empty,
-        .blob = blob[0 .. blob_size / 4],
+        .blob = blob[0..blob_size],
         .phandle_table = std.AutoArrayHashMapUnmanaged(u32, u32){},
     };
 

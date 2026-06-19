@@ -5,6 +5,8 @@ const Module = @import("Module.zig");
 const devicetree = @import("dt/devicetree.zig");
 const interrupt = @import("interrupt.zig");
 
+const log = std.log.scoped(.device);
+
 /// A bus that devices and drivers are associated with.
 pub const Bus = struct {
     /// Name of the bus.
@@ -55,10 +57,10 @@ var devices: ?*Device = null;
 pub fn dumpDevices() void {
     var device_ptr = devices;
 
-    std.log.debug("Devices:", .{});
+    log.debug("Devices:", .{});
     // TODO: print a tree using parent ptr
     while (device_ptr) |device| : (device_ptr = device.next) {
-        std.log.debug("\t{s}", .{device.name});
+        log.debug("\t{s}", .{device.name});
     }
 }
 
@@ -105,14 +107,14 @@ pub fn matchDeviceTreeDevices(dt: *const devicetree.DeviceTree) void {
                     if (!std.mem.eql(u8, driver_compatible, device_compatible)) continue;
 
                     driver_dt_info.init(dt, dev_dt_info.handle) catch |err| {
-                        std.log.err("Failed to initialize {s}: {s}", .{
+                        log.err("Failed to initialize {s}: {s}", .{
                             module.name,
                             @errorName(err),
                         });
                         continue :dev_loop;
                     };
 
-                    std.log.info("Module '{s}'({s}) initialized", .{ module.name, device.name });
+                    log.info("Module '{s}'({s}) initialized", .{ module.name, device.name });
                     module.initialized = true;
 
                     continue :dev_loop;
@@ -125,7 +127,7 @@ pub fn matchDeviceTreeDevices(dt: *const devicetree.DeviceTree) void {
         dev_dt_info.compatible.print(&writer) catch @panic("compatible string too long");
         const all_comp_string = writer.buffered();
 
-        std.log.warn(
+        log.warn(
             "Compatible driver not found for '{s}' compatible: '{s}'",
             .{ device.name, all_comp_string },
         );

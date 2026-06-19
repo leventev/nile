@@ -238,7 +238,7 @@ pub fn init(regions: []const mm.MemoryRegion) void {
     //     }
     // }
 
-    std.log.info("Buddy allocator allocator initialized with {} frames ({} KiB) available", .{
+    log.info("Buddy allocator allocator initialized with {} frames ({} KiB) available", .{
         total_frames,
         total_frames * 4,
     });

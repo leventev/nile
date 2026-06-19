@@ -6,6 +6,8 @@ const arch = @import("../arch/arch.zig");
 const Process = @import("../Process.zig");
 const buddy_allocator = @import("buddy_allocator.zig");
 
+const log = std.log.scoped(.mm);
+
 const bigToNative = std.mem.bigToNative;
 
 // these addresses of these symbols can be used to
@@ -245,7 +247,7 @@ fn addKernelReservedMemory(
     const kernel_end = std.mem.alignForward(usize, @intFromPtr(&__kernel_end), 4096);
     const kernel_size = kernel_end - kernel_start;
 
-    std.log.info("Kernel code: {} KiB, rodata: {} KiB, data: {} KiB, bss: {} KiB", .{
+    log.info("Kernel code: {} KiB, rodata: {} KiB, data: {} KiB, bss: {} KiB", .{
         text_size / 1024,
         rodata_size / 1024,
         data_size / 1024,
@@ -287,11 +289,11 @@ fn addDeviceTreeReservedMemory(
 }
 
 fn printPhysicalRegions(physical_regions: []const PhysicalMemoryRegion) void {
-    std.log.info("Physical memory regions:", .{});
+    log.info("Physical memory regions:", .{});
     for (physical_regions) |reg| {
         const range = reg.range;
         const sizeInKiB = range.size / 1024;
-        std.log.info(
+        log.info(
             "    [0x{x:0>16}-0x{x:0>16}] ({} KiB)",
             .{ range.start.asInt(), range.end().asInt() - 1, sizeInKiB },
         );
@@ -299,12 +301,12 @@ fn printPhysicalRegions(physical_regions: []const PhysicalMemoryRegion) void {
 }
 
 fn printReservedRegions(reserved_regions: []const ReservedMemoryRegion) void {
-    std.log.info("Reserved memory regions:", .{});
+    log.info("Reserved memory regions:", .{});
     for (reserved_regions) |reg| {
         const range = reg.range;
         const size_in_kib = range.size / 1024;
         if (reg.system) {
-            std.log.info("    [0x{x:0>16}-0x{x:0>16}] <{s}> ({} KiB) system", .{
+            log.info("    [0x{x:0>16}-0x{x:0>16}] <{s}> ({} KiB) system", .{
                 range.start.asInt(),
                 range.end().asInt() - 1,
                 reg.name,
@@ -313,7 +315,7 @@ fn printReservedRegions(reserved_regions: []const ReservedMemoryRegion) void {
         } else {
             const no_map_string = if (reg.no_map) "no-map" else "map";
             const reusable_string = if (reg.reusable) "reusable" else "non-reusable";
-            std.log.info("    [0x{x:0>16}-0x{x:0>16}] <{s}> ({} KiB) {s} {s}", .{
+            log.info("    [0x{x:0>16}-0x{x:0>16}] <{s}> ({} KiB) {s} {s}", .{
                 range.start.asInt(),
                 range.end().asInt() - 1,
                 reg.name,
@@ -326,10 +328,10 @@ fn printReservedRegions(reserved_regions: []const ReservedMemoryRegion) void {
 }
 
 fn printUsableRegions(regions: []const MemoryRegion) void {
-    std.log.info("Usable memory regions:", .{});
+    log.info("Usable memory regions:", .{});
     for (regions) |reg| {
         const size_in_kib = reg.size / 1024;
-        std.log.info(
+        log.info(
             "    [0x{x:0>16}-0x{x:0>16}] ({} KiB)",
             .{ reg.start.asInt(), reg.end().asInt() - 1, size_in_kib },
         );

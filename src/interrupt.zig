@@ -88,7 +88,7 @@ pub fn setHandler(int_num: usize, handle: *const fn (dev: *Device) void, dev: *D
     };
 }
 
-pub fn dispatchInterruipt(int_num: usize) void {
+pub fn dispatchInterrupt(int_num: usize) void {
     const handler: *InterruptHandler = &interrupt_handlers[int_num];
     handler.handle(handler.owner);
     handler.call_count += 1;

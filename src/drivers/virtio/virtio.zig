@@ -429,52 +429,65 @@ pub const VirtQueue = struct {
     used_ring: [*]UsedElement,
 
     /// Writes the descriptor id of the head of a buffer chain to the available ring
-    /// to start a transaction. Polls until the device advances the used ring index
-    /// until the avaiable ring index, meaning the request's completion.
-    pub fn queueChainSingle(self: *VirtQueue, virt_dev: *VirtioDevice, chain_descriptor_id: u16) void {
+    /// to start a transaction. Optionally polls until the device advances the used ring index
+    /// until the available ring index, meaning the request's completion.
+    pub fn queueChainSingle(
+        self: *VirtQueue,
+        virt_dev: *VirtioDevice,
+        chain_descriptor_id: u16,
+        poll: bool,
+    ) void {
         std.debug.assert(chain_descriptor_id < self.queue_count);
 
         self.available_ring[self.available_ring_header.index % self.queue_count] = chain_descriptor_id;
-        self.available_ring_header.index +%= 1;
 
-        virt_dev.common.queue_select = self.queue_id;
-        const notify_off = virt_dev.common.queue_notify_offset;
-        const multiplier = virt_dev.notification_capability.notification_offset_multiplier;
-
-        const notif_addr = virt_dev.notification_base.add(multiplier * notify_off);
-        const notify_ptr: *u16 = notif_addr.asPtr(*u16);
-        notify_ptr.* = self.queue_id;
-
-        while (self.used_ring_header.index != self.available_ring_header.index) {}
+        self.queueChainCommon(virt_dev, self.available_ring_header.index +% 1, poll);
     }
 
-    /// Writes the descriptor id of the head of a buffer chain to the available ring
-    /// to start a transaction. Polls until the device advances the used ring index
-    /// until the avaiable ring index, meaning the request's completion.
-    pub fn queueChainMultiple(
+    /// Writes the descriptor id of the heads of buffer chains to the available ring
+    /// to start a transaction. Optionally polls until the device advances the used ring index
+    /// until the available ring index, meaning the request's completion.
+    pub fn queueChainRange(
         self: *VirtQueue,
         virt_dev: *VirtioDevice,
-        descriptor_chain_ids: []const u16,
+        start_desc_idx: u16,
+        desc_count: u16,
         poll: bool,
     ) void {
-        var new_index = self.available_ring_header.index;
-        for (descriptor_chain_ids) |descriptor_id| {
-            std.debug.assert(descriptor_id < self.queue_count);
+        std.debug.assert(start_desc_idx < self.queue_count);
+        std.debug.assert(desc_count <= self.queue_count);
 
-            self.available_ring[new_index % self.queue_count] = descriptor_id;
+        var new_index = self.available_ring_header.index;
+
+        var i: u16 = 0;
+        while (i != desc_count) : (i += 1) {
+            self.available_ring[new_index % self.queue_count] = start_desc_idx + i;
             new_index +%= 1;
         }
-        self.available_ring_header.index = new_index;
 
+        self.queueChainCommon(virt_dev, new_index, poll);
+    }
+
+    /// Sets the available ring index to the specified value. Notifies the device if the device
+    /// requested it. Optinally polls until the device advances the used ring index until the
+    /// available ring index, meaning the request's completion.
+    pub fn queueChainCommon(
+        self: *VirtQueue,
+        virt_dev: *VirtioDevice,
+        new_available_ring_index: u16,
+        poll: bool,
+    ) void {
+        self.available_ring_header.index = new_available_ring_index;
         virt_dev.common.queue_select = self.queue_id;
 
-        const notify_off = virt_dev.common.queue_notify_offset;
-        const multiplier = virt_dev.notification_capability.notification_offset_multiplier;
+        if (!self.used_ring_header.flags.no_notify) {
+            const notify_off = virt_dev.common.queue_notify_offset;
+            const multiplier = virt_dev.notification_capability.notification_offset_multiplier;
 
-        // TODO: respect no-notify if the device sets it
-        const notif_addr = virt_dev.notification_base.add(multiplier * notify_off);
-        const notify_ptr: *u16 = notif_addr.asPtr(*u16);
-        notify_ptr.* = self.queue_id;
+            const notif_addr = virt_dev.notification_base.add(multiplier * notify_off);
+            const notify_ptr: *u16 = notif_addr.asPtr(*u16);
+            notify_ptr.* = self.queue_id;
+        }
 
         if (poll) {
             while (self.used_ring_header.index != self.available_ring_header.index) {}
@@ -506,7 +519,9 @@ pub const VirtQueue = struct {
     }
 
     /// Sets up a virtqueue. Allocates the descriptor table, avaiable ring and the used ring.
-    /// Optionally overrides the queue size.
+    /// Optionally overrides the queue size. If the queue size is larger than the
+    /// maximum supported then the maximum queue count is used. The caller must not make
+    /// an assumption about the size of the queues.
     pub fn setup(
         common_cap: *VirtioPCICommon,
         queue_id: u16,
@@ -514,14 +529,16 @@ pub const VirtQueue = struct {
         avail_ring_flags: AvailableRingHeader.Flags,
     ) !VirtQueue {
         common_cap.queue_select = queue_id;
-        var queue_count = common_cap.queue_count;
-        std.debug.assert(queue_count != 0);
+        const max_queue_count = common_cap.queue_count;
+        std.debug.assert(max_queue_count != 0);
+
+        var queue_count = max_queue_count;
 
         if (override_queue_count) |override| {
-            if (queue_count < override) return error.InvalidOverride;
-
-            common_cap.queue_count = override;
-            queue_count = override;
+            if (queue_count > override) {
+                common_cap.queue_count = override;
+                queue_count = override;
+            }
         }
 
         const avail_ring_size = @as(usize, queue_count) * @sizeOf(u16);

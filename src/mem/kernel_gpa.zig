@@ -25,8 +25,6 @@ pub const KernelGPA = struct {
 fn allocate(ptr: *anyopaque, size: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
     _ = ret_addr;
 
-    log.debug("allocation size: {}", .{size});
-
     const kernel_gpa: *KernelGPA = @ptrCast(@alignCast(ptr));
 
     for (sizes, 0..) |cache_size, i| {

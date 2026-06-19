@@ -10,6 +10,7 @@ const buddy_allocator = @import("../../mem/buddy_allocator.zig");
 const arch = @import("../../arch/arch.zig");
 const virtio = @import("virtio.zig");
 const interrupt = @import("../../interrupt.zig");
+const input = @import("../../input.zig");
 
 const VirtQueue = virtio.VirtQueue;
 const VirtioDevice = virtio.VirtioDevice;
@@ -20,8 +21,10 @@ const VirtioInput = struct {
     pci_device: *pcie.PCIDevice,
     virtio_device: VirtioDevice,
     negotiated_features: u128,
+    event_queue_array: []VirtioInputEvent,
     event_queue: VirtQueue,
     status_queue: VirtQueue,
+    event_last_desc_idx: u16,
 
     fn readName(self: *VirtioInput) []const u8 {
         const device_config = self.virtio_device.device_base.asPtr(*VirtioInputDevice);
@@ -67,7 +70,7 @@ const VirtioInput = struct {
     }
 };
 
-pub var input: VirtioInput = undefined;
+pub var virtio_input_device: VirtioInput = undefined;
 
 const VirtioInputDevice = extern struct {
     select: ConfigSelect,
@@ -159,9 +162,9 @@ fn init(dev: *device.Device) void {
     const pci_dev = pcie.pciDeviceFromDevice(dev);
     const cfg_space = pcie.ConfigurationSpace.fromAddress(pci_dev.address);
     const header = cfg_space.generalHeader();
-    const features = virtio.initializeVirtioDevice(pci_dev, &input.virtio_device, 0);
+    const features = virtio.initializeVirtioDevice(pci_dev, &virtio_input_device.virtio_device, 0);
 
-    input.pci_device = pci_dev;
+    virtio_input_device.pci_device = pci_dev;
     header.common_header.command.bus_master_enable = true;
     header.common_header.command.interrupt_disable = false;
 
@@ -170,39 +173,44 @@ fn init(dev: *device.Device) void {
 
     // TODO: detect what kind of device this is
 
-    input.negotiated_features = features orelse @panic("Failed to initialize VirtIO device");
-
-    const event_queue_id = 0;
-    const status_queue_id = 1;
-
-    input.event_queue = VirtQueue.setup(
-        input.virtio_device.common,
-        event_queue_id,
-        null,
-        .{ .no_interrupt = false },
-    ) catch @panic("TODO");
-
-    input.status_queue = VirtQueue.setup(
-        input.virtio_device.common,
-        status_queue_id,
-        null,
-        .{ .no_interrupt = true },
-    ) catch @panic("TODO");
-
-    input.virtio_device.common.device_status.driver_ok = true;
-
-    input.pci_device.device.interrupt = .{
-        .number = input.pci_device.interrupt_number orelse @panic("TODO"),
-        .handler = handleInterrupt,
-    };
+    virtio_input_device.negotiated_features = features orelse @panic("Failed to initialize VirtIO device");
 
     const buffer_phys = buddy_allocator.allocBlock(0) catch unreachable;
     const virt_addr = mm.physicalToVirtualAddress(buffer_phys);
     const arr = virt_addr.asPtr([*]VirtioInputEvent);
 
-    const count = 10;
-    for (0..count) |i| {
-        input.event_queue.writeDescriptor(
+    const event_buff_count = arch.page_size / @sizeOf(VirtioInputEvent);
+
+    const event_queue_id = 0;
+    const status_queue_id = 1;
+
+    virtio_input_device.event_queue = VirtQueue.setup(
+        virtio_input_device.virtio_device.common,
+        event_queue_id,
+        event_buff_count,
+        .{ .no_interrupt = false },
+    ) catch @panic("TODO");
+
+    const event_buff_count_used = virtio_input_device.event_queue.queue_count;
+    virtio_input_device.event_queue_array = arr[0..event_buff_count_used];
+
+    virtio_input_device.status_queue = VirtQueue.setup(
+        virtio_input_device.virtio_device.common,
+        status_queue_id,
+        null,
+        .{ .no_interrupt = true },
+    ) catch @panic("TODO");
+
+    virtio_input_device.virtio_device.common.device_status.driver_ok = true;
+
+    virtio_input_device.pci_device.device.interrupt = .{
+        .number = virtio_input_device.pci_device.interrupt_number orelse @panic("TODO"),
+        .handler = handleInterrupt,
+    };
+    std.log.debug("virtio input start", .{});
+
+    for (0..event_buff_count_used) |i| {
+        virtio_input_device.event_queue.writeDescriptor(
             @intCast(i),
             &arr[i],
             @sizeOf(VirtioInputEvent),
@@ -211,12 +219,49 @@ fn init(dev: *device.Device) void {
         );
     }
 
-    input.event_queue.queueChainMultiple(&input.virtio_device, &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 }, false);
+    virtio_input_device.event_queue.queueChainRange(
+        &virtio_input_device.virtio_device,
+        0,
+        virtio_input_device.event_queue.queue_count,
+        false,
+    );
 }
 
 fn handleInterrupt(dev: *device.Device) void {
     _ = dev;
-    log.debug("got keyboard interrupt!!!", .{});
+
+    // TODO: this assumes VIRTIO_F_IN_ORDER which is not negotiated
+
+    const virtio_input = &virtio_input_device;
+    const used_ring_idx = virtio_input.event_queue.used_ring_header.index;
+
+    var index = virtio_input.event_last_desc_idx;
+    const ev_count = used_ring_idx - index;
+
+    while (index < used_ring_idx) : (index +%= 1) {
+        const desc_index = index % virtio_input.event_queue.queue_count;
+
+        const ev = virtio_input_device.event_queue_array[desc_index];
+
+        switch (ev.event_type) {
+            .key => {
+                input.addKeyEvent(.{
+                    .event_type = @enumFromInt(ev.value),
+                    .key = @enumFromInt(ev.code),
+                });
+            },
+            else => {},
+        }
+    }
+
+    virtio_input.event_last_desc_idx = index;
+
+    const avail_ring_idx = virtio_input.event_queue.available_ring_header.index +% ev_count;
+    virtio_input.event_queue.queueChainCommon(&virtio_input.virtio_device, avail_ring_idx, false);
+
+    // clear the interrupt flag
+    const isr = virtio_input.virtio_device.isr_base.asPtr(*volatile u8);
+    _ = isr.*;
 }
 
 const device_ids: []const pcie.PCIDevice.Id = &.{

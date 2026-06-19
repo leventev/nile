@@ -23,7 +23,7 @@ const enable_bits_base_off = 0x2000;
 
 /// Each context has a threshhold, claim and complete register.
 /// They are each 0x1000 bytes apart, all other bytes are reserved.
-const context_base_off = 0x200000;
+const context_base_off = 0x20_0000;
 
 /// Offset of the threshhold register from the base address of a context's registers.
 const context_priority_threshold_off = 0x0;
@@ -180,7 +180,7 @@ const PLIC = struct {
 
         // TODO: locking
 
-        const offset = context_base_off + context * context_size + context_claim_off;
+        const offset = context_base_off + context * context_size + context_complete_off;
         const context_complete = self.base_ptr.add(offset).asPtr(*u32);
 
         context_complete.* = id;
@@ -268,7 +268,7 @@ fn dumpEnabledInterrupts() void {
 pub fn handleInterrupt() void {
     const int_num = plic.claim(plic.used_context);
 
-    interrupt.dispatchInterruipt(int_num);
+    interrupt.dispatchInterrupt(int_num);
 
     plic.complete(plic.used_context, int_num);
 }

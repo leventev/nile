@@ -42,13 +42,27 @@ pub fn setupNewThread(thread: *Thread, entry_point_addr: usize, stack_top: usize
     }
 
     thread.registers.pc = @intCast(entry_point_addr);
-    // TODO: maybe dont copy sstatus?
-    thread.registers.status = @bitCast(CSR.sstatus.read());
-    if (user) {
-        thread.registers.status.supervisor_previous_privilege = .user;
-    } else {
-        thread.registers.status.supervisor_previous_privilege = .supervisor;
-    }
+    thread.registers.status = .{
+        .executable_memory_read = true,
+        .extra_extension_status = .all_off,
+        .float_status = .off,
+        .state_dirty = false,
+        .supervisor_interrupt_enable = false,
+        .supervisor_previous_interrupt_enable = user,
+        .supervisor_previous_privilege = if (user) .user else .supervisor,
+        .supervisor_user_memory_accessable = true,
+        .user_big_endian = false,
+        .user_xlen = .x64,
+        .vector_status = .off,
+        .__reserved1 = 0,
+        .__reserved2 = 0,
+        .__reserved3 = 0,
+        .__reserved4 = 0,
+        .__reserved5 = 0,
+        .__reserved6 = 0,
+        .__reserved7 = 0,
+    };
+
     thread.registers.gprs[Registers.stack_ptr] = @intCast(stack_top);
     thread.registers.gprs[Registers.global_data_ptr] = @intFromPtr(&__global_pointer);
 }

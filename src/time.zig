@@ -9,7 +9,7 @@ pub const ns_per_microseconds = 1_000;
 pub const ns_per_milliseconds = 1_000_000;
 pub const ns_per_second = 1_000_000_000;
 
-pub const ns_per_tick = 1_000_000_000;
+pub const ns_per_tick = 10_000_000;
 
 pub const ClockSourceInitError = error{InvalidDeviceTree};
 

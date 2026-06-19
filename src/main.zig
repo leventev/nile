@@ -20,6 +20,7 @@ pub const device = @import("device.zig");
 pub const framebuffer = @import("framebuffer.zig");
 pub const pc_font = @import("pc_font.zig");
 pub const kernel_gpa = @import("mem/kernel_gpa.zig");
+pub const tty = @import("tty.zig");
 
 const test_binary_file = @embedFile("shell");
 const test_archive = @embedFile("root.cpio");
@@ -95,6 +96,12 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     // find interrupt controllers first
     devicetree.addDevices(&dt) catch @panic("TODO");
 
+    // initialize the thread cache so that drivers can create
+    // soft interrupts,
+    // or TODO: make the drivers store the
+    // Thread structure themselves
+    scheduler.init();
+
     device.matchDeviceTreeDevices(&dt);
 
     while (device.matchNonDeviceTreeDevices()) {}
@@ -105,7 +112,7 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     pc_font.init();
 
-    framebuffer.fillRect(0, 0, 300, 500, .{
+    framebuffer.fillRect(0, 100, 300, 500, .{
         .red = 100,
         .green = 200,
         .blue = 50,
@@ -120,8 +127,6 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     });
 
     framebuffer.flush();
-
-    scheduler.init();
 
     time.init(&dt) catch @panic("Failed to initialize timer");
 
@@ -156,7 +161,8 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     // // initramfs.dumpTree();
 
     const idle_process_thread = processes.init();
-    _ = processes.spawnInitProcess(root_page_table, null, test_binary_file) catch @panic("TODO");
+    _ = processes.spawnInitProcess(root_page_table, null, test_binary_file) catch
+        @panic("TODO");
     // TODO: this could probably be done in a nicer way
     arch.scheduleNextThread(idle_process_thread);
 
@@ -164,8 +170,6 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     arch.enableInterrupts();
 
     while (true) {
-        interrupt.dumpPendingInterrupts();
-        // interrupt.dumpEnabledInterrupts();
         asm volatile ("wfi");
     }
 }

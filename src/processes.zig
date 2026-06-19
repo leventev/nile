@@ -128,7 +128,9 @@ pub fn killCurrentProcess(exit_code: usize) void {
     // - free Process structure
     // - schedule the next thread in line
 
-    const current_process = current_thread.owner_process;
+    const gp_thread = current_thread.purpose.general;
+
+    const current_process = gp_thread.owner_process;
 
     if (@intFromEnum(current_process.id) == 0) {
         @panic("Trying to kill sentinel process");
@@ -137,7 +139,8 @@ pub fn killCurrentProcess(exit_code: usize) void {
     running_processes.remove(&current_process.list_node);
 
     while (current_process.associated_threads.popFirst()) |thread_node| {
-        const thread: *Thread = @fieldParentPtr("process_list_node", thread_node);
+        const general: *Thread.General = @fieldParentPtr("process_list_node", thread_node);
+        const thread: *Thread = @fieldParentPtr("purpose", @as(*Thread.Purpose, @ptrCast(general)));
         scheduler.removeThread(thread);
     }
 

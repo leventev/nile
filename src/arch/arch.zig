@@ -34,8 +34,16 @@ pub const scheduleNextThread = switch (target) {
     Arch.riscv64 => riscv64.scheduleNextThread,
 };
 
-pub const setupNewThread = switch (target) {
-    Arch.riscv64 => riscv64.setupNewThread,
+pub const forceScheduleNextThread = switch (target) {
+    Arch.riscv64 => riscv64.forceScheduleNextThread,
+};
+
+pub const setupSoftInterruptThread = switch (target) {
+    Arch.riscv64 => riscv64.setupSoftInterruptThread,
+};
+
+pub const setupNewGeneralThread = switch (target) {
+    Arch.riscv64 => riscv64.setupNewGeneralThread,
 };
 
 pub const Lock = switch (target) {

@@ -68,5 +68,6 @@ pub const Registers = extern struct {
     pub fn printRegs(self: Self, comptime log_level: std.log.Level) void {
         self.printGPRs(log_level);
         kio.kernel_log(log_level, .riscv, "pc: 0x{x:0>16}", .{self.pc});
+        kio.kernel_log(log_level, .riscv, "status: {any}", .{self.status});
     }
 };

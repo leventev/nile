@@ -34,14 +34,17 @@ const kernel_physical_address = 0x80200000;
 const kernel_virtual_address = 0xffffffffc0200000;
 pub const kernel_virtual_offset = kernel_virtual_address - kernel_physical_address;
 
-pub fn setupNewThread(thread: *Thread, entry_point_addr: usize, stack_top: usize, user: bool) void {
+pub fn setupNewGeneralThread(thread: *Thread, entry_point_addr: usize) void {
     if (config.debug_scheduler) {
         thread.registers.gprs = [_]u64{0xAA_BB_CC_DD_AA_BB_CC_DD} ** Registers.gpr_count;
     } else {
         thread.registers.gprs = [_]u64{0x00} ** Registers.gpr_count;
     }
 
+    const user = thread.purpose.general.user;
+
     thread.registers.pc = @intCast(entry_point_addr);
+
     thread.registers.status = .{
         .executable_memory_read = true,
         .extra_extension_status = .all_off,
@@ -63,17 +66,64 @@ pub fn setupNewThread(thread: *Thread, entry_point_addr: usize, stack_top: usize
         .__reserved7 = 0,
     };
 
-    thread.registers.gprs[Registers.stack_ptr] = @intCast(stack_top);
+    thread.registers.gprs[Registers.stack_ptr] = thread.stack_top.asInt();
+    thread.registers.gprs[Registers.global_data_ptr] = @intFromPtr(&__global_pointer);
+}
+
+pub fn setupSoftInterruptThread(thread: *Thread) void {
+    if (config.debug_scheduler) {
+        thread.registers.gprs = [_]u64{0xAA_BB_CC_DD_AA_BB_CC_DD} ** Registers.gpr_count;
+    } else {
+        thread.registers.gprs = [_]u64{0x00} ** Registers.gpr_count;
+    }
+
+    // TODO:
+    thread.registers.gprs[1] = @intFromPtr(&scheduler.forceScheduleNextThread);
+    thread.registers.pc = @intFromPtr(thread.purpose.soft_interrupt.callback);
+    thread.registers.status = .{
+        .executable_memory_read = true,
+        .extra_extension_status = .all_off,
+        .float_status = .off,
+        .state_dirty = false,
+        .supervisor_interrupt_enable = false,
+        .supervisor_previous_interrupt_enable = false,
+        .supervisor_previous_privilege = .supervisor,
+        .supervisor_user_memory_accessable = false,
+        .user_big_endian = false,
+        .user_xlen = .x64,
+        .vector_status = .off,
+        .__reserved1 = 0,
+        .__reserved2 = 0,
+        .__reserved3 = 0,
+        .__reserved4 = 0,
+        .__reserved5 = 0,
+        .__reserved6 = 0,
+        .__reserved7 = 0,
+    };
+
+    thread.registers.gprs[Registers.stack_ptr] = thread.stack_top.asInt();
     thread.registers.gprs[Registers.global_data_ptr] = @intFromPtr(&__global_pointer);
 }
 
 pub fn scheduleNextThread(thread: *Thread) void {
     if (config.debug_scheduler) {
-        std.log.debug("schedule next thread: {}", .{thread.id});
+        std.log.debug("schedule next thread: {} {any}", .{ thread.id, thread.purpose });
         thread.registers.printRegs(.debug);
     }
     CSR.sscratch.write(@intFromPtr(&thread.registers));
     timer.resetTimer();
+}
+
+extern fn forceSchedule() noreturn;
+
+pub fn forceScheduleNextThread(thread: *Thread) noreturn {
+    if (config.debug_scheduler) {
+        std.log.debug("force schedule next thread: {} {any}", .{ thread.id, thread.purpose });
+        thread.registers.printRegs(.debug);
+    }
+    CSR.sscratch.write(@intFromPtr(&thread.registers));
+    timer.resetTimer();
+    forceSchedule();
 }
 
 pub const clock_source = timer.riscv_clock_source;

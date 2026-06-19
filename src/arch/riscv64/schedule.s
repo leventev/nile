@@ -75,3 +75,30 @@ trapHandlerSupervisor:
     .endr
 
     sret
+
+.type forceSchedule, @function
+.global forceSchedule
+.global trap_stack_bottom
+.align 4
+forceSchedule:
+    # the next thread's *Registers is already written to sscratch
+
+    # write *Registers to t6
+    csrr t6, sscratch
+
+    ld t0, (32 * REGISTER_BYTES)(t6)
+    csrw sepc, t0
+
+    ld t0, (33 * REGISTER_BYTES)(t6)
+    csrw sstatus, t0
+
+    # load GPRs
+    # NOTE: it can seem that we are rewriting t6 here but t6 is the last register thus writing all 30
+    # registers before it is fine
+    .set i, 1
+    .rept 31
+        readGPR t6, %i
+        .set i, i + 1
+    .endr
+
+    sret

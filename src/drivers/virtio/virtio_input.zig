@@ -11,6 +11,8 @@ const arch = @import("../../arch/arch.zig");
 const virtio = @import("virtio.zig");
 const interrupt = @import("../../interrupt.zig");
 const input = @import("../../input.zig");
+const Thread = @import("../../Thread.zig");
+const scheduler = @import("../../scheduler.zig");
 
 const VirtQueue = virtio.VirtQueue;
 const VirtioDevice = virtio.VirtioDevice;
@@ -25,6 +27,7 @@ const VirtioInput = struct {
     event_queue: VirtQueue,
     status_queue: VirtQueue,
     event_last_desc_idx: u16,
+    soft_interrupt_thread: *Thread,
 
     fn readName(self: *VirtioInput) []const u8 {
         const device_config = self.virtio_device.device_base.asPtr(*VirtioInputDevice);
@@ -207,7 +210,11 @@ fn init(dev: *device.Device) void {
         .number = virtio_input_device.pci_device.interrupt_number orelse @panic("TODO"),
         .handler = handleInterrupt,
     };
-    std.log.debug("virtio input start", .{});
+
+    virtio_input_device.soft_interrupt_thread = scheduler.newSoftInterruptHandler(
+        softInterrupt,
+        &virtio_input_device.pci_device.device,
+    ) catch @panic("TODO");
 
     for (0..event_buff_count_used) |i| {
         virtio_input_device.event_queue.writeDescriptor(
@@ -227,7 +234,7 @@ fn init(dev: *device.Device) void {
     );
 }
 
-fn handleInterrupt(dev: *device.Device) void {
+fn softInterrupt(dev: *device.Device) void {
     _ = dev;
 
     // TODO: this assumes VIRTIO_F_IN_ORDER which is not negotiated
@@ -258,8 +265,15 @@ fn handleInterrupt(dev: *device.Device) void {
 
     const avail_ring_idx = virtio_input.event_queue.available_ring_header.index +% ev_count;
     virtio_input.event_queue.queueChainCommon(&virtio_input.virtio_device, avail_ring_idx, false);
+}
+
+fn handleInterrupt(dev: *device.Device) void {
+    _ = dev;
+
+    scheduler.queueSoftInterruptHandler(virtio_input_device.soft_interrupt_thread);
 
     // clear the interrupt flag
+    const virtio_input = &virtio_input_device;
     const isr = virtio_input.virtio_device.isr_base.asPtr(*volatile u8);
     _ = isr.*;
 }

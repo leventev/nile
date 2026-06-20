@@ -6,7 +6,7 @@ const mm = @import("mm.zig");
 
 const log = std.log.scoped(.buddy_allocator);
 
-const PhysicalAddress = arch.PhysicalAddress;
+const PhysicalAddress = mm.PhysicalAddress;
 
 pub const order_count = 12;
 pub const max_order = order_count - 1;
@@ -121,7 +121,7 @@ pub const BuddyAllocator = struct {
 
         for (0..page_count) |i| {
             const block_page_idx = start_page_idx + i;
-            const block_addr = arch.PhysicalAddress.fromInt(block_page_idx * arch.page_size);
+            const block_addr = PhysicalAddress.fromInt(block_page_idx * arch.page_size);
             self.orders[0].orderedAdd(block_addr);
         }
     }

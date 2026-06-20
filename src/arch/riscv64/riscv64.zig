@@ -13,9 +13,6 @@ const CSR = @import("csr.zig").CSR;
 const config = @import("../../config.zig");
 pub const Lock = @import("Lock.zig");
 
-pub const VirtualAddress = riscv64_mm.Sv39VirtualAddress;
-pub const PhysicalAddress = riscv64_mm.Sv39PhysicalAddress;
-
 pub const enableInterrupts = trap.enableInterrupts;
 pub const disableInterrupts = trap.disableInterrupts;
 

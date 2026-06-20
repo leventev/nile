@@ -18,14 +18,6 @@ pub const disableInterrupts = switch (target) {
     Arch.riscv64 => riscv64.disableInterrupts,
 };
 
-pub const VirtualAddress = switch (target) {
-    Arch.riscv64 => riscv64.VirtualAddress,
-};
-
-pub const PhysicalAddress = switch (target) {
-    Arch.riscv64 => riscv64.PhysicalAddress,
-};
-
 pub const Registers = switch (target) {
     Arch.riscv64 => riscv64.Registers,
 };

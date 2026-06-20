@@ -57,7 +57,7 @@ pub const PageTableEntry = packed struct(u64) {
         return !self.flags.readable and !self.flags.writable and !self.flags.readable;
     }
 
-    pub inline fn address(self: Self) Sv39PhysicalAddress {
+    pub inline fn address(self: Self) mm.PhysicalAddress {
         const addend2 = @shlExact(@as(u64, self.page_number_2), 30);
         const addend1 = @shlExact(@as(u64, self.page_number_1), 21);
         const addend0 = @shlExact(@as(u64, self.page_number_0), 12);
@@ -65,66 +65,33 @@ pub const PageTableEntry = packed struct(u64) {
     }
 };
 
-// TODO: support other addressing modes like Sv48, Sv57...
-pub const Sv39PhysicalAddress = packed struct(u64) {
-    offset: u12,
+const PageNumbers = struct {
+    page_offset: u12,
     page_number_0: u9,
     page_number_1: u9,
     page_number_2: u9,
-    __unused: u25,
 
-    const Self = @This();
+    // TODO: Sv48
+    // page_number_3: u9,
 
-    pub inline fn fromInt(addr: u64) Self {
-        return @bitCast(addr);
+    // TODO: Sv57
+    // page_number_4: u9,
+
+    fn fromInt(addr: u64) PageNumbers {
+        return .{
+            .page_offset = @truncate(addr),
+            .page_number_0 = @truncate(std.math.shr(u64, addr, 12)),
+            .page_number_1 = @truncate(std.math.shr(u64, addr, 12 + 9)),
+            .page_number_2 = @truncate(std.math.shr(u64, addr, 12 + 18)),
+        };
     }
 
-    pub inline fn asInt(self: Self) u64 {
-        return @bitCast(self);
+    fn fromVirtual(virt: mm.VirtualAddress) PageNumbers {
+        return fromInt(virt.asInt());
     }
 
-    pub inline fn add(self: Self, offset: u64) Self {
-        return fromInt(self.asInt() + offset);
-    }
-
-    pub inline fn asPtr(self: Self, comptime T: type) T {
-        if (@typeInfo(T) != .pointer) @compileError("not a pointer");
-        return @ptrFromInt(self.asInt());
-    }
-
-    pub inline fn isPageAligned(self: Self) bool {
-        return self.offset == 0;
-    }
-};
-
-pub const Sv39VirtualAddress = packed struct(u64) {
-    offset: u12,
-    page_number_0: u9,
-    page_number_1: u9,
-    page_number_2: u9,
-    __unused: u25,
-
-    const Self = @This();
-
-    pub inline fn fromInt(addr: u64) Self {
-        return @bitCast(addr);
-    }
-
-    pub inline fn asInt(self: Self) u64 {
-        return @bitCast(self);
-    }
-
-    pub inline fn add(self: Self, offset: u64) Self {
-        return fromInt(self.asInt() + offset);
-    }
-
-    pub inline fn asPtr(self: Self, comptime T: type) T {
-        if (@typeInfo(T) != .pointer) @compileError("not a pointer");
-        return @ptrFromInt(self.asInt());
-    }
-
-    pub inline fn isPageAligned(self: Self) bool {
-        return self.offset == 0;
+    fn fromPhysical(phys: mm.PhysicalAddress) PageNumbers {
+        return fromInt(phys.asInt());
     }
 };
 
@@ -133,16 +100,16 @@ pub const PageTable = struct {
 
     const Self = @This();
 
-    pub inline fn fromVirtualAddress(addr: Sv39VirtualAddress) PageTable {
+    pub inline fn fromVirtualAddress(addr: mm.VirtualAddress) PageTable {
         return .{
-            .entries = @ptrFromInt(addr.asInt()),
+            .entries = addr.asPtr(*[entries_per_table]PageTableEntry),
         };
     }
 
     pub inline fn writeEntry(
         self: Self,
         idx: usize,
-        phys: Sv39PhysicalAddress,
+        phys: mm.PhysicalAddress,
         entry_type: PageEntryType,
         flags: PageTableEntry.Flags,
     ) !void {
@@ -152,10 +119,12 @@ pub const PageTable = struct {
         if (!phys.isPageAligned())
             return error.InvalidAddress;
 
+        const pn = PageNumbers.fromPhysical(phys);
+
         _ = switch (entry_type) {
-            PageEntryType.leaf_2mib => if (phys.page_number_0 != 0)
+            PageEntryType.leaf_2mib => if (pn.page_number_0 != 0)
                 return error.InvalidAddress,
-            PageEntryType.leaf_1gib => if (phys.page_number_0 != 0 or phys.page_number_1 != 0)
+            PageEntryType.leaf_1gib => if (pn.page_number_0 != 0 or pn.page_number_1 != 0)
                 return error.InvalidAddress,
             PageEntryType.branch => if (flags.executable or flags.readable or flags.writable)
                 return error.InvalidFlags,
@@ -167,9 +136,9 @@ pub const PageTable = struct {
             .flags = flags,
             .accessed = false,
             .dirty = false,
-            .page_number_0 = phys.page_number_0,
-            .page_number_1 = phys.page_number_1,
-            .page_number_2 = phys.page_number_2,
+            .page_number_0 = pn.page_number_0,
+            .page_number_1 = pn.page_number_1,
+            .page_number_2 = pn.page_number_2,
             .__reserved = 0,
             .__reserved2 = 0,
         };
@@ -262,7 +231,7 @@ fn getOrMapPageTable(parent_page_tbl: PageTable, index: usize) !PageTable {
 }
 
 pub fn switchAddressSpace(root_page_table: PageTable) void {
-    const pg_tbl_virt = Sv39VirtualAddress.fromInt(@intFromPtr(root_page_table.entries));
+    const pg_tbl_virt = mm.VirtualAddress.fromInt(@intFromPtr(root_page_table.entries));
     const pg_tbl_ppn: u44 = @intCast(mm.virtualToPhysicalAddress(pg_tbl_virt).asInt() / 4096);
     writeSATP(.{
         .address_space_id = 0,
@@ -276,7 +245,7 @@ pub fn switchAddressSpace(root_page_table: PageTable) void {
 
 pub fn mapRegion(
     root_page_tbl: PageTable,
-    addr: Sv39VirtualAddress,
+    addr: mm.VirtualAddress,
     size: usize,
     flags: Process.MappedRegion.Flags,
 ) !void {
@@ -295,29 +264,34 @@ pub fn mapRegion(
     // in Sv39 we have 3 levels of page tables
     // level 2 is the highest(root page table)
     const pg_tbl_2 = root_page_tbl;
-    var pg_tbl_1 = try getOrMapPageTable(pg_tbl_2, current_addr.page_number_2);
-    var pg_tbl_0 = try getOrMapPageTable(pg_tbl_1, current_addr.page_number_1);
+
+    const pn = PageNumbers.fromVirtual(current_addr);
+    var pg_tbl_1 = try getOrMapPageTable(pg_tbl_2, pn.page_number_2);
+    var pg_tbl_0 = try getOrMapPageTable(pg_tbl_1, pn.page_number_1);
 
     while (end_addr.asInt() != current_addr.asInt()) {
-        if (prev_addr.page_number_2 != current_addr.page_number_2) {
-            pg_tbl_1 = try getOrMapPageTable(pg_tbl_2, current_addr.page_number_2);
+        const prev_pn = PageNumbers.fromVirtual(prev_addr);
+        const current_pn = PageNumbers.fromVirtual(current_addr);
+
+        if (prev_pn.page_number_2 != current_pn.page_number_2) {
+            pg_tbl_1 = try getOrMapPageTable(pg_tbl_2, current_pn.page_number_2);
         }
 
-        if (prev_addr.page_number_1 != current_addr.page_number_1) {
-            pg_tbl_0 = try getOrMapPageTable(pg_tbl_1, current_addr.page_number_1);
+        if (prev_pn.page_number_1 != current_pn.page_number_1) {
+            pg_tbl_0 = try getOrMapPageTable(pg_tbl_1, current_pn.page_number_1);
         }
 
-        const prev_entry = pg_tbl_0.entries[current_addr.page_number_0];
+        const prev_entry = pg_tbl_0.entries[current_pn.page_number_0];
         if (!prev_entry.isZero()) {
             std.log.warn("overwriting page table mapping(VPN={},{},{})", .{
-                current_addr.page_number_2,
-                current_addr.page_number_1,
-                current_addr.page_number_0,
+                current_pn.page_number_2,
+                current_pn.page_number_1,
+                current_pn.page_number_0,
             });
         }
 
         const frame = try buddy_allocator.allocBlock(0);
-        pg_tbl_0.writeEntry(current_addr.page_number_0, frame, .leaf_4kib, .{
+        pg_tbl_0.writeEntry(current_pn.page_number_0, frame, .leaf_4kib, .{
             .executable = flags.execute,
             .readable = flags.read,
             .writable = flags.write,
@@ -339,7 +313,7 @@ pub fn copyPageTable(original_page_table: PageTable, new_page_table: PageTable) 
 pub fn unmapPageTable(
     page_table: PageTable,
     level: usize,
-    base_address: Sv39VirtualAddress,
+    base_address: mm.VirtualAddress,
 ) void {
     // NOTE: the root page table above 256th index contains kernel mappings which must not be unmapped
     const is_root_pg_tbl = level == 2;
@@ -374,8 +348,8 @@ pub fn unmapPageTable(
 }
 
 pub fn unmapAddressSpace(root_page_table: PageTable) void {
-    unmapPageTable(root_page_table, 2, Sv39VirtualAddress.fromInt(0));
-    const page_tbl_virt_ptr = Sv39VirtualAddress.fromInt(@intFromPtr(root_page_table.entries));
+    unmapPageTable(root_page_table, 2, .fromInt(0));
+    const page_tbl_virt_ptr = mm.VirtualAddress.fromInt(@intFromPtr(root_page_table.entries));
     const root_page_table_addr = mm.virtualToPhysicalAddress(page_tbl_virt_ptr);
     buddy_allocator.deallocBlock(root_page_table_addr, 0);
 }
@@ -383,7 +357,7 @@ pub fn unmapAddressSpace(root_page_table: PageTable) void {
 pub fn setupPaging(root_page_table: PageTable) void {
     // map 128GiB directly
     for (256..256 + 128, 0..) |i, j| {
-        const phys_addr = Sv39PhysicalAddress.fromInt(j * (1024 * 1024 * 1024));
+        const phys_addr = mm.PhysicalAddress.fromInt(j * (1024 * 1024 * 1024));
         root_page_table.writeEntry(
             i,
             phys_addr,

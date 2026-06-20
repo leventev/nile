@@ -27,8 +27,55 @@ extern const __bss_end: u8;
 pub const frame_size = arch.page_size;
 
 pub const PageTable = arch.PageTable;
-pub const VirtualAddress = arch.VirtualAddress;
-pub const PhysicalAddress = arch.PhysicalAddress;
+pub const VirtualAddress = packed struct(u64) {
+    address: u64,
+
+    pub inline fn fromInt(addr: u64) VirtualAddress {
+        return @bitCast(addr);
+    }
+
+    pub inline fn asInt(self: VirtualAddress) u64 {
+        return @bitCast(self);
+    }
+
+    pub inline fn add(self: VirtualAddress, offset: u64) VirtualAddress {
+        return fromInt(self.asInt() + offset);
+    }
+
+    pub inline fn asPtr(self: VirtualAddress, comptime T: type) T {
+        if (@typeInfo(T) != .pointer) @compileError("not a pointer");
+        return @ptrFromInt(self.asInt());
+    }
+
+    pub inline fn isPageAligned(self: VirtualAddress) bool {
+        return self.address % arch.page_size == 0;
+    }
+};
+
+pub const PhysicalAddress = packed struct(u64) {
+    address: u64,
+
+    pub inline fn fromInt(addr: u64) PhysicalAddress {
+        return @bitCast(addr);
+    }
+
+    pub inline fn asInt(self: PhysicalAddress) u64 {
+        return @bitCast(self);
+    }
+
+    pub inline fn add(self: PhysicalAddress, offset: u64) PhysicalAddress {
+        return fromInt(self.asInt() + offset);
+    }
+
+    pub inline fn asPtr(self: PhysicalAddress, comptime T: type) T {
+        if (@typeInfo(T) != .pointer) @compileError("not a pointer");
+        return @ptrFromInt(self.asInt());
+    }
+
+    pub inline fn isPageAligned(self: PhysicalAddress) bool {
+        return self.address % arch.page_size == 0;
+    }
+};
 
 // TODO: move all device tree specific code to devicetree.zig
 pub const MemoryRegion = struct {

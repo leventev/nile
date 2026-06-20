@@ -1,6 +1,7 @@
 const std = @import("std");
 const arch = @import("arch/arch.zig");
 const Thread = @import("Thread.zig");
+const mm = @import("mem/mm.zig");
 
 const Self = @This();
 
@@ -18,7 +19,7 @@ pub const Id = enum(u32) {
 };
 
 pub const MappedRegion = struct {
-    address: arch.VirtualAddress,
+    address: mm.VirtualAddress,
     size: usize,
     flags: Flags,
     next: std.DoublyLinkedList.Node,
@@ -30,7 +31,7 @@ pub const MappedRegion = struct {
     };
 };
 
-pub fn mapRegion(self: Self, addr: arch.VirtualAddress, size: usize, flags: MappedRegion.Flags) !void {
+pub fn mapRegion(self: Self, addr: mm.VirtualAddress, size: usize, flags: MappedRegion.Flags) !void {
     // TODO: check overlap with already mapped region
     // TODO: check whether address is in userspace(< kernel higher half)
 

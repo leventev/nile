@@ -1,16 +1,29 @@
 const std = @import("std");
 const processes = @import("../../../processes.zig");
 
-pub fn openat(args: [7]u64) u64 {
-    const dirfd = args[0];
-    const path = args[1];
-    const flags = args[2];
-    const mode = args[3];
+const OpenFlags = packed struct(u64) {
+    reserved: u64,
+};
 
-    _ = dirfd;
+const OpenMode = packed struct(u64) {
+    reserved: u64,
+};
+
+const dirfd_cwd = -100;
+
+pub fn openat(args: [7]u64) u64 {
+    const dirfd: i64 = @intCast(args[0]);
+    const path: [*]const u8 = @ptrFromInt(args[1]);
+    // const path_size: u64 = args[2];
+    // const flags: OpenFlags = args[3];
+    // const mode: OpenMode = args[4];
+
+    // TODO: error
+    std.debug.assert(dirfd > 0 or dirfd_cwd == -100);
+
     _ = path;
-    _ = flags;
-    _ = mode;
+    // _ = flags;
+    // _ = mode;
 
     return 0;
 }

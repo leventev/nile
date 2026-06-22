@@ -5,6 +5,7 @@ const Process = @import("Process.zig");
 const Thread = @import("Thread.zig");
 const arch = @import("arch/arch.zig");
 const mm = @import("mem/mm.zig");
+const fs = @import("fs.zig");
 
 const log = std.log.scoped(.processes);
 
@@ -26,6 +27,7 @@ pub fn spawnInitProcess(
     root_page_table: arch.PageTable,
     parent_pid: ?Process.Id,
     data: []const u8,
+    mount_table: *fs.MountTable,
 ) !*Process {
     const new_proc_id = nextProcessId() catch @panic("TODO: this is pid 1 anyways but handle error");
     std.debug.assert(@intFromEnum(new_proc_id) == 1);
@@ -33,6 +35,7 @@ pub fn spawnInitProcess(
 
     new_proc.id = new_proc_id;
     new_proc.parent_id = parent_pid;
+    new_proc.mount_table = mount_table;
     // PID 0 owns root_page_table and it only contains the kernel higher half mappings
     // we copy it for PID 1
     new_proc.root_page_table = try mm.clonePageTable(root_page_table);
@@ -114,10 +117,14 @@ pub fn spawnInitProcess(
     return new_proc;
 }
 
+pub fn currentProcess() *Process {
+    const current_thread = scheduler.getCurrentThread();
+    const gp_thread = current_thread.purpose.general;
+    return gp_thread.owner_process;
+}
+
 /// Terminates current process.
 pub fn killCurrentProcess(exit_code: usize) void {
-    const current_thread = scheduler.getCurrentThread();
-
     // TODO:LOCKING
 
     // process killing checklist:
@@ -128,9 +135,7 @@ pub fn killCurrentProcess(exit_code: usize) void {
     // - free Process structure
     // - schedule the next thread in line
 
-    const gp_thread = current_thread.purpose.general;
-
-    const current_process = gp_thread.owner_process;
+    const current_process = currentProcess();
 
     if (@intFromEnum(current_process.id) == 0) {
         @panic("Trying to kill sentinel process");

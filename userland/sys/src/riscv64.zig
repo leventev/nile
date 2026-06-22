@@ -92,3 +92,13 @@ pub fn sysExit(exit_code: u64) noreturn {
     _ = syscall(.exit, .{exit_code});
     unreachable;
 }
+
+pub fn sysOpenat(dirfd: i64, path: []const u8, flags: u64, mode: u64) i64 {
+    return syscall(.openat, .{
+        @as(u64, @bitCast(dirfd)),
+        @intFromPtr(path.ptr),
+        path.len,
+        flags,
+        mode,
+    });
+}

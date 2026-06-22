@@ -27,53 +27,87 @@ extern const __bss_end: u8;
 pub const frame_size = arch.page_size;
 
 pub const PageTable = arch.PageTable;
-pub const VirtualAddress = packed struct(u64) {
-    address: u64,
+pub const VirtualAddress = packed struct(usize) {
+    address: usize,
 
-    pub inline fn fromInt(addr: u64) VirtualAddress {
+    pub fn fromInt(addr: usize) VirtualAddress {
         return @bitCast(addr);
     }
 
-    pub inline fn asInt(self: VirtualAddress) u64 {
+    pub fn asInt(self: VirtualAddress) usize {
         return @bitCast(self);
     }
 
-    pub inline fn add(self: VirtualAddress, offset: u64) VirtualAddress {
+    pub fn add(self: VirtualAddress, offset: usize) VirtualAddress {
         return fromInt(self.asInt() + offset);
     }
 
-    pub inline fn asPtr(self: VirtualAddress, comptime T: type) T {
+    pub fn asPtr(self: VirtualAddress, comptime T: type) T {
         if (@typeInfo(T) != .pointer) @compileError("not a pointer");
         return @ptrFromInt(self.asInt());
     }
 
-    pub inline fn isPageAligned(self: VirtualAddress) bool {
+    pub fn isPageAligned(self: VirtualAddress) bool {
         return self.address % arch.page_size == 0;
     }
 };
 
-pub const PhysicalAddress = packed struct(u64) {
+pub const PhysicalAddress = packed struct(usize) {
     address: u64,
 
-    pub inline fn fromInt(addr: u64) PhysicalAddress {
+    pub fn fromInt(addr: usize) PhysicalAddress {
         return @bitCast(addr);
     }
 
-    pub inline fn asInt(self: PhysicalAddress) u64 {
+    pub fn asInt(self: PhysicalAddress) u64 {
         return @bitCast(self);
     }
 
-    pub inline fn add(self: PhysicalAddress, offset: u64) PhysicalAddress {
+    pub fn add(self: PhysicalAddress, offset: usize) PhysicalAddress {
         return fromInt(self.asInt() + offset);
     }
 
-    pub inline fn asPtr(self: PhysicalAddress, comptime T: type) T {
+    pub fn asPtr(self: PhysicalAddress, comptime T: type) T {
         if (@typeInfo(T) != .pointer) @compileError("not a pointer");
         return @ptrFromInt(self.asInt());
     }
 
-    pub inline fn isPageAligned(self: PhysicalAddress) bool {
+    pub fn isPageAligned(self: PhysicalAddress) bool {
         return self.address % arch.page_size == 0;
+    }
+};
+
+/// Returns the start of the higher half memory address space for a given useful bit count.
+/// For example in Sv39 there are 39 useful bits.
+/// The address space is split in half to a lower half and higher half address space.
+/// An N bit address space has 2^N valid addresses.
+/// The lower half is 0 <=> 2^(N-1) - 1.
+/// The higher half is 2^64-2^(N-1) <=> 2^64 - 1.
+/// Thus the higher half address has the most significant 64-N+1 bits set, the rest clear.
+fn higherHalfAddress(used_bits: usize) VirtualAddress {
+    const final = std.math.shl(usize, std.math.maxInt(usize), used_bits - 1);
+    return .fromInt(final);
+}
+
+const sv39_higher_half_start = higherHalfAddress(39);
+
+pub const UserAddress = struct {
+    address: VirtualAddress,
+
+    pub fn fromInt(addr: usize) UserAddress {
+        return .{ .address = VirtualAddress.fromInt(addr) };
+    }
+
+    pub fn asPtr(self: UserAddress, comptime T: type) T {
+        return self.address.asPtr(T);
+    }
+
+    pub fn add(self: UserAddress, offset: usize) UserAddress {
+        return .{ .address = self.address.add(offset) };
+    }
+
+    pub fn isValid(self: UserAddress) bool {
+        return self.address.asInt() < sv39_higher_half_start.asInt();
     }
 };
 

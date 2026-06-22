@@ -7,3 +7,7 @@ pub const test_constant = 1;
 pub fn sysExit(exit_code: usize) noreturn {
     riscv64.sysExit(exit_code);
 }
+
+pub fn sysOpenat(dirfd: i64, path: []const u8, flags: u64, mode: u64) i64 {
+    return riscv64.sysOpenat(dirfd, path, flags, mode);
+}

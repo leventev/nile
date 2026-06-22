@@ -2,8 +2,11 @@ const std = @import("std");
 const arch = @import("arch/arch.zig");
 const Thread = @import("Thread.zig");
 const mm = @import("mem/mm.zig");
+const fs = @import("fs.zig");
 
 const Self = @This();
+
+const max_fd = 100;
 
 parent_id: ?Id,
 id: Id,
@@ -11,6 +14,10 @@ associated_threads: std.DoublyLinkedList,
 mapped_regions: std.DoublyLinkedList,
 mapped_region_count: usize,
 root_page_table: arch.PageTable,
+mount_table: *fs.MountTable,
+
+// TODO:
+file_descriptor_table: [max_fd]?fs.OpenFile,
 list_node: std.DoublyLinkedList.Node,
 
 pub const Id = enum(u32) {

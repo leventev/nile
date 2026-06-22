@@ -161,8 +161,12 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     // // initramfs.dumpTree();
 
     const idle_process_thread = processes.init();
-    _ = processes.spawnInitProcess(root_page_table, null, test_binary_file) catch
-        @panic("TODO");
+    _ = processes.spawnInitProcess(
+        root_page_table,
+        null,
+        test_binary_file,
+        &mount_table,
+    ) catch @panic("TODO");
     // TODO: this could probably be done in a nicer way
     arch.scheduleNextThread(idle_process_thread);
 

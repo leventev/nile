@@ -2,9 +2,11 @@ const std = @import("std");
 
 const exit = @import("syscalls/exit.zig");
 const fs = @import("syscalls/fs.zig");
+const errors = @import("../../syscall/errors.zig");
+const SyscallError = errors.SyscallError;
 
 const Registers = @import("registers.zig").Registers;
-const SyscallCallback = *const fn (args: [7]usize) u64;
+const SyscallCallback = *const fn (args: [7]usize) SyscallError!u64;
 
 pub const Syscall = struct {
     name: []const u8,
@@ -35,7 +37,11 @@ pub fn dispatchSyscall(regs: *Registers) void {
 
     const syscall = syscall_table[syscall_num];
 
-    const result = syscall.callback(args);
+    const result: u64 = syscall.callback(args) catch |err|
+        @bitCast(-@as(i64, errors.errorToInt(err)));
+
+    std.log.debug("syscall {s} {any}: return {}", .{ syscall.name, args, result });
+
     regs.gprs[10] = result;
 
     // ECALL writes its own address into sepc, not the next instruction's

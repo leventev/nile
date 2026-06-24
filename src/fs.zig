@@ -414,6 +414,20 @@ pub const OpenFile = struct {
         }
         return;
     }
+
+    pub fn write(self: OpenFile, buff: []u8, offset: usize) usize {
+        _ = buff;
+        _ = offset;
+        const fs = global_file_system_table.getById(self.mounted_fs_id).* orelse
+            @panic("Invalid open file");
+        _ = fs;
+
+        switch (self.dir_ent.data) {
+            .directory => @panic("TODO: directory write"),
+            .regular => @panic("TODO: regular write"),
+        }
+        return;
+    }
 };
 
 pub fn walkUntilLastComponent(

@@ -15,3 +15,7 @@ pub fn sysOpenat(dirfd: i64, path: []const u8, flags: u64, mode: u64) i64 {
 pub fn sysRead(fd: u32, buff: []u8) i64 {
     return riscv64.sysRead(fd, buff);
 }
+
+pub fn sysWrite(fd: u32, buff: []const u8) i64 {
+    return riscv64.sysWrite(fd, buff);
+}

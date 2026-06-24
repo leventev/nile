@@ -17,6 +17,7 @@ const syscall_table: []const Syscall = &[_]Syscall{
     .{ .name = "exit", .callback = exit.exit },
     .{ .name = "openat", .callback = fs.openat },
     .{ .name = "read", .callback = fs.read },
+    .{ .name = "write", .callback = fs.write },
 };
 
 pub fn dispatchSyscall(regs: *Registers) void {

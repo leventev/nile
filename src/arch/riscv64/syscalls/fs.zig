@@ -26,3 +26,11 @@ pub fn read(args: [7]u64) !u64 {
 
     return syscall_fs.read(fd, .fromInt(buffer), buffer_size);
 }
+
+pub fn write(args: [7]u64) !u64 {
+    const fd: u32 = @truncate(args[0]);
+    const buffer: u64 = args[1];
+    const buffer_size = args[2];
+
+    return syscall_fs.write(fd, .fromInt(buffer), buffer_size);
+}

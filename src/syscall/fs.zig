@@ -87,3 +87,30 @@ pub fn read(
 
     return open_file.file.read(buff, open_file.offset);
 }
+
+pub fn write(
+    fd: u32,
+    buff_ptr: mm.UserAddress,
+    buff_size: usize,
+) SyscallError!usize {
+    if (buff_size == 0)
+        return 0;
+
+    // last byte accessed
+    const buff_end_ptr = buff_ptr.add(buff_size - 1);
+
+    if (!buff_ptr.isValid() or !buff_end_ptr.isValid())
+        return SyscallError.invalid_memory_address;
+
+    const buff = buff_ptr.asPtr([*]u8)[0..buff_size];
+
+    const current_process = processes.currentProcess();
+
+    // TODO:
+    std.debug.assert(fd < current_process.file_descriptor_table.len);
+
+    const open_file = current_process.file_descriptor_table[fd] orelse
+        return SyscallError.invalid_file_descriptor;
+
+    return open_file.file.write(buff, open_file.offset);
+}

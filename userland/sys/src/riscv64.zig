@@ -2,6 +2,7 @@ const SyscallNumber = enum(u64) {
     exit = 0,
     openat = 1,
     read = 2,
+    write = 3,
 };
 
 pub fn syscall(
@@ -105,4 +106,8 @@ pub fn sysOpenat(dirfd: i64, path: []const u8, flags: u64, mode: u64) i64 {
 
 pub fn sysRead(fd: u32, buff: []u8) i64 {
     return syscall(.read, .{ fd, @intFromPtr(buff.ptr), buff.len });
+}
+
+pub fn sysWrite(fd: u32, buff: []const u8) i64 {
+    return syscall(.write, .{ fd, @intFromPtr(buff.ptr), buff.len });
 }

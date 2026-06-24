@@ -9,6 +9,8 @@ export fn _start() void {
         var buff: [256]u8 = undefined;
         _ = sys.sysRead(fd, &buff);
         _ = sys.sysRead(42, &buff);
+
+        _ = sys.sysWrite(fd, "hello");
     }
     sys.sysExit(123);
 }

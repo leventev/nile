@@ -102,3 +102,7 @@ pub fn sysOpenat(dirfd: i64, path: []const u8, flags: u64, mode: u64) i64 {
         mode,
     });
 }
+
+pub fn sysRead(fd: u32, buff: []u8) i64 {
+    return syscall(.read, .{ fd, @intFromPtr(buff.ptr), buff.len });
+}

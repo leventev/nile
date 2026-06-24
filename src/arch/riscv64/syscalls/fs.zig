@@ -20,13 +20,9 @@ pub fn openat(args: [7]u64) !u64 {
 }
 
 pub fn read(args: [7]u64) !u64 {
-    const fd = args[0];
-    const buffer = args[1];
+    const fd: u32 = @truncate(args[0]);
+    const buffer: u64 = args[1];
     const buffer_size = args[2];
 
-    _ = fd;
-    _ = buffer;
-    _ = buffer_size;
-
-    return 0;
+    return syscall_fs.read(fd, .fromInt(buffer), buffer_size);
 }

@@ -135,7 +135,7 @@ const Mount = struct {
     var cache: slab_allocator.ObjectCache(Mount) = undefined;
 };
 
-pub const DeviceId = struct {
+pub const FileSystemDeviceId = struct {
     major: u16,
     minor: u16,
 };
@@ -212,7 +212,7 @@ const MountedFileSystem = struct {
 
     /// The device the file system is mounted on. Usually null if the file system is ramfs.
     /// In that case the reference count cannot go above 1.
-    device: ?DeviceId,
+    device: ?FileSystemDeviceId,
 
     /// Mounted file system type
     file_system: *FileSystem,
@@ -226,7 +226,7 @@ const MountedFileSystem = struct {
     fs_cache: FileSystemCache,
 
     /// Linked list node pointing to the next mounted file system.
-    list_node: std.SinglyLinkedList.Node,
+    next: ?*MountedFileSystem,
 
     const Id = enum(usize) { _ };
 
@@ -237,9 +237,32 @@ const MountedFileSystem = struct {
 };
 
 var global_file_system_table: struct {
-    mounted_file_systems: std.SinglyLinkedList = .{},
+    mounted_file_systems: ?*MountedFileSystem = null,
     // TODO: no global lock?
     lock: arch.Lock = .{},
+
+    /// If an fs matches the provided id return a pointer to the 'next' pointer pointing to it.
+    /// Otherwise returns a pointer to the last element's 'next' pointer (which points to null).
+    fn getById(self: *@This(), id: MountedFileSystem.Id) *?*MountedFileSystem {
+        var fs_next_ptr = &self.mounted_file_systems;
+        while (fs_next_ptr.*) |fs| : (fs_next_ptr = &fs.next) {
+            if (fs.id == id) break;
+        }
+
+        return fs_next_ptr;
+    }
+
+    fn getByDeviceId(self: *@This(), device_id: FileSystemDeviceId) *?*MountedFileSystem {
+        var fs_next_ptr = &self.mounted_file_systems;
+        while (fs_next_ptr.*) |fs| : (fs_next_ptr = &fs.next) {
+            const device_id_fs = fs.device orelse continue;
+
+            if (device_id.major == device_id_fs.major and device_id.minor == device_id.minor)
+                break;
+        }
+
+        return fs_next_ptr;
+    }
 } = .{};
 
 /// Per process mount table. Contains a singly linked list of struct Mount.
@@ -293,7 +316,7 @@ pub fn mountFileSystem(
     mount_table: *MountTable,
     path: []const u8,
     fs_name: []const u8,
-    dev_id: ?DeviceId,
+    fs_dev_id: ?FileSystemDeviceId,
 ) !void {
     // TODO: special case mounting root
 
@@ -329,21 +352,11 @@ pub fn mountFileSystem(
     else
         try openFile(mount_table, path);
 
-    // either points to the 'next' pointer that points to the MountedFileSystem that matches
-    // the device id or points to the last element's 'next' pointer (which contains null)
-    const existing_mounted_fs: *?*std.SinglyLinkedList.Node = blk: {
-        var fs_node_ptr = &global_file_system_table.mounted_file_systems.first;
-        while (fs_node_ptr.*) |list_node| : (fs_node_ptr = &list_node.next) {
-            const device_id = dev_id orelse continue;
-
-            const fs: *MountedFileSystem = @fieldParentPtr("list_node", list_node);
-            const device_id_fs = fs.device orelse continue;
-
-            if (device_id.major == device_id_fs.major and device_id.minor == device_id.minor)
-                break :blk fs_node_ptr;
-        }
-        break :blk fs_node_ptr;
-    };
+    const existing_mounted_fs: *?*MountedFileSystem =
+        if (fs_dev_id) |dev_id|
+            global_file_system_table.getByDeviceId(dev_id)
+        else
+            &global_file_system_table.mounted_file_systems;
 
     var new_mount = try Mount.cache.alloc();
     errdefer Mount.cache.free(new_mount);
@@ -355,8 +368,7 @@ pub fn mountFileSystem(
     new_mount.next = null;
     mount_next_ptr.* = new_mount;
 
-    if (existing_mounted_fs.*) |mounted_fs_node| {
-        var mounted_fs: *MountedFileSystem = @fieldParentPtr("list_node", mounted_fs_node);
+    if (existing_mounted_fs.*) |mounted_fs| {
         mounted_fs.reference_count += 1;
         mounted_fs.id = @enumFromInt(MountedFileSystem.counter);
         MountedFileSystem.counter += 1;
@@ -368,10 +380,10 @@ pub fn mountFileSystem(
         new_mounted_fs.file_system = file_system;
         // TODO: internal data
         new_mounted_fs.reference_count = 1;
-        new_mounted_fs.list_node = .{};
+        new_mounted_fs.next = null;
 
         new_mount.file_system = new_mounted_fs;
-        existing_mounted_fs.* = &new_mounted_fs.list_node;
+        existing_mounted_fs.* = new_mounted_fs;
     }
 
     mount_table.mount_count += 1;
@@ -379,7 +391,29 @@ pub fn mountFileSystem(
 
 pub const OpenFile = struct {
     mounted_fs_id: MountedFileSystem.Id,
-    file_id: FileSystemCache.DirectoryEntry.Id,
+    dir_ent: *FileSystemCache.DirectoryEntry,
+
+    pub fn read(self: OpenFile, buff: []u8, offset: usize) usize {
+        const fs = global_file_system_table.getById(self.mounted_fs_id).* orelse
+            @panic("Invalid open file");
+        _ = fs;
+
+        switch (self.dir_ent.data) {
+            .directory => @panic("TODO: directory read"),
+            .regular => |regular| {
+                // TODO:
+                const data = regular.data;
+                if (data.len <= offset) return 0;
+                const rem_size = data.len - offset;
+
+                const read_len = @min(rem_size, buff.len);
+                @memcpy(buff[0..read_len], data[offset .. offset + read_len]);
+
+                return read_len;
+            },
+        }
+        return;
+    }
 };
 
 pub fn walkUntilLastComponent(
@@ -472,7 +506,7 @@ pub fn openFile(mount_table: *MountTable, path_str: []const u8) !OpenFile {
     return OpenFile{
         // TODO
         .mounted_fs_id = @enumFromInt(0),
-        .file_id = dir_entry.id,
+        .dir_ent = dir_entry,
     };
 }
 

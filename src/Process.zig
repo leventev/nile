@@ -17,7 +17,10 @@ root_page_table: arch.PageTable,
 mount_table: *fs.MountTable,
 
 // TODO:
-file_descriptor_table: [max_fd]?fs.OpenFile,
+file_descriptor_table: [max_fd]?struct {
+    file: fs.OpenFile,
+    offset: usize,
+},
 list_node: std.DoublyLinkedList.Node,
 
 pub const Id = enum(u32) {

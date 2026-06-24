@@ -37,7 +37,7 @@ pub fn openat(
     if (!path_ptr.isValid() or !path_end_ptr.isValid())
         return SyscallError.invalid_memory_address;
 
-    const path = path_ptr.asPtr([*]u8)[0..path_size];
+    const path = path_ptr.asPtr([*]const u8)[0..path_size];
 
     _ = flags;
     _ = mode;
@@ -53,7 +53,37 @@ pub fn openat(
     var next_fd: u32 = 0;
     while (current_process.file_descriptor_table[next_fd] != null) : (next_fd += 1) {}
 
-    current_process.file_descriptor_table[next_fd] = open_file;
+    current_process.file_descriptor_table[next_fd] = .{
+        .file = open_file,
+        .offset = 0,
+    };
 
     return next_fd;
+}
+
+pub fn read(
+    fd: u32,
+    buff_ptr: mm.UserAddress,
+    buff_size: usize,
+) SyscallError!usize {
+    if (buff_size == 0)
+        return 0;
+
+    // last byte accessed
+    const buff_end_ptr = buff_ptr.add(buff_size - 1);
+
+    if (!buff_ptr.isValid() or !buff_end_ptr.isValid())
+        return SyscallError.invalid_memory_address;
+
+    const buff = buff_ptr.asPtr([*]u8)[0..buff_size];
+
+    const current_process = processes.currentProcess();
+
+    // TODO:
+    std.debug.assert(fd < current_process.file_descriptor_table.len);
+
+    const open_file = current_process.file_descriptor_table[fd] orelse
+        return SyscallError.invalid_file_descriptor;
+
+    return open_file.file.read(buff, open_file.offset);
 }

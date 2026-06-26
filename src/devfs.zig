@@ -1,5 +1,5 @@
 const std = @import("std");
-const fs = @import("fs.zig");
+const vfs = @import("vfs.zig");
 
 pub const DeviceFsOperations = struct {
     // TODO: errors
@@ -7,7 +7,7 @@ pub const DeviceFsOperations = struct {
     write: *const fn (private_data: *anyopaque, buff: []u8, offset: u8) usize,
 };
 
-pub var device_file_system_skeleton: fs.FileSystemSkeleton = .{
+pub var device_file_system_skeleton: vfs.FileSystemSkeleton = .{
     .name = "devfs",
     .flags = .{
         .no_device = true,
@@ -15,13 +15,16 @@ pub var device_file_system_skeleton: fs.FileSystemSkeleton = .{
     .init = init,
 };
 
-fn init(gpa: std.mem.Allocator) !?*anyopaque {
+fn init(gpa: std.mem.Allocator, fs: *vfs.FileSystem) !?*anyopaque {
     const devfs = try gpa.create(DeviceFileSystem);
+    devfs.fs = fs;
 
     return devfs;
 }
 
 pub const DeviceFileSystem = struct {
+    fs: *vfs.FileSystem,
+
     pub fn create(
         self: *DeviceFileSystem,
         path: []const u8,

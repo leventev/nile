@@ -14,7 +14,7 @@ pub const processes = @import("processes.zig");
 pub const slab_allocator = @import("mem/slab_allocator.zig");
 pub const Thread = @import("Thread.zig");
 pub const cpio = @import("cpio.zig");
-pub const fs = @import("fs.zig");
+pub const vfs = @import("vfs.zig");
 pub const Module = @import("Module.zig");
 pub const device = @import("device.zig");
 pub const framebuffer = @import("framebuffer.zig");
@@ -94,11 +94,11 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     allocator.init();
     const gpa = allocator.allocator();
 
-    fs.init();
+    vfs.init();
 
-    fs.registerFileSystem(&devfs.device_file_system_skeleton);
+    vfs.registerFileSystem(&devfs.device_file_system_skeleton);
 
-    const devfs_instance = fs.createFileSystem(gpa, "devfs") catch unreachable;
+    const devfs_instance = vfs.createFileSystem(gpa, "devfs") catch unreachable;
     _ = devfs_instance;
 
     // find interrupt controllers first
@@ -138,23 +138,23 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     time.init(&dt) catch @panic("Failed to initialize timer");
 
-    fs.dumpRegisteredFilesystems();
+    vfs.dumpRegisteredFilesystems();
 
-    var mount_table: fs.MountTable = .{
+    var mount_table: vfs.MountTable = .{
         .mount_count = 0,
         .mounts = null,
         .lock = .{},
     };
 
-    const ramfs = fs.createFileSystem(gpa, "ramfs") catch @panic("Failed to create ramfs");
+    const ramfs = vfs.createFileSystem(gpa, "ramfs") catch @panic("Failed to create ramfs");
 
-    fs.mountFileSystem(&mount_table, "/", ramfs) catch @panic("Failed to mount /");
-    fs.createDirectory(&mount_table, "/test_dir") catch @panic("Failed to create file");
-    fs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
-    fs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");
-    fs.createRegularFile(&mount_table, "/test_dir/a/test_file", "burger") catch @panic("Failed to create file");
+    vfs.mountFileSystem(&mount_table, "/", ramfs) catch @panic("Failed to mount /");
+    vfs.createDirectory(&mount_table, "/test_dir") catch @panic("Failed to create file");
+    vfs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
+    vfs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");
+    vfs.createRegularFile(&mount_table, "/test_dir/a/test_file", "burger") catch @panic("Failed to create file");
     mount_table.dump();
-    fs.dumpTree(&mount_table);
+    vfs.dumpTree(&mount_table);
 
     //
     // // TODO

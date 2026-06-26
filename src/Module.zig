@@ -1,5 +1,5 @@
 const std = @import("std");
-const fs = @import("fs.zig");
+const vfs = @import("vfs.zig");
 const devicetree = @import("dt/devicetree.zig");
 const device = @import("device.zig");
 
@@ -40,7 +40,7 @@ module_type: union(Type) {
         },
     },
     /// The module is a file system.
-    fs: *fs.FileSystemSkeleton,
+    fs: *vfs.FileSystemSkeleton,
 },
 
 /// Set when the driver has been initialized.
@@ -87,7 +87,7 @@ pub fn registerFsModules() void {
     for (modules) |mod| {
         switch (mod.module_type) {
             .device_driver => continue,
-            .fs => |fs_type| fs.registerFileSystem(fs_type),
+            .fs => |fs_type| vfs.registerFileSystem(fs_type),
         }
     }
 }

@@ -2,7 +2,7 @@ const std = @import("std");
 const mm = @import("../mem/mm.zig");
 const errors = @import("errors.zig");
 const SyscallError = errors.SyscallError;
-const fs = @import("../fs.zig");
+const vfs = @import("../vfs.zig");
 const processes = @import("../processes.zig");
 
 pub const OpenFlags = packed struct(u64) {
@@ -44,7 +44,7 @@ pub fn openat(
 
     const current_process = processes.currentProcess();
 
-    const open_file = fs.openFile(
+    const open_file = vfs.openFile(
         current_process.mount_table,
         path,
     ) catch return SyscallError.file_not_found;

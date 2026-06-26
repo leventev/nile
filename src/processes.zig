@@ -5,7 +5,7 @@ const Process = @import("Process.zig");
 const Thread = @import("Thread.zig");
 const arch = @import("arch/arch.zig");
 const mm = @import("mem/mm.zig");
-const fs = @import("fs.zig");
+const vfs = @import("vfs.zig");
 
 const log = std.log.scoped(.processes);
 
@@ -27,7 +27,7 @@ pub fn spawnInitProcess(
     root_page_table: arch.PageTable,
     parent_pid: ?Process.Id,
     data: []const u8,
-    mount_table: *fs.MountTable,
+    mount_table: *vfs.MountTable,
 ) !*Process {
     const new_proc_id = nextProcessId() catch @panic("TODO: this is pid 1 anyways but handle error");
     std.debug.assert(@intFromEnum(new_proc_id) == 1);

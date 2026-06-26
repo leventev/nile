@@ -26,7 +26,7 @@ pub const FileSystemSkeleton = struct {
     name: []const u8,
 
     /// Called when the file system is created
-    init: *const fn (gpa: std.mem.Allocator) FileSystemError!?*anyopaque,
+    init: *const fn (gpa: std.mem.Allocator, fs: *FileSystem) FileSystemError!?*anyopaque,
 
     /// File system flags
     flags: Flags,
@@ -209,7 +209,7 @@ const FileSystemCache = struct {
 /// It can be associated with a device whose ID then can uniquely identify the file system.
 /// Not providing a device ID could be useful for in-memory file systems e.g. ramfs, devfs.
 /// If the reference count reaches 0 then the struct is deallocated(TODO: make it a flag).
-const FileSystem = struct {
+pub const FileSystem = struct {
     id: Id,
 
     /// The device the file system resides on.
@@ -229,7 +229,7 @@ const FileSystem = struct {
     /// Linked list node pointing to the next mounted file system.
     next: ?*FileSystem,
 
-    const Id = enum(usize) { _ };
+    pub const Id = enum(usize) { _ };
 
     var cache: slab_allocator.ObjectCache(FileSystem) = undefined;
 
@@ -309,10 +309,11 @@ pub fn createFileSystem(gpa: std.mem.Allocator, fs_name: []const u8) !*FileSyste
 
     const skel = file_system_skeletons.getByName(fs_name).* orelse return error.FsNotRegistered;
 
-    const internal_data = try skel.init(gpa);
     // TODO: errdefer cleanup
 
     var fs = try FileSystem.cache.alloc();
+    const internal_data = try skel.init(gpa, fs);
+
     fs.skeleton = skel;
     fs.device = null;
     fs.mount_count = 0;

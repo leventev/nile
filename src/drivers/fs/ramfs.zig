@@ -2,7 +2,7 @@ const std = @import("std");
 const Module = @import("../../Module.zig");
 const Path = @import("../../Path.zig");
 const slab_allocator = @import("../../mem/slab_allocator.zig");
-const fs = @import("../../fs.zig");
+const vfs = @import("../../vfs.zig");
 
 // TODO: this is an abysmal solution and i am ashamed of myself. replace this with something nicer
 
@@ -120,7 +120,7 @@ pub const RamFs = struct {
     }
 };
 
-pub fn init(gpa: std.mem.Allocator) fs.FileSystemError!?*anyopaque {
+pub fn init(gpa: std.mem.Allocator, _: *vfs.FileSystem) vfs.FileSystemError!?*anyopaque {
     const ramfs = try gpa.create(RamFs);
     ramfs.init();
     return ramfs;
@@ -133,7 +133,7 @@ pub const module: Module = .{
     },
 };
 
-var ram_file_system: fs.FileSystemSkeleton = .{
+var ram_file_system: vfs.FileSystemSkeleton = .{
     .name = "ramfs",
     .flags = .{
         .no_device = true,

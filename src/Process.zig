@@ -2,7 +2,7 @@ const std = @import("std");
 const arch = @import("arch/arch.zig");
 const Thread = @import("Thread.zig");
 const mm = @import("mem/mm.zig");
-const fs = @import("fs.zig");
+const vfs = @import("vfs.zig");
 
 const Self = @This();
 
@@ -14,11 +14,11 @@ associated_threads: std.DoublyLinkedList,
 mapped_regions: std.DoublyLinkedList,
 mapped_region_count: usize,
 root_page_table: arch.PageTable,
-mount_table: *fs.MountTable,
+mount_table: *vfs.MountTable,
 
 // TODO:
 file_descriptor_table: [max_fd]?struct {
-    file: fs.OpenFile,
+    file: vfs.OpenFile,
     offset: usize,
 },
 list_node: std.DoublyLinkedList.Node,

@@ -20,7 +20,7 @@ pub const PixelRGBA = packed struct(u32) {
 pub const Framebuffer = struct {
     active_display: Display,
     operations: Operations,
-    private_data: *anyopaque,
+    internal_data: *anyopaque,
 
     pub fn fillRect(
         self: *Framebuffer,
@@ -39,14 +39,13 @@ pub const Framebuffer = struct {
         while (y < start_y + height) : (y += 1) {
             var x = start_x;
             while (x < start_x + width) : (x += 1) {
-                // log.debug("x: {} y: {} idx: {}", .{ x, y, y * self.active_display.width + x });
                 pixels[y * self.active_display.width + x] = color;
             }
         }
     }
 
     pub fn flush(self: *Framebuffer) void {
-        self.operations.flush(self.private_data);
+        self.operations.flush(self.internal_data);
     }
 
     pub const Display = struct {
@@ -65,10 +64,10 @@ pub const Framebuffer = struct {
 
     pub const Operations = struct {
         /// TODO: be able to select format
-        setup: *const fn (private_data: *anyopaque, display_data: *Display) bool,
+        setup: *const fn (internal_data: *anyopaque, display_data: *Display) bool,
 
         /// Flushes the updates to the display.
-        flush: *const fn (private_data: *anyopaque) void,
+        flush: *const fn (internal_data: *anyopaque) void,
     };
 };
 
@@ -76,18 +75,31 @@ const max_framebuffers = 4;
 var framebuffers: [max_framebuffers]Framebuffer = undefined;
 var framebuffer_count: usize = 0;
 
-fn devfsRead(private_data: *anyopaque, buff: []u8, offset: usize) usize {
-    _ = private_data;
+fn devfsRead(internal_data: *anyopaque, buff: []u8, offset: usize) usize {
+    _ = internal_data;
     _ = buff;
     _ = offset;
     return 0;
 }
 
-fn devfsWrite(private_data: *anyopaque, buff: []const u8, offset: usize) usize {
-    _ = private_data;
-    _ = buff;
-    _ = offset;
-    return 0;
+fn devfsWrite(internal_data: *anyopaque, buff: []const u8, offset: usize) usize {
+    const fb: *Framebuffer = @ptrCast(@alignCast(internal_data));
+    const display_pixel_count = fb.active_display.width * fb.active_display.height;
+    const display_size = display_pixel_count * @sizeOf(u32);
+
+    if (offset > display_size)
+        return 0;
+
+    const rem = display_size - offset;
+    const actual_write_size = @min(rem, buff.len);
+
+    const mem: [*]u8 = @ptrCast(fb.active_display.memory);
+    @memcpy(mem[offset .. offset + actual_write_size], buff[0..actual_write_size]);
+
+    // TODO: dont flush on every write
+    fb.operations.flush(fb.internal_data);
+
+    return actual_write_size;
 }
 
 const devfs_ops = DeviceFilesystem.Device.Operations{
@@ -98,15 +110,15 @@ const devfs_ops = DeviceFilesystem.Device.Operations{
 pub fn addFramebuffer(
     devfs: *DeviceFilesystem,
     ops: Framebuffer.Operations,
-    private_data: *anyopaque,
+    internal_data: *anyopaque,
 ) bool {
     std.debug.assert(framebuffer_count < max_framebuffers);
 
     const fb: *Framebuffer = &framebuffers[framebuffer_count];
     fb.operations = ops;
-    fb.private_data = private_data;
+    fb.internal_data = internal_data;
 
-    const ok = ops.setup(private_data, &fb.active_display);
+    const ok = ops.setup(internal_data, &fb.active_display);
     if (!ok) {
         log.warn("Failed to add framebuffer", .{});
         return false;

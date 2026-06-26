@@ -109,8 +109,12 @@ pub fn write(
     // TODO:
     std.debug.assert(fd < current_process.file_descriptor_table.len);
 
-    const open_file = current_process.file_descriptor_table[fd] orelse
-        return SyscallError.invalid_file_descriptor;
+    const open_file = &(current_process.file_descriptor_table[fd] orelse
+        return SyscallError.invalid_file_descriptor);
 
-    return open_file.file.write(buff, open_file.offset) catch @panic("TODO");
+    const written = open_file.file.write(buff, open_file.offset) catch @panic("TODO");
+
+    open_file.offset += written;
+
+    return written;
 }

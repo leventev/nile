@@ -21,6 +21,7 @@ pub const framebuffer = @import("framebuffer.zig");
 pub const pc_font = @import("pc_font.zig");
 pub const kernel_gpa = @import("mem/kernel_gpa.zig");
 pub const tty = @import("tty.zig");
+pub const devfs = @import("devfs.zig");
 
 const test_binary_file = @embedFile("shell");
 const test_archive = @embedFile("root.cpio");
@@ -93,6 +94,13 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     allocator.init();
     const gpa = allocator.allocator();
 
+    fs.init();
+
+    fs.registerFileSystem(&devfs.device_file_system_skeleton);
+
+    const devfs_instance = fs.createFileSystem(gpa, "devfs") catch unreachable;
+    _ = devfs_instance;
+
     // find interrupt controllers first
     devicetree.addDevices(&dt) catch @panic("TODO");
 
@@ -130,8 +138,6 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     time.init(&dt) catch @panic("Failed to initialize timer");
 
-    fs.init();
-
     fs.dumpRegisteredFilesystems();
 
     var mount_table: fs.MountTable = .{
@@ -140,7 +146,9 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
         .lock = .{},
     };
 
-    fs.mountFileSystem(&mount_table, "/", "ramfs", null) catch @panic("Failed to mount /");
+    const ramfs = fs.createFileSystem(gpa, "ramfs") catch @panic("Failed to create ramfs");
+
+    fs.mountFileSystem(&mount_table, "/", ramfs) catch @panic("Failed to mount /");
     fs.createDirectory(&mount_table, "/test_dir") catch @panic("Failed to create file");
     fs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
     fs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");

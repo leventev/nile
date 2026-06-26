@@ -15,24 +15,24 @@ pub const Inode = enum(u64) {
     }
 };
 
-pub const FileSystemError = error{};
+pub const FileSystemError = std.mem.Allocator.Error || error{};
 
-/// A file system descriptor contains its name, flags and operations.
+/// A file system skeleton/descritpor contains its name, flags and operations.
 ///
 /// Before calling registerFileSystem all fields must be initialized appropriately
 /// except list_node which will be set by the VFS.
-pub const FileSystem = struct {
+pub const FileSystemSkeleton = struct {
     /// Name of the file system
     name: []const u8,
 
-    /// Called when the file system is mounted
-    mount_init: *const fn (internal_data: *anyopaque) FileSystemError!void,
+    /// Called when the file system is created
+    init: *const fn (gpa: std.mem.Allocator) FileSystemError!?*anyopaque,
 
     /// File system flags
     flags: Flags,
 
     /// Set by the VFS
-    list_node: std.SinglyLinkedList.Node = undefined,
+    next: ?*FileSystemSkeleton = null,
 
     /// File system flags
     pub const Flags = packed struct {
@@ -46,65 +46,66 @@ pub const FileSystem = struct {
 };
 
 /// File systems registered in the VFS
-var registered_file_systems: struct {
-    /// Linked list of the file systems
-    list: std.SinglyLinkedList = .{},
+var file_system_skeletons: struct {
+    /// Linked list of the file system skeletons
+    head: ?*FileSystemSkeleton = null,
 
-    /// The number of registed file systems
+    /// The number of registed file system skeletons
     count: usize = 0,
 
     /// Lock
     lock: arch.Lock = .{},
+
+    /// If an fs matches the provided name return a pointer to the 'next' pointer pointing to it.
+    /// Otherwise returns a pointer to the last element's 'next' pointer (which points to null).
+    /// While performing operations on the list the lock shall be locked.
+    fn getByName(self: *@This(), name: []const u8) *?*FileSystemSkeleton {
+        var fs_next_ptr = &self.head;
+        while (fs_next_ptr.*) |fs| : (fs_next_ptr = &fs.next)
+            if (std.mem.eql(u8, fs.name, name))
+                break;
+
+        return fs_next_ptr;
+    }
 } = .{};
 
 /// Register a file system.
 /// The recommended way to store FileSystem is to make it a global variable and store
 /// it in the data section, that way we don't need to worry about its lifetime.
-pub fn registerFileSystem(file_system: *FileSystem) error{FsAlreadyRegistered}!void {
-    registered_file_systems.lock.lock();
-    defer registered_file_systems.lock.unlock();
+pub fn registerFileSystem(file_system: *FileSystemSkeleton) void {
+    file_system_skeletons.lock.lock();
+    defer file_system_skeletons.lock.unlock();
 
-    var node_ptr: *?*std.SinglyLinkedList.Node = &registered_file_systems.list.first;
-    while (node_ptr.*) |list_node| : (node_ptr = &list_node.next) {
-        const fs: *FileSystem = @fieldParentPtr("list_node", list_node);
-        if (std.mem.eql(u8, fs.name, file_system.name)) {
-            return error.FsAlreadyRegistered;
-        }
-    }
+    const fs_next_ptr = file_system_skeletons.getByName(file_system.name);
+    std.debug.assert(fs_next_ptr.* == null);
 
-    node_ptr.* = &file_system.list_node;
-    file_system.list_node.next = null;
-    registered_file_systems.count += 1;
+    fs_next_ptr.* = file_system;
+    file_system.next = null;
+    file_system_skeletons.count += 1;
 }
 
 /// Unregister a file system.
 /// TODO: check if fs is mounted
-pub fn unregisterFileSystem(name: []const u8) error{FsNotRegistered}!void {
-    registered_file_systems.lock.lock();
-    defer registered_file_systems.lock.unlock();
+pub fn unregisterFileSystem(name: []const u8) void {
+    file_system_skeletons.lock.lock();
+    defer file_system_skeletons.lock.unlock();
 
-    var node_ptr: *?*std.SinglyLinkedList.Node = &registered_file_systems.list.first;
-    while (node_ptr.*) |list_node| : (node_ptr = &list_node.next) {
-        const fs: *FileSystem = @fieldParentPtr("list_node", list_node);
-        if (std.mem.eql(u8, fs.name, name)) {
-            node_ptr.* = list_node.next;
-            registered_file_systems.count -= 1;
-            return;
-        }
-    }
+    const fs_next_ptr = file_system_skeletons.getByName(name);
+    const fs = fs_next_ptr.*.?;
 
-    return error.FsNotRegistered;
+    fs_next_ptr.* = fs.next;
+    fs.next = null;
+    file_system_skeletons.count -= 1;
 }
 
 /// Print registered file systems
 pub fn dumpRegisteredFilesystems() void {
-    registered_file_systems.lock.lock();
-    defer registered_file_systems.lock.unlock();
+    file_system_skeletons.lock.lock();
+    defer file_system_skeletons.lock.unlock();
 
-    std.log.debug("Registered file systems({}):", .{registered_file_systems.count});
-    var node = registered_file_systems.list.first;
-    while (node) |list_node| : (node = list_node.next) {
-        const fs: *FileSystem = @fieldParentPtr("list_node", list_node);
+    std.log.debug("Registered file systems({}):", .{file_system_skeletons.count});
+    var fs_ptr = file_system_skeletons.head;
+    while (fs_ptr) |fs| : (fs_ptr = fs.next) {
         std.log.debug("  {s}", .{fs.name});
     }
 }
@@ -119,7 +120,7 @@ const Mount = struct {
     file: ?OpenFile,
 
     /// Mounted file system
-    file_system: *MountedFileSystem,
+    file_system: *FileSystem,
 
     /// Mount flags
     flags: Flags,
@@ -204,46 +205,46 @@ const FileSystemCache = struct {
     };
 };
 
-/// A mounted file system. Can be associated with a device whose ID then can uniquely identify
-/// a mounted file system. Not providing a device ID could be useful for in-memory file systems
-/// e.g. ramfs. If the reference count reaches 0 then the struct is deallocated(TODO).
-const MountedFileSystem = struct {
+/// An existing file system. There can be multiple existing file systems with the same skeleton.
+/// It can be associated with a device whose ID then can uniquely identify the file system.
+/// Not providing a device ID could be useful for in-memory file systems e.g. ramfs, devfs.
+/// If the reference count reaches 0 then the struct is deallocated(TODO: make it a flag).
+const FileSystem = struct {
     id: Id,
 
-    /// The device the file system is mounted on. Usually null if the file system is ramfs.
-    /// In that case the reference count cannot go above 1.
+    /// The device the file system resides on.
     device: ?FileSystemDeviceId,
 
-    /// Mounted file system type
-    file_system: *FileSystem,
+    /// File system skeleton.
+    skeleton: *FileSystemSkeleton,
 
-    /// The internal data of the mounted file system.
-    internal_data: *anyopaque,
+    /// The internal data of the file system.
+    internal_data: ?*anyopaque,
 
     /// The total (global) number of times this file system (identified by the device) is mounted.
-    reference_count: usize,
+    mount_count: usize,
 
     fs_cache: FileSystemCache,
 
     /// Linked list node pointing to the next mounted file system.
-    next: ?*MountedFileSystem,
+    next: ?*FileSystem,
 
     const Id = enum(usize) { _ };
 
-    var cache: slab_allocator.ObjectCache(MountedFileSystem) = undefined;
+    var cache: slab_allocator.ObjectCache(FileSystem) = undefined;
 
     // TODO: TEMPORARY, NOT EVEN LOCKED
     var counter: usize = 0;
 };
 
 var global_file_system_table: struct {
-    mounted_file_systems: ?*MountedFileSystem = null,
+    mounted_file_systems: ?*FileSystem = null,
     // TODO: no global lock?
     lock: arch.Lock = .{},
 
     /// If an fs matches the provided id return a pointer to the 'next' pointer pointing to it.
     /// Otherwise returns a pointer to the last element's 'next' pointer (which points to null).
-    fn getById(self: *@This(), id: MountedFileSystem.Id) *?*MountedFileSystem {
+    fn getById(self: *@This(), id: FileSystem.Id) *?*FileSystem {
         var fs_next_ptr = &self.mounted_file_systems;
         while (fs_next_ptr.*) |fs| : (fs_next_ptr = &fs.next) {
             if (fs.id == id) break;
@@ -252,7 +253,7 @@ var global_file_system_table: struct {
         return fs_next_ptr;
     }
 
-    fn getByDeviceId(self: *@This(), device_id: FileSystemDeviceId) *?*MountedFileSystem {
+    fn getByDeviceId(self: *@This(), device_id: FileSystemDeviceId) *?*FileSystem {
         var fs_next_ptr = &self.mounted_file_systems;
         while (fs_next_ptr.*) |fs| : (fs_next_ptr = &fs.next) {
             const device_id_fs = fs.device orelse continue;
@@ -284,7 +285,7 @@ pub const MountTable = struct {
         std.log.info("Mounts in namespaces({}):", .{self.mount_count});
         var mount_ptr = self.mounts;
         while (mount_ptr) |mount| : (mount_ptr = mount.next) {
-            std.log.info("  {s} - {s}", .{ mount.path, mount.file_system.file_system.name });
+            std.log.info("  {s} - {s}", .{ mount.path, mount.file_system.skeleton.name });
         }
     }
 
@@ -302,6 +303,31 @@ pub const MountTable = struct {
 };
 
 // TODO: explicit errors
+pub fn createFileSystem(gpa: std.mem.Allocator, fs_name: []const u8) !*FileSystem {
+    file_system_skeletons.lock.lock();
+    defer file_system_skeletons.lock.unlock();
+
+    const skel = file_system_skeletons.getByName(fs_name).* orelse return error.FsNotRegistered;
+
+    const internal_data = try skel.init(gpa);
+    // TODO: errdefer cleanup
+
+    var fs = try FileSystem.cache.alloc();
+    fs.skeleton = skel;
+    fs.device = null;
+    fs.mount_count = 0;
+    fs.next = null;
+    fs.internal_data = internal_data;
+    fs.id = @enumFromInt(FileSystem.counter);
+    FileSystem.counter += 1;
+
+    var next_ptr = &global_file_system_table.mounted_file_systems;
+    while (next_ptr.*) |ptr| : (next_ptr = &ptr.next) {}
+
+    next_ptr.* = fs;
+
+    return fs;
+}
 
 /// Attach a file system to the specified path.
 /// Trying to mount to an existing path or trying to mount an unregistered file system
@@ -315,18 +341,17 @@ pub const MountTable = struct {
 pub fn mountFileSystem(
     mount_table: *MountTable,
     path: []const u8,
-    fs_name: []const u8,
-    fs_dev_id: ?FileSystemDeviceId,
+    fs: *FileSystem,
 ) !void {
     // TODO: special case mounting root
 
     // TODO: the order shouldnt matter here, right?
     mount_table.lock.lock();
-    registered_file_systems.lock.lock();
+    file_system_skeletons.lock.lock();
     global_file_system_table.lock.lock();
     defer {
         mount_table.lock.unlock();
-        registered_file_systems.lock.unlock();
+        file_system_skeletons.lock.unlock();
         global_file_system_table.lock.unlock();
     }
 
@@ -336,61 +361,29 @@ pub fn mountFileSystem(
     const mount_next_ptr = mount_table.findMount(path);
     if (mount_next_ptr.* != null) return error.AlreadyMounted;
 
-    const file_system = blk: {
-        var fs_node_ptr: *?*std.SinglyLinkedList.Node = &registered_file_systems.list.first;
-        while (fs_node_ptr.*) |list_node| : (fs_node_ptr = &list_node.next) {
-            const fs: *FileSystem = @fieldParentPtr("list_node", list_node);
-            if (std.mem.eql(u8, fs.name, fs_name)) {
-                break :blk fs;
-            }
-        }
-        return error.FsNotRegistered;
-    };
-
     const source_file: ?OpenFile = if (std.mem.eql(u8, path, "/"))
         null
     else
         try openFile(mount_table, path);
 
-    const existing_mounted_fs: *?*MountedFileSystem =
-        if (fs_dev_id) |dev_id|
-            global_file_system_table.getByDeviceId(dev_id)
-        else
-            &global_file_system_table.mounted_file_systems;
-
     var new_mount = try Mount.cache.alloc();
     errdefer Mount.cache.free(new_mount);
+
+    mount_table.mount_count += 1;
+    mount_next_ptr.* = new_mount;
 
     new_mount.flags = .{};
     // TODO: copy name
     new_mount.path = path;
     new_mount.file = source_file;
     new_mount.next = null;
-    mount_next_ptr.* = new_mount;
+    new_mount.file_system = fs;
 
-    if (existing_mounted_fs.*) |mounted_fs| {
-        mounted_fs.reference_count += 1;
-        mounted_fs.id = @enumFromInt(MountedFileSystem.counter);
-        MountedFileSystem.counter += 1;
-        new_mount.file_system = mounted_fs;
-    } else {
-        var new_mounted_fs = try MountedFileSystem.cache.alloc();
-
-        new_mounted_fs.device = null;
-        new_mounted_fs.file_system = file_system;
-        // TODO: internal data
-        new_mounted_fs.reference_count = 1;
-        new_mounted_fs.next = null;
-
-        new_mount.file_system = new_mounted_fs;
-        existing_mounted_fs.* = new_mounted_fs;
-    }
-
-    mount_table.mount_count += 1;
+    fs.mount_count += 1;
 }
 
 pub const OpenFile = struct {
-    mounted_fs_id: MountedFileSystem.Id,
+    mounted_fs_id: FileSystem.Id,
     dir_ent: *FileSystemCache.DirectoryEntry,
 
     pub fn read(self: OpenFile, buff: []u8, offset: usize) usize {
@@ -474,7 +467,7 @@ pub fn walkUntilLastComponent(
                     .directory => |*dir| current_dir = dir,
                 }
             } else {
-                if (current_fs.file_system.flags.no_device) {
+                if (current_fs.skeleton.flags.no_device) {
                     return error.EntryNotFound;
                 } else {
                     @panic("TODO");
@@ -557,6 +550,6 @@ fn dumpDirectory(dir: *FileSystemCache.Directory, depth: usize) void {
 /// Initialize the Virtual File System.
 pub fn init() void {
     Mount.cache = slab_allocator.createObjectCache(Mount);
-    MountedFileSystem.cache = slab_allocator.createObjectCache(MountedFileSystem);
+    FileSystem.cache = slab_allocator.createObjectCache(FileSystem);
     FileSystemCache.DirectoryEntry.cache = slab_allocator.createObjectCache(FileSystemCache.DirectoryEntry);
 }

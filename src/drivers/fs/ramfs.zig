@@ -111,7 +111,7 @@ pub const RamFs = struct {
         self.root_directory.dumpTree(0);
     }
 
-    pub fn init(self: *RamFs) fs.FileSystemError!void {
+    fn init(self: *RamFs) void {
         self.file_cache = slab_allocator.createObjectCache(File);
         self.root_directory = .{
             .child_count = 0,
@@ -120,9 +120,10 @@ pub const RamFs = struct {
     }
 };
 
-pub fn init(internal_data: *anyopaque) fs.FileSystemError!void {
-    const ramfs: *RamFs = @ptrCast(@alignCast(internal_data));
-    return ramfs.init();
+pub fn init(gpa: std.mem.Allocator) fs.FileSystemError!?*anyopaque {
+    const ramfs = try gpa.create(RamFs);
+    ramfs.init();
+    return ramfs;
 }
 
 pub const module: Module = .{
@@ -132,10 +133,10 @@ pub const module: Module = .{
     },
 };
 
-var ram_file_system: fs.FileSystem = .{
+var ram_file_system: fs.FileSystemSkeleton = .{
     .name = "ramfs",
     .flags = .{
         .no_device = true,
     },
-    .mount_init = init,
+    .init = init,
 };

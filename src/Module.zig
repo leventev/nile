@@ -40,7 +40,7 @@ module_type: union(Type) {
         },
     },
     /// The module is a file system.
-    fs: *fs.FileSystem,
+    fs: *fs.FileSystemSkeleton,
 },
 
 /// Set when the driver has been initialized.
@@ -87,8 +87,7 @@ pub fn registerFsModules() void {
     for (modules) |mod| {
         switch (mod.module_type) {
             .device_driver => continue,
-            .fs => |fs_type| fs.registerFileSystem(fs_type) catch
-                @panic("TODO: Failed to register fs"),
+            .fs => |fs_type| fs.registerFileSystem(fs_type),
         }
     }
 }

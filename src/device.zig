@@ -4,6 +4,7 @@ const property = @import("dt/property.zig");
 const Module = @import("Module.zig");
 const devicetree = @import("dt/devicetree.zig");
 const interrupt = @import("interrupt.zig");
+const DeviceFilesystem = @import("DeviceFilesystem.zig");
 
 const log = std.log.scoped(.device);
 
@@ -77,7 +78,7 @@ pub fn addDevice(dev: *Device) void {
     dev.next = null;
 }
 
-pub fn matchDeviceTreeDevices(dt: *const devicetree.DeviceTree) void {
+pub fn matchDeviceTreeDevices(dt: *const devicetree.DeviceTree, devfs: *DeviceFilesystem) void {
     var device_ptr = devices;
     dev_loop: while (device_ptr) |device| : (device_ptr = device.next) {
         if (device.matched) continue;
@@ -106,7 +107,7 @@ pub fn matchDeviceTreeDevices(dt: *const devicetree.DeviceTree) void {
                 for (driver_dt_info.compatible) |driver_compatible| {
                     if (!std.mem.eql(u8, driver_compatible, device_compatible)) continue;
 
-                    driver_dt_info.init(dt, dev_dt_info.handle) catch |err| {
+                    driver_dt_info.init(dt, dev_dt_info.handle, devfs) catch |err| {
                         log.err("Failed to initialize {s}: {s}", .{
                             module.name,
                             @errorName(err),
@@ -134,7 +135,7 @@ pub fn matchDeviceTreeDevices(dt: *const devicetree.DeviceTree) void {
     }
 }
 
-pub fn matchNonDeviceTreeDevices() bool {
+pub fn matchNonDeviceTreeDevices(devfs: *DeviceFilesystem) bool {
     const prev_bus_count = bus_count;
 
     var device_ptr = devices;
@@ -164,7 +165,7 @@ pub fn matchNonDeviceTreeDevices() bool {
             const success = driver_bus_info.bus_type.match(device, module);
             if (!success) continue;
 
-            driver_bus_info.init(device);
+            driver_bus_info.init(device, devfs);
             module.initialized = true;
             device.matched = true;
         }

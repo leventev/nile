@@ -7,6 +7,7 @@ const buddy_allocator = @import("../../mem/buddy_allocator.zig");
 const arch = @import("../../arch/arch.zig");
 const virtio = @import("virtio.zig");
 const framebuffer = @import("../../framebuffer.zig");
+const DeviceFilesystem = @import("../../DeviceFilesystem.zig");
 
 const VirtioDevice = virtio.VirtioDevice;
 const VirtQueue = virtio.VirtQueue;
@@ -203,7 +204,7 @@ fn flushScreen(private_data: *anyopaque) void {
     }
 }
 
-fn init(dev: *device.Device) void {
+fn init(dev: *device.Device, devfs: *DeviceFilesystem) void {
     const pci_dev = pcie.pciDeviceFromDevice(dev);
     const features = virtio.initializeVirtioDevice(pci_dev, &gpu.virtio_device, 0);
 
@@ -233,6 +234,7 @@ fn init(dev: *device.Device) void {
     gpu.builder.size = arch.page_size;
 
     _ = framebuffer.addFramebuffer(
+        devfs,
         .{
             .setup = setupFramebuffer,
             .flush = flushScreen,

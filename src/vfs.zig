@@ -28,6 +28,10 @@ pub const FileSystemSkeleton = struct {
     /// Called when the file system is created
     init: *const fn (gpa: std.mem.Allocator, fs: *FileSystem) FileSystemError!?*anyopaque,
 
+    read: *const fn (internal_data: ?*anyopaque, inode: Inode, buff: []u8, offset: usize) FileSystemError!usize,
+
+    write: *const fn (internal_data: ?*anyopaque, inode: Inode, buff: []u8, offset: usize) FileSystemError!usize,
+
     /// File system flags
     flags: Flags,
 
@@ -145,8 +149,8 @@ const FileSystemCache = struct {
     root_directory: Directory,
     ids_available: std.bit_set.ArrayBitSet(usize, DirectoryEntry.Id.max) = .full,
 
-    const DirectoryEntry = struct {
-        id: Id,
+    pub const DirectoryEntry = struct {
+        inode: Inode,
         name: []const u8,
         data: FileData,
         reference_count: usize,
@@ -154,34 +158,34 @@ const FileSystemCache = struct {
 
         var cache: slab_allocator.ObjectCache(DirectoryEntry) = undefined;
 
-        const Id = enum(usize) {
+        pub const Id = enum(usize) {
             _,
             const max = 4096;
         };
     };
 
-    const FileType = enum {
+    pub const FileType = enum {
         regular,
         directory,
     };
 
-    const FileData = union(FileType) {
+    pub const FileData = union(FileType) {
         regular: Regular,
         directory: Directory,
     };
 
-    const Regular = struct {
+    pub const Regular = struct {
         // TODO: temporary
         data: []const u8,
     };
 
     // TODO: ERRORS
 
-    const Directory = struct {
+    pub const Directory = struct {
         entry_count: usize,
         entries: ?*DirectoryEntry,
 
-        fn lookup(self: *Directory, name: []const u8) *?*DirectoryEntry {
+        pub fn lookup(self: *Directory, name: []const u8) *?*DirectoryEntry {
             var dent_ptr = &self.entries;
             while (dent_ptr.*) |dent| : (dent_ptr = &dent.next) {
                 if (std.mem.eql(u8, dent.name, name))
@@ -190,7 +194,7 @@ const FileSystemCache = struct {
             return dent_ptr;
         }
 
-        fn create(self: *Directory, name: []const u8, file_data: FileData) !void {
+        pub fn create(self: *Directory, name: []const u8, file_data: FileData) !void {
             const dent_ptr = self.lookup(name);
 
             if (dent_ptr.* != null) return error.AlreadyExists;
@@ -387,38 +391,34 @@ pub const OpenFile = struct {
     mounted_fs_id: FileSystem.Id,
     dir_ent: *FileSystemCache.DirectoryEntry,
 
-    pub fn read(self: OpenFile, buff: []u8, offset: usize) usize {
+    pub fn read(self: OpenFile, buff: []u8, offset: usize) !usize {
         const fs = global_file_system_table.getById(self.mounted_fs_id).* orelse
             @panic("Invalid open file");
-        _ = fs;
 
         switch (self.dir_ent.data) {
             .directory => @panic("TODO: directory read"),
-            .regular => |regular| {
-                // TODO:
-                const data = regular.data;
-                if (data.len <= offset) return 0;
-                const rem_size = data.len - offset;
-
-                const read_len = @min(rem_size, buff.len);
-                @memcpy(buff[0..read_len], data[offset .. offset + read_len]);
-
-                return read_len;
-            },
+            .regular => return fs.skeleton.read(
+                fs.internal_data,
+                self.dir_ent.inode,
+                buff,
+                offset,
+            ),
         }
         return;
     }
 
-    pub fn write(self: OpenFile, buff: []u8, offset: usize) usize {
-        _ = buff;
-        _ = offset;
+    pub fn write(self: OpenFile, buff: []u8, offset: usize) !usize {
         const fs = global_file_system_table.getById(self.mounted_fs_id).* orelse
             @panic("Invalid open file");
-        _ = fs;
 
         switch (self.dir_ent.data) {
             .directory => @panic("TODO: directory write"),
-            .regular => @panic("TODO: regular write"),
+            .regular => return fs.skeleton.write(
+                fs.internal_data,
+                self.dir_ent.inode,
+                buff,
+                offset,
+            ),
         }
         return;
     }

@@ -139,4 +139,22 @@ var ram_file_system: vfs.FileSystemSkeleton = .{
         .no_device = true,
     },
     .init = init,
+    .read = read,
+    .write = write,
 };
+
+fn read(internal_data: ?*anyopaque, inode: vfs.Inode, buff: []u8, offset: usize) !usize {
+    _ = inode;
+    _ = internal_data;
+    _ = buff;
+    _ = offset;
+    return 0;
+}
+
+fn write(internal_data: ?*anyopaque, inode: vfs.Inode, buff: []u8, offset: usize) !usize {
+    _ = inode;
+    _ = internal_data;
+    _ = buff;
+    _ = offset;
+    return 0;
+}

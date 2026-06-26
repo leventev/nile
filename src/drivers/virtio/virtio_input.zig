@@ -13,6 +13,7 @@ const interrupt = @import("../../interrupt.zig");
 const input = @import("../../input.zig");
 const Thread = @import("../../Thread.zig");
 const scheduler = @import("../../scheduler.zig");
+const DeviceFilesystem = @import("../../DeviceFilesystem.zig");
 
 const VirtQueue = virtio.VirtQueue;
 const VirtioDevice = virtio.VirtioDevice;
@@ -161,7 +162,8 @@ const VirtioInputEvent = extern struct {
     };
 };
 
-fn init(dev: *device.Device) void {
+fn init(dev: *device.Device, devfs: *DeviceFilesystem) void {
+    _ = devfs;
     const pci_dev = pcie.pciDeviceFromDevice(dev);
     const cfg_space = pcie.ConfigurationSpace.fromAddress(pci_dev.address);
     const header = cfg_space.generalHeader();

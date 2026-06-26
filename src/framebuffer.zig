@@ -1,5 +1,6 @@
 const std = @import("std");
 const pc_font = @import("pc_font.zig");
+const DeviceFilesystem = @import("DeviceFilesystem.zig");
 
 const log = std.log.scoped(.framebuffer);
 
@@ -75,7 +76,30 @@ const max_framebuffers = 4;
 var framebuffers: [max_framebuffers]Framebuffer = undefined;
 var framebuffer_count: usize = 0;
 
-pub fn addFramebuffer(ops: Framebuffer.Operations, private_data: *anyopaque) bool {
+fn devfsRead(private_data: *anyopaque, buff: []u8, offset: usize) usize {
+    _ = private_data;
+    _ = buff;
+    _ = offset;
+    return 0;
+}
+
+fn devfsWrite(private_data: *anyopaque, buff: []const u8, offset: usize) usize {
+    _ = private_data;
+    _ = buff;
+    _ = offset;
+    return 0;
+}
+
+const devfs_ops = DeviceFilesystem.Device.Operations{
+    .read = devfsRead,
+    .write = devfsWrite,
+};
+
+pub fn addFramebuffer(
+    devfs: *DeviceFilesystem,
+    ops: Framebuffer.Operations,
+    private_data: *anyopaque,
+) bool {
     std.debug.assert(framebuffer_count < max_framebuffers);
 
     const fb: *Framebuffer = &framebuffers[framebuffer_count];
@@ -95,6 +119,9 @@ pub fn addFramebuffer(ops: Framebuffer.Operations, private_data: *anyopaque) boo
     });
 
     framebuffer_count += 1;
+
+    // TODO: multiple framebuffer numbers
+    devfs.create("framebuffer", &devfs_ops, fb) catch @panic("TODO");
 
     return true;
 }

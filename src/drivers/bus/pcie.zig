@@ -13,6 +13,7 @@ const Module = @import("../../Module.zig");
 const device = @import("../../device.zig");
 const slab_allocator = @import("../../mem/slab_allocator.zig");
 const arch = @import("../../arch/arch.zig");
+const DeviceFilesystem = @import("../../DeviceFilesystem.zig");
 
 const log = std.log.scoped(.pcie);
 
@@ -645,7 +646,13 @@ fn enumerateBus(
     return 1 + child_bus_counter;
 }
 
-fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!void {
+fn init(
+    dt: *const devicetree.DeviceTree,
+    handle: u32,
+    devfs: *DeviceFilesystem,
+) error{InvalidDeviceTree}!void {
+    _ = devfs;
+
     const node = dt.nodes.items[handle];
 
     const ranges = node.getProperty(.ranges) orelse

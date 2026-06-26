@@ -4,6 +4,7 @@
 const std = @import("std");
 const Module = @import("../Module.zig");
 const root = @import("root");
+const DeviceFilesystem = @import("../DeviceFilesystem.zig");
 
 const devicetree = root.devicetree;
 const mm = root.mm;
@@ -131,7 +132,13 @@ fn writeBytes(buf: []const u8) ?usize {
     return buf.len;
 }
 
-pub fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!void {
+pub fn init(
+    dt: *const devicetree.DeviceTree,
+    handle: u32,
+    devfs: *DeviceFilesystem,
+) error{InvalidDeviceTree}!void {
+    _ = devfs;
+
     const uart = dt.nodes.items[handle];
 
     const freq = uart.getProperty(.clock_frequency) orelse

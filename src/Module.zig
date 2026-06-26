@@ -2,6 +2,7 @@ const std = @import("std");
 const vfs = @import("vfs.zig");
 const devicetree = @import("dt/devicetree.zig");
 const device = @import("device.zig");
+const DeviceFilesystem = @import("DeviceFilesystem.zig");
 
 const DeviceTree = devicetree.DeviceTree;
 
@@ -20,7 +21,11 @@ module_type: union(Type) {
             compatible: []const []const u8,
 
             /// The function that is called when a driver is successfully matched to a device.
-            init: *const fn (dt: *const DeviceTree, handle: u32) error{InvalidDeviceTree}!void,
+            init: *const fn (
+                dt: *const DeviceTree,
+                handle: u32,
+                devfs: *DeviceFilesystem,
+            ) error{InvalidDeviceTree}!void,
         },
         /// The device driver is matched to a device on a bus.
         bus: struct {
@@ -36,7 +41,7 @@ module_type: union(Type) {
             /// The function that is called when a driver is successfully matched to a device.
             /// The Device struct is usually encapsulated in a bigger bus specific struct
             /// which can be obtained with @fieldParentPtr.
-            init: *const fn (device: *device.Device) void,
+            init: *const fn (device: *device.Device, devfs: *DeviceFilesystem) void,
         },
     },
     /// The module is a file system.

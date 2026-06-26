@@ -8,6 +8,7 @@ const interrupt = @import("../../interrupt.zig");
 const riscv_int = @import("../../arch/riscv64/trap.zig");
 const Module = @import("../../Module.zig");
 const CSR = @import("../../arch/riscv64/csr.zig").CSR;
+const DeviceFilesystem = @import("../../DeviceFilesystem.zig");
 
 const log = std.log.scoped(.plic);
 
@@ -189,7 +190,13 @@ const PLIC = struct {
 
 var plic: PLIC = undefined;
 
-fn init(dt: *const devicetree.DeviceTree, handle: u32) error{InvalidDeviceTree}!void {
+fn init(
+    dt: *const devicetree.DeviceTree,
+    handle: u32,
+    devfs: *DeviceFilesystem,
+) error{InvalidDeviceTree}!void {
+    _ = devfs;
+
     const node = dt.nodes.items[handle];
 
     const interrupt_count = node.getPropertyOtherU32("riscv,ndev") orelse

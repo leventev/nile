@@ -21,7 +21,7 @@ pub const framebuffer = @import("framebuffer.zig");
 pub const pc_font = @import("pc_font.zig");
 pub const kernel_gpa = @import("mem/kernel_gpa.zig");
 pub const tty = @import("tty.zig");
-pub const devfs = @import("devfs.zig");
+pub const DeviceFilesystem = @import("DeviceFilesystem.zig");
 
 const test_binary_file = @embedFile("shell");
 const test_archive = @embedFile("root.cpio");
@@ -96,10 +96,10 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     vfs.init();
 
-    vfs.registerFileSystem(&devfs.device_file_system_skeleton);
+    vfs.registerFileSystem(&DeviceFilesystem.skeleton);
 
-    const devfs_instance = vfs.createFileSystem(gpa, "devfs") catch unreachable;
-    _ = devfs_instance;
+    const devfs = vfs.createFileSystem(gpa, "devfs") catch unreachable;
+    const devfs_internal: *DeviceFilesystem = @ptrCast(@alignCast(devfs.internal_data));
 
     // find interrupt controllers first
     devicetree.addDevices(&dt) catch @panic("TODO");
@@ -110,9 +110,9 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     // Thread structure themselves
     scheduler.init();
 
-    device.matchDeviceTreeDevices(&dt);
+    device.matchDeviceTreeDevices(&dt, devfs_internal);
 
-    while (device.matchNonDeviceTreeDevices()) {}
+    while (device.matchNonDeviceTreeDevices(devfs_internal)) {}
 
     device.enableInterrupts(gpa);
 
@@ -149,6 +149,8 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     const ramfs = vfs.createFileSystem(gpa, "ramfs") catch @panic("Failed to create ramfs");
 
     vfs.mountFileSystem(&mount_table, "/", ramfs) catch @panic("Failed to mount /");
+    vfs.createDirectory(&mount_table, "/dev") catch @panic("Failed to create /dev directory");
+    vfs.mountFileSystem(&mount_table, "/dev", devfs) catch @panic("Failed to mount /dev");
     vfs.createDirectory(&mount_table, "/test_dir") catch @panic("Failed to create file");
     vfs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
     vfs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");

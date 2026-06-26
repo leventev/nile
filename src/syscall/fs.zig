@@ -85,7 +85,7 @@ pub fn read(
     const open_file = current_process.file_descriptor_table[fd] orelse
         return SyscallError.invalid_file_descriptor;
 
-    return open_file.file.read(buff, open_file.offset);
+    return open_file.file.read(buff, open_file.offset) catch @panic("TODO");
 }
 
 pub fn write(
@@ -112,5 +112,5 @@ pub fn write(
     const open_file = current_process.file_descriptor_table[fd] orelse
         return SyscallError.invalid_file_descriptor;
 
-    return open_file.file.write(buff, open_file.offset);
+    return open_file.file.write(buff, open_file.offset) catch @panic("TODO");
 }

@@ -15,31 +15,34 @@ output_buffer_index: usize,
 const font_scale = 2;
 
 pub const operations = tty.TTYDevice.Driver.Operations{
-    .write = write,
+    .writeChar = writeChar,
 };
 
-fn write(tty_device: *tty.TTYDevice, buff: []const u8) void {
+fn writeChar(tty_device: *tty.TTYDevice, ch: u8) void {
     // TODO: wrapping
 
     const self: *VirtualConsole = @ptrCast(@alignCast(tty_device.driver.internal_data));
 
-    for (buff) |ch| {
-        var displayed_ch = ch;
-        var new_position = self.output_buffer_index +% 1;
-
-        // TODO:only add valid characters
-        if (ch == '\n') {
-            new_position = std.mem.alignForwardAnyAlign(
+    switch (ch) {
+        '\n' => {
+            // to erase the cursor
+            self.output_buffer[self.output_buffer_index] = ' ';
+            self.output_buffer_index = std.mem.alignForwardAnyAlign(
                 usize,
                 self.output_buffer_index,
                 self.columns,
             );
-            displayed_ch = ' ';
-        }
-
-        self.output_buffer[self.output_buffer_index] = displayed_ch;
-        self.output_buffer_index = new_position;
+        },
+        0x8 => {
+            self.output_buffer_index -= 1;
+            self.output_buffer[self.output_buffer_index] = ' ';
+        },
+        else => {
+            self.output_buffer[self.output_buffer_index] = ch;
+            self.output_buffer_index +%= 1;
+        },
     }
+    // TODO:only add valid characters
 
     self.redraw();
 }

@@ -20,7 +20,7 @@ pub const device = @import("device.zig");
 pub const framebuffer = @import("framebuffer.zig");
 pub const pc_font = @import("pc_font.zig");
 pub const kernel_gpa = @import("mem/kernel_gpa.zig");
-pub const tty = @import("tty.zig");
+pub const console = @import("console.zig");
 pub const DeviceFilesystem = @import("DeviceFilesystem.zig");
 
 const test_binary_file = @embedFile("shell");
@@ -155,6 +155,9 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     vfs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
     vfs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");
     vfs.createRegularFile(&mount_table, "/test_dir/a/test_file", "burger") catch @panic("Failed to create file");
+
+    console.init(gpa, devfs_internal, &framebuffer.framebuffers[0]) catch @panic("TODO");
+
     mount_table.dump();
     vfs.dumpTree(&mount_table);
 

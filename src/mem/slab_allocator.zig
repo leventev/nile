@@ -259,6 +259,9 @@ pub const SlabAllocator = struct {
                     self.object_size,
                     self.alignment_log,
                 );
+
+                // NOTE: if there was only 1 object per slab this would add a used slab
+                // to the partial slab list
                 self.partial_slabs.append(&slab_descriptor.list_node);
                 break :blk addr;
             };
@@ -411,10 +414,7 @@ pub const FixedSizedCache = struct {
         ) catch @panic("Name buffer is too small");
 
         // TODO: come up with some kind of logic for assigning higher block orders
-        var slab_block_order = buddy_allocator.blockOrderFromSize(size);
-        // TODO: fix this hack
-        if (size == std.math.shl(usize, 1, 12 + slab_block_order))
-            slab_block_order += 1;
+        const slab_block_order = buddy_allocator.blockOrderFromSize(4 * size);
 
         const alignment = if (size < 16) size else 16;
         const alignment_log = std.math.log2_int(u5, @intCast(alignment));

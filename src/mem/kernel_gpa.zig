@@ -3,7 +3,7 @@ const slab_allocator = @import("slab_allocator.zig");
 
 const log = std.log.scoped(.gpa);
 
-const sizes = [_]usize{ 16, 32, 64, 128, 256, 512, 1024, 2048, 4096 };
+const sizes = [_]usize{ 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384 };
 
 pub const KernelGPA = struct {
     caches: [sizes.len]slab_allocator.FixedSizedCache = undefined,

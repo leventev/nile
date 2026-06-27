@@ -1,0 +1,113 @@
+const std = @import("std");
+const tty = @import("tty.zig");
+const VirtualConsole = @import("VirtualConsole.zig");
+const DeviceFilesystem = @import("DeviceFilesystem.zig");
+const framebuffer = @import("framebuffer.zig");
+const input = @import("input.zig");
+
+const log = std.log.scoped(.console);
+
+// TODO: tty device count config
+const tty_device_count = 4;
+var tty_devices: [tty_device_count]*tty.TTYDevice = undefined;
+var current_tty_device: usize = 0;
+
+pub fn init(
+    gpa: std.mem.Allocator,
+    devfs: *DeviceFilesystem,
+    fb: *framebuffer.Framebuffer,
+) !void {
+
+    // TODO: errdefer cleanup
+    for (0..tty_device_count) |i| {
+        const virtual_console = try gpa.create(VirtualConsole);
+        try virtual_console.init(gpa, fb);
+        tty_devices[i] = try tty.createTTYDevice(
+            gpa,
+            devfs,
+            virtual_console,
+            &VirtualConsole.operations,
+        );
+    }
+}
+
+fn keyToChar(ev: input.KeyEvent) ?u8 {
+    // TODO
+    return switch (ev.key) {
+        .key_1 => '1',
+        .key_2 => '2',
+        .key_3 => '3',
+        .key_4 => '4',
+        .key_5 => '5',
+        .key_6 => '6',
+        .key_7 => '7',
+        .key_8 => '8',
+        .key_9 => '9',
+        .key_0 => '0',
+        .key_q => 'q',
+        .key_w => 'w',
+        .key_e => 'e',
+        .key_r => 'r',
+        .key_t => 't',
+        .key_y => 'y',
+        .key_u => 'u',
+        .key_i => 'i',
+        .key_o => 'o',
+        .key_p => 'p',
+        .key_a => 'a',
+        .key_s => 's',
+        .key_d => 'd',
+        .key_f => 'f',
+        .key_g => 'g',
+        .key_h => 'h',
+        .key_j => 'j',
+        .key_k => 'k',
+        .key_l => 'l',
+        .key_z => 'z',
+        .key_x => 'x',
+        .key_c => 'c',
+        .key_v => 'v',
+        .key_b => 'b',
+        .key_n => 'n',
+        .key_m => 'm',
+        .key_space => ' ',
+        .key_semicolon => ';',
+        .key_dot => '.',
+        .key_comma => ',',
+        .key_backspace => 0x8,
+        else => {
+            log.warn("ignored key: {}", .{ev.key});
+            return null;
+        },
+    };
+}
+
+var shift_enabled = false;
+
+pub fn keyEvent() void {
+    const current_dev = tty_devices[current_tty_device];
+
+    while (input.readKeyEvent()) |ev| {
+        if (ev.event_type == .released) {
+            if (ev.key == .key_leftshift or ev.key == .key_rightshift) {
+                shift_enabled = false;
+            }
+            continue;
+        }
+
+        switch (ev.key) {
+            .key_leftshift, .key_rightshift => shift_enabled = true,
+            else => {
+                const raw_ch = keyToChar(ev) orelse continue;
+                const ch = if (shift_enabled)
+                    std.ascii.toUpper(raw_ch)
+                else
+                    raw_ch;
+
+                // TODO: print in bulk
+                const chars: [1]u8 = .{ch};
+                current_dev.writeToInputBuffer(&chars);
+            },
+        }
+    }
+}

@@ -46,7 +46,7 @@ const PCFont = struct {
     glyph_table: []const u8,
 };
 
-var pc_font: PCFont = undefined;
+pub var loaded_font: PCFont = undefined;
 
 pub fn init() void {
     const psf2: *const PSF2Header = @ptrCast(@alignCast(font));
@@ -54,7 +54,7 @@ pub fn init() void {
         const psf1: *const PSF1Header = @ptrCast(@alignCast(font));
         const glyph_table: []const u8 = font[@sizeOf(PSF1Header)..];
 
-        pc_font = .{
+        loaded_font = .{
             .glyph_size = psf1.glyph_size,
             .glyph_count = 256,
             .width = 8,
@@ -64,7 +64,7 @@ pub fn init() void {
     } else {
         const glyph_table: []const u8 = font[psf2.header_size..];
 
-        pc_font = .{
+        loaded_font = .{
             .glyph_size = psf2.glyph_size,
             .glyph_count = psf2.glyph_count,
             .width = psf2.width,
@@ -93,19 +93,19 @@ pub fn displayChararcter(fb: *framebuffer.Framebuffer, x: usize, y: usize, ch: u
 
     const fb_mem: [*]framebuffer.PixelRGBA = @ptrCast(@alignCast(fb.active_display.memory));
 
-    const glyph_table_base = ch * pc_font.glyph_size;
+    const glyph_table_base = ch * loaded_font.glyph_size;
     var glyph_table_off: usize = 0;
 
     const scale = 2;
-    const base_x = x * pc_font.width * scale;
-    const base_y = y * pc_font.height * scale;
+    const base_x = x * loaded_font.width * scale;
+    const base_y = y * loaded_font.height * scale;
 
     var glyph_y: usize = 0;
-    while (glyph_y < pc_font.height) : (glyph_y += 1) {
+    while (glyph_y < loaded_font.height) : (glyph_y += 1) {
         var glyph_x: usize = 0;
-        while (glyph_x < pc_font.width) : (glyph_x += 1) {
+        while (glyph_x < loaded_font.width) : (glyph_x += 1) {
             if (glyph_x != 0 and glyph_x % 8 == 0) glyph_table_off += 1;
-            const current_glyph_byte = pc_font.glyph_table[glyph_table_base + glyph_table_off];
+            const current_glyph_byte = loaded_font.glyph_table[glyph_table_base + glyph_table_off];
 
             const bit = std.math.shr(u8, 0b1000_0000, glyph_x % 8);
 

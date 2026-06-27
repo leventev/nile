@@ -1,117 +1,125 @@
 const std = @import("std");
 const framebuffer = @import("framebuffer.zig");
 const input = @import("input.zig");
+const DeviceFilesystem = @import("DeviceFilesystem.zig");
 
 const log = std.log.scoped(.tty);
 
-fn keyToChar(ev: input.KeyEvent) ?u8 {
-    // TODO
-    return switch (ev.key) {
-        .key_1 => '1',
-        .key_2 => '2',
-        .key_3 => '3',
-        .key_4 => '4',
-        .key_5 => '5',
-        .key_6 => '6',
-        .key_7 => '7',
-        .key_8 => '8',
-        .key_9 => '9',
-        .key_0 => '0',
-        .key_q => 'q',
-        .key_w => 'w',
-        .key_e => 'e',
-        .key_r => 'r',
-        .key_t => 't',
-        .key_y => 'y',
-        .key_u => 'u',
-        .key_i => 'i',
-        .key_o => 'o',
-        .key_p => 'p',
-        .key_a => 'a',
-        .key_s => 's',
-        .key_d => 'd',
-        .key_f => 'f',
-        .key_g => 'g',
-        .key_h => 'h',
-        .key_j => 'j',
-        .key_k => 'k',
-        .key_l => 'l',
-        .key_z => 'z',
-        .key_x => 'x',
-        .key_c => 'c',
-        .key_v => 'v',
-        .key_b => 'b',
-        .key_n => 'n',
-        .key_m => 'm',
-        .key_space => ' ',
-        .key_semicolon => ';',
-        .key_dot => '.',
-        .key_comma => ',',
-        else => {
-            log.warn("ignored key: {}", .{ev.key});
-            return null;
-        },
+// TODO: maybe abstract a ring buffer
+pub const TTYDevice = struct {
+    input_buffer: []u8,
+    input_buffer_write_index: usize,
+    input_buffer_read_index: usize,
+    input_buffer_written: usize,
+    driver: Driver,
+    flags: Flags,
+
+    pub const Flags = packed struct(u64) {
+        echo: bool,
+        reserved: u63,
     };
-}
 
-var line_buffer: [80]u8 = undefined;
-var line_buffer_written: usize = 0;
-
-fn writeChar(ch: u8) void {
-    line_buffer[line_buffer_written] = ch;
-    line_buffer_written += 1;
-    reprintLine();
-}
-
-fn backspace() void {
-    if (line_buffer_written == 0) return;
-    line_buffer_written -= 1;
-    reprintLine();
-}
-
-fn reprintLine() void {
-    const rem = 80 - line_buffer_written;
-    framebuffer.printText(0, 0, line_buffer[0..line_buffer_written]);
-    for (0..rem) |i| {
-        framebuffer.displayCharacter(line_buffer_written + i, 0, ' ');
-    }
-    drawCursor();
-    framebuffer.flush();
-}
-
-fn drawCursor() void {
-    const x = line_buffer_written * 16;
-    framebuffer.fillRect(x, 0, 16, 32, .{
-        .alpha = 255,
-        .red = 255,
-        .green = 255,
-        .blue = 255,
-    });
-}
-
-var shift_enabled = false;
-
-pub fn keyEvent() void {
-    while (input.readKeyEvent()) |ev| {
-        if (ev.event_type == .released) {
-            if (ev.key == .key_leftshift or ev.key == .key_rightshift) {
-                shift_enabled = false;
-            }
-            continue;
+    pub fn writeToInputBuffer(self: *TTYDevice, chars: []const u8) void {
+        for (chars) |ch| {
+            const idx = self.input_buffer_write_index % self.input_buffer.len;
+            self.input_buffer[idx] = ch;
+            self.input_buffer_write_index +%= 1;
+            self.input_buffer_written += 1;
         }
 
-        switch (ev.key) {
-            .key_backspace => backspace(),
-            .key_leftshift, .key_rightshift => shift_enabled = true,
-            else => {
-                const raw_ch = keyToChar(ev) orelse continue;
-                const ch = if (shift_enabled)
-                    std.ascii.toUpper(raw_ch)
-                else
-                    raw_ch;
-
-                writeChar(ch);
-            },
+        if (self.flags.echo) {
+            self.driver.operations.write(self, chars);
         }
     }
+
+    pub const Driver = struct {
+        internal_data: *anyopaque,
+        operations: *const Operations,
+
+        pub const Operations = struct {
+            write: *const fn (tty_device: *TTYDevice, buff: []const u8) void,
+        };
+    };
+
+    // fn reprintLine(self: *TTYDevice) void {
+    //     const rem = 80 - self.line_buffer_written;
+    //     framebuffer.printText(0, 0, self.input_buffer[0..self.line_buffer_written]);
+    //     for (0..rem) |i| {
+    //         framebuffer.displayCharacter(self.line_buffer_written + i, 0, ' ');
+    //     }
+    //     // drawCursor();
+    //     framebuffer.flush();
+    // }
+};
+
+const tty_devfs_operations = DeviceFilesystem.Device.Operations{
+    .read = ttyDevfsRead,
+    .write = ttyDevfsWrite,
+};
+
+const buffer_size = 4096;
+
+// TODO: store all TTY devices
+
+var tty_counter: usize = 0;
+
+pub fn createTTYDevice(
+    gpa: std.mem.Allocator,
+    devfs: *DeviceFilesystem,
+    internal_data: *anyopaque,
+    operations: *const TTYDevice.Driver.Operations,
+) !*TTYDevice {
+    const tty_dev = try gpa.create(TTYDevice);
+
+    tty_dev.input_buffer = try gpa.alloc(u8, buffer_size);
+    tty_dev.input_buffer_read_index = 0;
+    tty_dev.input_buffer_write_index = 0;
+    tty_dev.input_buffer_written = 0;
+    tty_dev.driver.internal_data = internal_data;
+    tty_dev.driver.operations = operations;
+
+    const filename = try std.fmt.allocPrint(gpa, "tty{}", .{tty_counter});
+
+    try DeviceFilesystem.create(devfs, filename, &tty_devfs_operations, tty_dev);
+
+    tty_counter += 1;
+
+    return tty_dev;
+}
+
+fn ttyDevfsRead(internal_data: *anyopaque, buff: []u8, offset: usize) usize {
+    if (offset != 0) {
+        log.warn("offset != 0 ({})", .{offset});
+        return 0;
+    }
+
+    const tty: *TTYDevice = @ptrCast(@alignCast(internal_data));
+    const read_size = @min(buff.len, tty.input_buffer_written);
+
+    var buff_idx: usize = 0;
+    while (tty.input_buffer_read_index != tty.input_buffer_write_index) {
+        const read_idx = tty.input_buffer_read_index % tty.input_buffer.len;
+        buff[buff_idx] = tty.input_buffer[read_idx];
+
+        buff_idx += 1;
+        tty.input_buffer_read_index +%= 1;
+    }
+
+    std.debug.assert(buff_idx == read_size);
+
+    tty.input_buffer_written -= read_size;
+
+    return read_size;
+}
+
+fn ttyDevfsWrite(internal_data: *anyopaque, buff: []const u8, offset: usize) usize {
+    if (offset != 0) {
+        log.warn("offset != 0 ({})", .{offset});
+        return 0;
+    }
+
+    const tty: *TTYDevice = @ptrCast(@alignCast(internal_data));
+    tty.driver.operations.write(tty, buff);
+
+    return 0;
 }

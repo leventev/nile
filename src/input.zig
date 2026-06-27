@@ -2,7 +2,7 @@
 //! https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/uapi/linux/input-event-codes.h
 
 const std = @import("std");
-const tty = @import("tty.zig");
+const console = @import("console.zig");
 
 const EvdevKeyEventCode = enum(u16) {
     key_reserved = 0,
@@ -718,7 +718,7 @@ pub fn addKeyEvent(event: KeyEvent) void {
     event_buffer.write_index = event_buffer.write_index % KeyEventBuffer.buffer_event_count;
     event_buffer.written += 1;
 
-    tty.keyEvent();
+    console.keyEvent();
 }
 
 pub fn readKeyEvent() ?KeyEvent {

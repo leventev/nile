@@ -149,17 +149,19 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     const ramfs = vfs.createFileSystem(gpa, "ramfs") catch @panic("Failed to create ramfs");
 
     vfs.mountFileSystem(&mount_table, "/", ramfs) catch @panic("Failed to mount /");
-    vfs.createDirectory(&mount_table, "/dev") catch @panic("Failed to create /dev directory");
+    // TODO: proper inode
+    vfs.createDirectory(&mount_table, .fromInt(1), "/dev") catch @panic("Failed to create /dev directory");
     vfs.mountFileSystem(&mount_table, "/dev", devfs) catch @panic("Failed to mount /dev");
-    vfs.createDirectory(&mount_table, "/test_dir") catch @panic("Failed to create file");
-    vfs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
-    vfs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");
-    vfs.createRegularFile(&mount_table, "/test_dir/a/test_file", "burger") catch @panic("Failed to create file");
+    // vfs.createDirectory(&mount_table, "/test_dir") catch @panic("Failed to create file");
+    // vfs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
+    // vfs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");
+    // vfs.createRegularFile(&mount_table, "/test_dir/a/test_file", "burger") catch @panic("Failed to create file");
 
     console.init(gpa, devfs_internal, &framebuffer.framebuffers[0]) catch @panic("TODO");
 
     mount_table.dump();
     vfs.dumpTree(&mount_table);
+    vfs.dumpDirectory(&devfs.fs_cache.root_directory, 0);
 
     //
     // // TODO

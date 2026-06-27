@@ -88,7 +88,7 @@ const black = framebuffer.PixelRGBA{
     .alpha = 0,
 };
 
-pub fn displayChararcter(fb: *framebuffer.Framebuffer, x: usize, y: usize, ch: u8) void {
+pub fn displayChararcter(fb: *framebuffer.Framebuffer, x: usize, y: usize, ch: u8, scale: usize) void {
     // TODO: format
 
     const fb_mem: [*]framebuffer.PixelRGBA = @ptrCast(@alignCast(fb.active_display.memory));
@@ -96,7 +96,6 @@ pub fn displayChararcter(fb: *framebuffer.Framebuffer, x: usize, y: usize, ch: u
     const glyph_table_base = ch * loaded_font.glyph_size;
     var glyph_table_off: usize = 0;
 
-    const scale = 2;
     const base_x = x * loaded_font.width * scale;
     const base_y = y * loaded_font.height * scale;
 

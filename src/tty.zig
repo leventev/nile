@@ -40,16 +40,6 @@ pub const TTYDevice = struct {
             write: *const fn (tty_device: *TTYDevice, buff: []const u8) void,
         };
     };
-
-    // fn reprintLine(self: *TTYDevice) void {
-    //     const rem = 80 - self.line_buffer_written;
-    //     framebuffer.printText(0, 0, self.input_buffer[0..self.line_buffer_written]);
-    //     for (0..rem) |i| {
-    //         framebuffer.displayCharacter(self.line_buffer_written + i, 0, ' ');
-    //     }
-    //     // drawCursor();
-    //     framebuffer.flush();
-    // }
 };
 
 const tty_devfs_operations = DeviceFilesystem.Device.Operations{
@@ -61,13 +51,12 @@ const buffer_size = 4096;
 
 // TODO: store all TTY devices
 
-var tty_counter: usize = 0;
-
 pub fn createTTYDevice(
     gpa: std.mem.Allocator,
     devfs: *DeviceFilesystem,
     internal_data: *anyopaque,
     operations: *const TTYDevice.Driver.Operations,
+    filename: []const u8,
 ) !*TTYDevice {
     const tty_dev = try gpa.create(TTYDevice);
 
@@ -77,12 +66,12 @@ pub fn createTTYDevice(
     tty_dev.input_buffer_written = 0;
     tty_dev.driver.internal_data = internal_data;
     tty_dev.driver.operations = operations;
-
-    const filename = try std.fmt.allocPrint(gpa, "tty{}", .{tty_counter});
+    tty_dev.flags = .{
+        .echo = true,
+        .reserved = 0,
+    };
 
     try DeviceFilesystem.create(devfs, filename, &tty_devfs_operations, tty_dev);
-
-    tty_counter += 1;
 
     return tty_dev;
 }

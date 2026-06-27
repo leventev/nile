@@ -194,13 +194,14 @@ const FileSystemCache = struct {
             return dent_ptr;
         }
 
-        pub fn create(self: *Directory, name: []const u8, file_data: FileData) !void {
+        pub fn create(self: *Directory, name: []const u8, inode: Inode, file_data: FileData) !void {
             const dent_ptr = self.lookup(name);
 
             if (dent_ptr.* != null) return error.AlreadyExists;
 
             var new_entry = try DirectoryEntry.cache.alloc();
             new_entry.name = name;
+            new_entry.inode = inode;
             new_entry.data = file_data;
             new_entry.next = null;
 
@@ -478,25 +479,34 @@ pub fn walkUntilLastComponent(
     }
 }
 
-pub fn createDirectory(mount_table: *MountTable, path_str: []const u8) !void {
+pub fn createDirectory(mount_table: *MountTable, inode: Inode, path_str: []const u8) !void {
     var mount: *Mount = undefined;
     var dir: *FileSystemCache.Directory = undefined;
     var last_component: []const u8 = &.{};
 
     try walkUntilLastComponent(mount_table, path_str, &mount, &dir, &last_component);
 
-    try dir.create(last_component, .{ .directory = .{ .entry_count = 0, .entries = null } });
+    try dir.create(
+        last_component,
+        inode,
+        .{ .directory = .{ .entry_count = 0, .entries = null } },
+    );
 }
 
 // TODO: CONTENT
-pub fn createRegularFile(mount_table: *MountTable, path_str: []const u8, content: []const u8) !void {
+pub fn createRegularFile(
+    mount_table: *MountTable,
+    inode: Inode,
+    path_str: []const u8,
+    content: []const u8,
+) !void {
     var mount: *Mount = undefined;
     var dir: *FileSystemCache.Directory = undefined;
     var last_component: []const u8 = &.{};
 
     try walkUntilLastComponent(mount_table, path_str, &mount, &dir, &last_component);
 
-    try dir.create(last_component, .{ .regular = .{ .data = content } });
+    try dir.create(last_component, inode, .{ .regular = .{ .data = content } });
 }
 
 // TODO: ERRORS
@@ -526,7 +536,7 @@ pub fn dumpTree(mount_table: *MountTable) void {
     dumpDirectory(root_dir, 0);
 }
 
-fn dumpDirectory(dir: *FileSystemCache.Directory, depth: usize) void {
+pub fn dumpDirectory(dir: *FileSystemCache.Directory, depth: usize) void {
     // TODO: buffer likely too small
     const space_count = depth * 4;
     var indent_buffer: [512]u8 = undefined;

@@ -21,12 +21,17 @@ pub fn init(
     // TODO: errdefer cleanup
     for (0..tty_device_count) |i| {
         const virtual_console = try gpa.create(VirtualConsole);
+        virtual_console.id = i;
         try virtual_console.init(gpa, fb);
+
+        const filename = try std.fmt.allocPrint(gpa, "tty{}", .{virtual_console.id});
+
         tty_devices[i] = try tty.createTTYDevice(
             gpa,
             devfs,
             virtual_console,
             &VirtualConsole.operations,
+            filename,
         );
     }
 }
@@ -82,6 +87,9 @@ fn keyToChar(ev: input.KeyEvent) ?u8 {
     };
 }
 
+// TODO: there is probably a better way to do this with @Type
+var key_states: [@intFromEnum(input.EvdevKeyEventCode.max)]bool = @splat(false);
+
 var shift_enabled = false;
 
 pub fn keyEvent() void {
@@ -89,14 +97,28 @@ pub fn keyEvent() void {
 
     while (input.readKeyEvent()) |ev| {
         if (ev.event_type == .released) {
-            if (ev.key == .key_leftshift or ev.key == .key_rightshift) {
-                shift_enabled = false;
-            }
+            key_states[@intFromEnum(ev.key)] = false;
             continue;
         }
 
+        key_states[@intFromEnum(ev.key)] = true;
+
         switch (ev.key) {
-            .key_leftshift, .key_rightshift => shift_enabled = true,
+            // TODO:
+            .key_f1, .key_f2, .key_f3, .key_f4, .key_f5, .key_f6 => {
+                const f_num = @intFromEnum(ev.key) - @intFromEnum(input.EvdevKeyEventCode.key_f1);
+                const ctrl = key_states[@intFromEnum(input.EvdevKeyEventCode.key_leftctrl)];
+                const shift = key_states[@intFromEnum(input.EvdevKeyEventCode.key_leftshift)];
+                if (ctrl and shift and f_num < tty_device_count) {
+                    current_tty_device = f_num;
+                    const new_current_dev = tty_devices[current_tty_device];
+                    const virt_console: *VirtualConsole = @ptrCast(
+                        @alignCast(new_current_dev.driver.internal_data),
+                    );
+
+                    virt_console.redraw();
+                }
+            },
             else => {
                 const raw_ch = keyToChar(ev) orelse continue;
                 const ch = if (shift_enabled)

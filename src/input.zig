@@ -4,7 +4,7 @@
 const std = @import("std");
 const console = @import("console.zig");
 
-const EvdevKeyEventCode = enum(u16) {
+pub const EvdevKeyEventCode = enum(u16) {
     key_reserved = 0,
     key_esc = 1,
     key_1 = 2,
@@ -685,6 +685,8 @@ const EvdevKeyEventCode = enum(u16) {
     btn_trigger_happy38 = 0x2e5,
     btn_trigger_happy39 = 0x2e6,
     btn_trigger_happy40 = 0x2e7,
+
+    max = 0x2e8,
 };
 
 pub const KeyEvent = struct {

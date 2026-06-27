@@ -29,8 +29,8 @@ pub const Framebuffer = struct {
         height: usize,
         color: PixelRGBA,
     ) void {
-        std.debug.assert(start_x + width < self.active_display.width);
-        std.debug.assert(start_y + height < self.active_display.height);
+        std.debug.assert(start_x + width <= self.active_display.width);
+        std.debug.assert(start_y + height <= self.active_display.height);
         // TODO: format
 
         const pixels: [*]PixelRGBA = @ptrCast(@alignCast(self.active_display.memory));

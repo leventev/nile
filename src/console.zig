@@ -34,6 +34,10 @@ pub fn init(
             filename,
         );
     }
+
+    const current_dev = tty_devices[current_tty_device];
+    const virt_console: *VirtualConsole = @ptrCast(@alignCast(current_dev.driver.internal_data));
+    virt_console.redraw();
 }
 
 fn keyToChar(ev: input.KeyEvent) ?u8 {

@@ -43,7 +43,6 @@ pub fn openat(
     _ = mode;
 
     const current_process = processes.currentProcess();
-
     const open_file = vfs.openFile(
         current_process.mount_table,
         path,

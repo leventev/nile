@@ -98,6 +98,9 @@ fn ttyDevfsRead(internal_data: *anyopaque, buff: []u8, offset: usize) usize {
     const tty: *TTYDevice = @ptrCast(@alignCast(internal_data));
     const read_size = @min(buff.len, tty.input_buffer_written);
 
+    // block
+    while (tty.input_buffer_read_index == tty.input_buffer_write_index) {}
+
     var buff_idx: usize = 0;
     while (tty.input_buffer_read_index != tty.input_buffer_write_index) {
         const read_idx = tty.input_buffer_read_index % tty.input_buffer.len;

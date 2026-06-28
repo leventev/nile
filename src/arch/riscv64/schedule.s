@@ -15,7 +15,7 @@
 
 .type trapHandlerSupervisor, @function
 .global trapHandlerSupervisor
-.global trap_stack_bottom
+.global current_trap_stack_bottom
 .align 4
 trapHandlerSupervisor:
     # move *Registers from sscratch into t6 and t6 into sscratch
@@ -46,7 +46,7 @@ trapHandlerSupervisor:
     sd t0, (33 * REGISTER_BYTES)(t1)
 
     # set trap stack
-    ld sp, trap_stack_bottom
+    ld sp, current_trap_stack_bottom
 
     # pass scause and stval to zig trap handler
     csrr a0, scause
@@ -78,7 +78,6 @@ trapHandlerSupervisor:
 
 .type forceSchedule, @function
 .global forceSchedule
-.global trap_stack_bottom
 .align 4
 forceSchedule:
     # the next thread's *Registers is already written to sscratch

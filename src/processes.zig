@@ -96,12 +96,12 @@ pub fn spawnInitProcess(
     }
 
     // TODO:
-    const stack_bottom = 0xA000_0000;
+    const stack_top = 0xA000_0000;
     const stack_size = 64 * arch.page_size;
-    const stack_top = stack_bottom + stack_size;
+    const stack_bottom = stack_top + stack_size;
 
     try new_proc.mapRegion(
-        .fromInt(stack_bottom),
+        .fromInt(stack_top),
         stack_size,
         .{
             .execute = false,
@@ -110,7 +110,7 @@ pub fn spawnInitProcess(
         },
     );
 
-    _ = try scheduler.newUserThread(elf_header.entry, stack_top, new_proc);
+    _ = try scheduler.newUserThread(elf_header.entry, stack_bottom, new_proc);
 
     running_processes.append(&new_proc.list_node);
 

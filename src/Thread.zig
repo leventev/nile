@@ -12,10 +12,10 @@ scheduler_list_node: std.DoublyLinkedList.Node,
 
 registers: arch.Registers,
 
-/// Start of the stack
-stack_top: mm.VirtualAddress,
+/// Start of the kernel stack
+kernel_stack_top: mm.VirtualAddress,
 
-// TODO: store stack size
+kernel_stack_size: usize,
 
 /// The type/purpose of the thread.
 purpose: Purpose,

@@ -467,6 +467,7 @@ pub const CSR = enum(u64) {
             : [outreg] "=r" (res),
             : [inreg] "r" (mask),
         );
+        return res;
     }
 
     pub inline fn readAndWrite(self: Self, val: u64) u64 {
@@ -476,6 +477,7 @@ pub const CSR = enum(u64) {
             : [outreg] "=r" (res),
             : [inreg] "r" (val),
         );
+        return res;
     }
 
     pub inline fn readAndClearBits(self: Self, mask: u64) u64 {
@@ -485,5 +487,6 @@ pub const CSR = enum(u64) {
             : [outreg] "=r" (res),
             : [inreg] "r" (mask),
         );
+        return res;
     }
 };

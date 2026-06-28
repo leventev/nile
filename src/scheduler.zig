@@ -84,7 +84,8 @@ pub fn newSoftInterruptHandler(
     // TODO: smaller stack size or on demand by the caller
     const stack_bottom = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
     const stack_top = stack_bottom.add(stack_size);
-    thread.stack_top = mm.physicalToVirtualAddress(stack_top);
+    thread.kernel_stack_top = mm.physicalToVirtualAddress(stack_top);
+    thread.kernel_stack_size = std.math.shl(usize, 1, 12 + stack_size_order);
 
     const callback_addr = @intFromPtr(callback);
 
@@ -119,10 +120,11 @@ pub fn newKernelThread(entry_point: *const fn () void, owner_process: *Process) 
 
     const stack_bottom = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
     const stack_top = stack_bottom.add(stack_size);
-    thread.stack_top = mm.physicalToVirtualAddress(stack_top);
+    thread.kernel_stack_top = mm.physicalToVirtualAddress(stack_top);
+    thread.kernel_stack_size = std.math.shl(usize, 1, 12 + stack_size_order);
 
     const entry_point_addr = @intFromPtr(entry_point);
-    arch.setupNewGeneralThread(thread, entry_point_addr);
+    arch.setupNewGeneralThread(thread, null, entry_point_addr);
     appendRunningThread(thread);
 
     if (config.debug_scheduler) {
@@ -139,14 +141,16 @@ pub fn newKernelThread(entry_point: *const fn () void, owner_process: *Process) 
 /// Create a new user thread
 pub fn newUserThread(
     entry_point_addr: usize,
-    stack_top_addr: usize,
+    user_stack_bottom_addr: usize,
     owner_process: *Process,
 ) Error!*Thread {
     const thread_id = try nextThreadId();
 
     var thread: *Thread = thread_cache.alloc() catch return error.out_of_memory;
     thread.id = thread_id;
-    thread.stack_top = .fromInt(stack_top_addr);
+    const stack_bottom = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
+    const stack_top = stack_bottom.add(stack_size);
+    thread.kernel_stack_top = mm.physicalToVirtualAddress(stack_top);
 
     thread.purpose = .{
         .general = .{
@@ -158,14 +162,14 @@ pub fn newUserThread(
 
     owner_process.associated_threads.append(&thread.purpose.general.process_list_node);
 
-    arch.setupNewGeneralThread(thread, entry_point_addr);
+    arch.setupNewGeneralThread(thread, user_stack_bottom_addr, entry_point_addr);
     appendRunningThread(thread);
 
     if (config.debug_scheduler) {
         std.log.debug("new user thread(TID={}), entry point: 0x{x}, stack top: 0x{x}", .{
             thread_id,
             entry_point_addr,
-            stack_top_addr,
+            // stack_top_addr,
         });
     }
 

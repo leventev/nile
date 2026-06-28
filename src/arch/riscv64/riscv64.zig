@@ -31,7 +31,13 @@ const kernel_physical_address = 0x80200000;
 const kernel_virtual_address = 0xffffffffc0200000;
 pub const kernel_virtual_offset = kernel_virtual_address - kernel_physical_address;
 
-pub fn setupNewGeneralThread(thread: *Thread, entry_point_addr: usize) void {
+pub export var current_trap_stack_bottom: u64 = undefined;
+
+pub fn setupNewGeneralThread(
+    thread: *Thread,
+    user_stack_bottom_addr: ?u64,
+    entry_point_addr: u64,
+) void {
     if (config.debug_scheduler) {
         thread.registers.gprs = [_]u64{0xAA_BB_CC_DD_AA_BB_CC_DD} ** Registers.gpr_count;
     } else {
@@ -63,7 +69,11 @@ pub fn setupNewGeneralThread(thread: *Thread, entry_point_addr: usize) void {
         .__reserved7 = 0,
     };
 
-    thread.registers.gprs[Registers.stack_ptr] = thread.stack_top.asInt();
+    thread.registers.gprs[Registers.stack_ptr] = if (user)
+        user_stack_bottom_addr.?
+    else
+        thread.kernel_stack_top.asInt() + thread.kernel_stack_size;
+
     thread.registers.gprs[Registers.global_data_ptr] = @intFromPtr(&__global_pointer);
 }
 
@@ -98,7 +108,7 @@ pub fn setupSoftInterruptThread(thread: *Thread) void {
         .__reserved7 = 0,
     };
 
-    thread.registers.gprs[Registers.stack_ptr] = thread.stack_top.asInt();
+    thread.registers.gprs[Registers.stack_ptr] = thread.kernel_stack_top.asInt();
     thread.registers.gprs[Registers.global_data_ptr] = @intFromPtr(&__global_pointer);
 }
 
@@ -108,6 +118,7 @@ pub fn scheduleNextThread(thread: *Thread) void {
         thread.registers.printRegs(.debug);
     }
     CSR.sscratch.write(@intFromPtr(&thread.registers));
+    current_trap_stack_bottom = thread.kernel_stack_top.asInt() + thread.kernel_stack_size;
     timer.resetTimer();
 }
 

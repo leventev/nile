@@ -287,11 +287,6 @@ fn handleInterrupt(
     }
 }
 
-// TODO: REPLACE THIS
-const trap_stack_size = 4 * 4096;
-var trap_stack: [trap_stack_size]u8 align(16) = undefined;
-export var trap_stack_bottom: u64 = undefined;
-
 export fn handleTrap(
     cause: TrapCause,
     tval: u64,
@@ -311,5 +306,4 @@ pub fn init() void {
     );
 
     CSR.stvec.write(@bitCast(stvec));
-    trap_stack_bottom = @intFromPtr(&trap_stack) + trap_stack_size;
 }

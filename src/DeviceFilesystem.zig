@@ -17,10 +17,12 @@ pub var skeleton: vfs.FileSystemSkeleton = .{
 };
 
 fn read(internal_data: ?*anyopaque, inode: vfs.Inode, buff: []u8, offset: usize) !usize {
+    std.log.debug("devfs read 1", .{});
     const devfs: *DeviceFilesystem = @ptrCast(@alignCast(internal_data));
     // TODO: validate inode
 
     const dev = &devfs.inode_table[inode.asInt()];
+    std.log.debug("devfs read 2", .{});
     return dev.operations.read(dev.internal_data, buff, offset);
 }
 

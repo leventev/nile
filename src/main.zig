@@ -49,7 +49,7 @@ pub fn panic(
     error_return_trace: ?*std.builtin.StackTrace,
     ret_addr: ?usize,
 ) noreturn {
-    arch.disableInterrupts();
+    _ = arch.disableInterrupts();
 
     _ = ret_addr;
     _ = error_return_trace;

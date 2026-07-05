@@ -396,6 +396,8 @@ pub const OpenFile = struct {
         const fs = global_file_system_table.getById(self.mounted_fs_id).* orelse
             @panic("Invalid open file");
 
+        std.log.debug("open file read", .{});
+
         switch (self.dir_ent.data) {
             .directory => @panic("TODO: directory read"),
             .regular => return fs.skeleton.read(
@@ -405,7 +407,6 @@ pub const OpenFile = struct {
                 offset,
             ),
         }
-        return;
     }
 
     pub fn write(self: OpenFile, buff: []u8, offset: usize) !usize {
@@ -421,7 +422,6 @@ pub const OpenFile = struct {
                 offset,
             ),
         }
-        return;
     }
 };
 

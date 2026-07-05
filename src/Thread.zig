@@ -4,13 +4,15 @@ const mm = @import("mem/mm.zig");
 const Process = @import("Process.zig");
 const device = @import("device.zig");
 
+const Thread = @This();
+
 /// ID of the thread. Every thread regardless of purpose has a unique ID.
 id: Id,
 
 ///
 scheduler_list_node: std.DoublyLinkedList.Node,
 
-registers: arch.Registers,
+kernel_state: *arch.ThreadState,
 
 /// Start of the kernel stack
 kernel_stack_top: mm.VirtualAddress,
@@ -35,7 +37,10 @@ pub const Purpose = union(enum) {
 
 pub const General = struct {
     /// Whether the thread is a user or kernel thread.
-    user: bool,
+    user: ?struct {
+        in_userspace: bool,
+        state: *arch.ThreadState,
+    },
 
     process_list_node: std.DoublyLinkedList.Node,
 
@@ -52,3 +57,10 @@ pub const SoftInterruptHandler = struct {
     /// to avoid adding it to the list again.
     queued: bool,
 };
+
+pub fn effectiveThreadState(self: *Thread) *arch.ThreadState {
+    return switch (self.purpose) {
+        .soft_interrupt => self.kernel_state,
+        .general => |general| if (general.user) |user| user.state else self.kernel_state,
+    };
+}

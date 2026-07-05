@@ -19,6 +19,7 @@ pub var running_threads: std.DoublyLinkedList = .{};
 pub var threads_available = std.bit_set.ArrayBitSet(usize, Thread.Id.max).initFull();
 
 var thread_cache: slab_allocator.ObjectCache(Thread) = .{};
+var thread_state_cache: slab_allocator.ObjectCache(arch.ThreadState) = .{};
 
 pub const Error = error{
     no_available_threads,
@@ -82,15 +83,15 @@ pub fn newSoftInterruptHandler(
     };
 
     // TODO: smaller stack size or on demand by the caller
-    const stack_bottom = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
-    const stack_top = stack_bottom.add(stack_size);
+    const stack_top = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
     thread.kernel_stack_top = mm.physicalToVirtualAddress(stack_top);
     thread.kernel_stack_size = std.math.shl(usize, 1, 12 + stack_size_order);
+    thread.kernel_state = thread_state_cache.alloc() catch return error.out_of_memory;
 
     const callback_addr = @intFromPtr(callback);
 
     if (config.debug_scheduler) {
-        std.log.debug("new soft interrupt thread(TID={}), callback: 0x{x}, stack top: 0x{x}, dev: {s}", .{
+        std.log.debug("new soft interrupt thread(TID={}), callback: 0x{x}, kernel stack top: 0x{x}, dev: {s}", .{
             thread_id,
             callback_addr,
             stack_top.asInt(),
@@ -102,7 +103,7 @@ pub fn newSoftInterruptHandler(
 }
 
 /// Create a new kernel thread
-pub fn newKernelThread(entry_point: *const fn () void, owner_process: *Process) Error!*Thread {
+pub fn newKernelThread(entry_point_fn: *const fn () void, owner_process: *Process) Error!*Thread {
     const thread_id = try nextThreadId();
 
     var thread: *Thread = thread_cache.alloc() catch return error.out_of_memory;
@@ -110,28 +111,29 @@ pub fn newKernelThread(entry_point: *const fn () void, owner_process: *Process) 
 
     thread.purpose = .{
         .general = .{
+            .user = null,
             .owner_process = owner_process,
-            .user = false,
             .process_list_node = .{},
         },
     };
 
     owner_process.associated_threads.append(&thread.purpose.general.process_list_node);
 
-    const stack_bottom = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
-    const stack_top = stack_bottom.add(stack_size);
-    thread.kernel_stack_top = mm.physicalToVirtualAddress(stack_top);
+    const kernel_stack_top = buddy_allocator.allocBlock(stack_size_order) catch
+        return error.out_of_memory;
+    thread.kernel_stack_top = mm.physicalToVirtualAddress(kernel_stack_top);
     thread.kernel_stack_size = std.math.shl(usize, 1, 12 + stack_size_order);
+    thread.kernel_state = thread_state_cache.alloc() catch return error.out_of_memory;
 
-    const entry_point_addr = @intFromPtr(entry_point);
-    arch.setupNewGeneralThread(thread, null, entry_point_addr);
+    const entry_point: mm.VirtualAddress = .fromInt(@intFromPtr(entry_point_fn));
+    arch.setupNewGeneralThread(thread, null, entry_point);
     appendRunningThread(thread);
 
     if (config.debug_scheduler) {
-        std.log.debug("new kernel thread(TID={}), entry point: 0x{x}, stack top: 0x{x}", .{
+        std.log.debug("new kernel thread(TID={}), entry point: 0x{x}, kernel stack top: 0x{x}", .{
             thread_id,
-            entry_point_addr,
-            stack_top.asInt(),
+            entry_point.asInt(),
+            kernel_stack_top.asInt(),
         });
     }
 
@@ -148,30 +150,35 @@ pub fn newUserThread(
 
     var thread: *Thread = thread_cache.alloc() catch return error.out_of_memory;
     thread.id = thread_id;
-    const stack_bottom = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
-    const stack_top = stack_bottom.add(stack_size);
+    const stack_top = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
     thread.kernel_stack_top = mm.physicalToVirtualAddress(stack_top);
+    thread.kernel_state = thread_state_cache.alloc() catch return error.out_of_memory;
 
     thread.purpose = .{
         .general = .{
             .owner_process = owner_process,
-            .user = true,
+            .user = .{
+                .in_userspace = true,
+                .state = thread_state_cache.alloc() catch return error.out_of_memory,
+            },
             .process_list_node = .{},
         },
     };
 
     owner_process.associated_threads.append(&thread.purpose.general.process_list_node);
 
-    arch.setupNewGeneralThread(thread, user_stack_bottom_addr, entry_point_addr);
+    arch.setupNewGeneralThread(thread, .fromInt(user_stack_bottom_addr), .fromInt(entry_point_addr));
     appendRunningThread(thread);
 
     if (config.debug_scheduler) {
-        std.log.debug("new user thread(TID={}), entry point: 0x{x}, stack top: 0x{x}", .{
+        std.log.debug("new user thread(TID={}), entry point: 0x{x}, kernel stack top: 0x{x}", .{
             thread_id,
             entry_point_addr,
-            // stack_top_addr,
+            thread.kernel_stack_top.asInt(),
         });
     }
+
+    std.log.debug("owner: {any}", .{owner_process});
 
     return thread;
 }
@@ -242,4 +249,5 @@ pub fn tick() void {
 /// Initialize the scheduler.
 pub fn init() void {
     thread_cache = slab_allocator.createObjectCache(Thread);
+    thread_state_cache = slab_allocator.createObjectCache(arch.ThreadState);
 }

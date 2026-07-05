@@ -2,12 +2,7 @@ const std = @import("std");
 const kio = @import("../../kio.zig");
 const trap = @import("trap.zig");
 
-comptime {
-    std.debug.assert(@offsetOf(Registers, "pc") == Registers.gpr_count * 8);
-    std.debug.assert(@offsetOf(Registers, "status") == (Registers.gpr_count + 1) * 8);
-}
-
-pub const Registers = extern struct {
+pub const ThreadState = extern struct {
     pub const gpr_count = 32;
 
     gprs: [gpr_count]u64,

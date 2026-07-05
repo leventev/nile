@@ -6,7 +6,7 @@ const mm = @import("../../mem/mm.zig");
 const kio = @import("../../kio.zig");
 const trap = @import("trap.zig");
 const timer = @import("timer.zig");
-pub const Registers = @import("registers.zig").Registers;
+pub const ThreadState = @import("registers.zig").ThreadState;
 const scheduler = @import("../../scheduler.zig");
 const Thread = @import("../../Thread.zig");
 const CSR = @import("csr.zig").CSR;
@@ -31,31 +31,28 @@ const kernel_physical_address = 0x80200000;
 const kernel_virtual_address = 0xffffffffc0200000;
 pub const kernel_virtual_offset = kernel_virtual_address - kernel_physical_address;
 
-pub export var current_trap_stack_bottom: u64 = undefined;
-
-pub fn setupNewGeneralThread(
-    thread: *Thread,
-    user_stack_bottom_addr: ?u64,
-    entry_point_addr: u64,
+fn setupThreadState(
+    thread_state: *ThreadState,
+    stack_top: mm.VirtualAddress,
+    entry_point: mm.VirtualAddress,
+    is_user: bool,
 ) void {
     if (config.debug_scheduler) {
-        thread.registers.gprs = [_]u64{0xAA_BB_CC_DD_AA_BB_CC_DD} ** Registers.gpr_count;
+        thread_state.gprs = [_]u64{0xAA_BB_CC_DD_AA_BB_CC_DD} ** ThreadState.gpr_count;
     } else {
-        thread.registers.gprs = [_]u64{0x00} ** Registers.gpr_count;
+        thread_state.gprs = [_]u64{0x00} ** ThreadState.gpr_count;
     }
 
-    const user = thread.purpose.general.user;
+    thread_state.pc = @intCast(entry_point.asInt());
 
-    thread.registers.pc = @intCast(entry_point_addr);
-
-    thread.registers.status = .{
+    thread_state.status = .{
         .executable_memory_read = true,
         .extra_extension_status = .all_off,
         .float_status = .off,
         .state_dirty = false,
         .supervisor_interrupt_enable = false,
-        .supervisor_previous_interrupt_enable = user,
-        .supervisor_previous_privilege = if (user) .user else .supervisor,
+        .supervisor_previous_interrupt_enable = is_user,
+        .supervisor_previous_privilege = if (is_user) .user else .supervisor,
         .supervisor_user_memory_accessable = true,
         .user_big_endian = false,
         .user_xlen = .x64,
@@ -69,67 +66,64 @@ pub fn setupNewGeneralThread(
         .__reserved7 = 0,
     };
 
-    thread.registers.gprs[Registers.stack_ptr] = if (user)
-        user_stack_bottom_addr.?
-    else
-        thread.kernel_stack_top.asInt() + thread.kernel_stack_size;
+    thread_state.gprs[ThreadState.stack_ptr] = stack_top.asInt();
+    thread_state.gprs[ThreadState.global_data_ptr] = @intFromPtr(&__global_pointer);
+}
 
-    thread.registers.gprs[Registers.global_data_ptr] = @intFromPtr(&__global_pointer);
+pub fn setupNewGeneralThread(
+    thread: *Thread,
+    user_stack_bottom_addr: ?mm.VirtualAddress,
+    entry_point_addr: mm.VirtualAddress,
+) void {
+    const kernel_stack_bottom = thread.kernel_stack_top.add(thread.kernel_stack_size);
+
+    // TODO: maybe separate kernel vs user thread
+    if (thread.purpose.general.user) |*user| {
+        setupThreadState(thread.kernel_state, kernel_stack_bottom, .fromInt(0), false);
+        setupThreadState(user.state, user_stack_bottom_addr.?, entry_point_addr, true);
+    } else {
+        setupThreadState(thread.kernel_state, kernel_stack_bottom, entry_point_addr, false);
+    }
 }
 
 pub fn setupSoftInterruptThread(thread: *Thread) void {
-    if (config.debug_scheduler) {
-        thread.registers.gprs = [_]u64{0xAA_BB_CC_DD_AA_BB_CC_DD} ** Registers.gpr_count;
-    } else {
-        thread.registers.gprs = [_]u64{0x00} ** Registers.gpr_count;
-    }
+    const kernel_stack_bottom = thread.kernel_stack_top.add(thread.kernel_stack_size);
+    const entry_point = mm.VirtualAddress.fromInt(
+        @intFromPtr(thread.purpose.soft_interrupt.callback),
+    );
+    setupThreadState(thread.kernel_state, kernel_stack_bottom, entry_point, false);
 
     // TODO:
-    thread.registers.gprs[1] = @intFromPtr(&scheduler.forceScheduleNextThread);
-    thread.registers.pc = @intFromPtr(thread.purpose.soft_interrupt.callback);
-    thread.registers.status = .{
-        .executable_memory_read = true,
-        .extra_extension_status = .all_off,
-        .float_status = .off,
-        .state_dirty = false,
-        .supervisor_interrupt_enable = false,
-        .supervisor_previous_interrupt_enable = false,
-        .supervisor_previous_privilege = .supervisor,
-        .supervisor_user_memory_accessable = false,
-        .user_big_endian = false,
-        .user_xlen = .x64,
-        .vector_status = .off,
-        .__reserved1 = 0,
-        .__reserved2 = 0,
-        .__reserved3 = 0,
-        .__reserved4 = 0,
-        .__reserved5 = 0,
-        .__reserved6 = 0,
-        .__reserved7 = 0,
-    };
-
-    thread.registers.gprs[Registers.stack_ptr] = thread.kernel_stack_top.asInt();
-    thread.registers.gprs[Registers.global_data_ptr] = @intFromPtr(&__global_pointer);
+    thread.kernel_state.gprs[1] = @intFromPtr(&scheduler.forceScheduleNextThread);
 }
 
 pub fn scheduleNextThread(thread: *Thread) void {
+    const sscratch_value = @intFromPtr(thread.effectiveThreadState());
     if (config.debug_scheduler) {
-        std.log.debug("schedule next thread: {} {any}", .{ thread.id, thread.purpose });
-        thread.registers.printRegs(.debug);
+        std.log.debug("schedule next thread: ID: {} sscratch: 0x{x} purpose: {any}", .{ @intFromEnum(thread.id), sscratch_value, thread.purpose });
+        thread.effectiveThreadState().printRegs(.debug);
     }
-    CSR.sscratch.write(@intFromPtr(&thread.registers));
-    current_trap_stack_bottom = thread.kernel_stack_top.asInt() + thread.kernel_stack_size;
+    CSR.sscratch.write(sscratch_value);
+    trap.current_trap_stack_bottom = thread.kernel_stack_top.asInt() + thread.kernel_stack_size;
     timer.resetTimer();
 }
 
 extern fn forceSchedule() noreturn;
 
 pub fn forceScheduleNextThread(thread: *Thread) noreturn {
+    const sscratch_value = @intFromPtr(
+        switch (thread.purpose) {
+            .soft_interrupt => thread.kernel_state,
+            .general => |general| if (general.user) |user| user.state else thread.kernel_state,
+        },
+    );
+
     if (config.debug_scheduler) {
         std.log.debug("force schedule next thread: {} {any}", .{ thread.id, thread.purpose });
-        thread.registers.printRegs(.debug);
+        thread.kernel_state.printRegs(.debug);
     }
-    CSR.sscratch.write(@intFromPtr(&thread.registers));
+
+    CSR.sscratch.write(sscratch_value);
     timer.resetTimer();
     forceSchedule();
 }
@@ -142,7 +136,7 @@ fn sbiWriteBytes(bytes: []const u8) ?usize {
     return bytes.len;
 }
 
-var init_scratch_registers: Registers = undefined;
+var init_scratch_registers: ThreadState = undefined;
 
 export fn initRiscv64(
     hart_id: usize,

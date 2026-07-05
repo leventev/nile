@@ -8,7 +8,7 @@ const registers = @import("registers.zig");
 const syscalls = @import("syscalls.zig");
 const plic = @import("../../drivers/int_controller/plic.zig");
 
-const Registers = registers.Registers;
+const ThreadState = registers.ThreadState;
 
 extern fn trapHandlerSupervisor() void;
 
@@ -187,8 +187,10 @@ pub fn enableInterrupts() void {
     CSR.sstatus.setBits(1 << @bitOffsetOf(SStatus, "supervisor_interrupt_enable"));
 }
 
-pub fn disableInterrupts() void {
-    CSR.sstatus.clearBits(1 << @bitOffsetOf(SStatus, "supervisor_interrupt_enable"));
+pub fn disableInterrupts() bool {
+    const bit = 1 << @bitOffsetOf(SStatus, "supervisor_interrupt_enable");
+    const bits = CSR.sstatus.readAndClearBits(bit);
+    return (bits & bit) > 0;
 }
 
 pub fn enableInterrupt(id: usize) void {
@@ -206,104 +208,111 @@ pub fn clearPendingInterrupt(id: usize) void {
     CSR.sip.clearBits(std.math.shl(u64, 1, id));
 }
 
-fn genericExceptionHandler(code: ExceptionCode, tval: u64, regs: *Registers) void {
-    regs.printGPRs(.err);
-    std.log.err("PC=0x{x}", .{regs.pc});
+fn genericExceptionHandler(code: ExceptionCode, tval: u64, state: *ThreadState) void {
+    state.printGPRs(.err);
+    std.log.err("PC=0x{x}", .{state.pc});
     std.log.err("Trap value: 0x{x}", .{tval});
     @panic(@tagName(code));
 }
 
-fn handleException(code: ExceptionCode, tval: u64, regs: *Registers) void {
+fn handleException(code: ExceptionCode, tval: u64, state: *ThreadState) void {
     switch (code) {
         .load_page_fault, .instruction_page_fault, .store_or_amo_page_fault => {
-            regs.printGPRs(.err);
-            std.log.err("sstatus={}", .{regs.status});
-            std.log.err("pc=0x{x}", .{regs.pc});
+            state.printGPRs(.err);
+            std.log.err("sstatus={}", .{state.status});
+            std.log.err("pc=0x{x}", .{state.pc});
             std.log.err("Faulting address: 0x{x}", .{tval});
             @panic("Page fault");
         },
         .ecall_u_mode => {
-            syscalls.dispatchSyscall(regs);
+            syscalls.dispatchSyscall(state);
         },
         .ecall_s_mode => {
-            regs.printGPRs(.err);
-            std.log.err("sstatus={}", .{regs.status});
-            std.log.err("pc=0x{x}", .{regs.pc});
+            state.printGPRs(.err);
+            std.log.err("sstatus={}", .{state.status});
+            std.log.err("pc=0x{x}", .{state.pc});
             std.log.err("Trap value: 0x{x}", .{tval});
             @panic("Environment call from S mode");
         },
         .ecall_m_mode => {
-            regs.printGPRs(.err);
-            std.log.err("sstatus={}", .{regs.status});
-            std.log.err("pc=0x{x}", .{regs.pc});
+            state.printGPRs(.err);
+            std.log.err("sstatus={}", .{state.status});
+            std.log.err("pc=0x{x}", .{state.pc});
             std.log.err("Trap value: 0x{x}", .{tval});
             @panic("Environment call from M mode");
         },
-        else => genericExceptionHandler(code, tval, regs),
+        else => genericExceptionHandler(code, tval, state),
     }
 }
 
-fn handleInterrupt(
-    code: InterruptCode,
-    tval: u64,
-    regs: *Registers,
-) void {
+var syscall_in_progress = false;
+
+fn handleInterrupt(code: InterruptCode, tval: u64, state: *ThreadState) void {
     _ = tval;
     switch (code) {
         .supervisor_software => {
-            regs.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{regs.pc});
+            state.printGPRs(.err);
+            std.log.err("PC=0x{x}", .{state.pc});
             @panic("Supervisor software interrupt");
         },
         .machine_software => {
-            regs.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{regs.pc});
+            state.printGPRs(.err);
+            std.log.err("PC=0x{x}", .{state.pc});
             @panic("Machine software interrupt");
         },
         .supervisor_timer => {
             timer.tick();
         },
         .machine_timer => {
-            regs.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{regs.pc});
+            state.printGPRs(.err);
+            std.log.err("PC=0x{x}", .{state.pc});
             @panic("Machine timer interrupt");
         },
         .supervisor_external => {
+            if (syscall_in_progress) @panic("syscall received while in a syscall handler");
+            syscall_in_progress = true;
             // regs.printGPRs(.err);
             // std.log.err("PC=0x{x}", .{regs.pc});
             // @panic("Supervisor external interrupt");
             plic.handleInterrupt();
+            syscall_in_progress = false;
         },
         .machine_external => {
-            regs.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{regs.pc});
+            state.printGPRs(.err);
+            std.log.err("PC=0x{x}", .{state.pc});
             @panic("Machine external interrupt");
         },
         .counter_overflow => {
-            regs.printGPRs(.err);
-            std.log.err("PC=0x{x}", .{regs.pc});
+            state.printGPRs(.err);
+            std.log.err("PC=0x{x}", .{state.pc});
             @panic("Counter overflow interrupt");
         },
     }
 }
 
-export fn handleTrap(
-    cause: TrapCause,
-    tval: u64,
-    regs: *Registers,
-) void {
+export fn handleTrap(cause: TrapCause, tval: u64, state: *ThreadState) void {
     if (cause.asynchronous) {
-        handleInterrupt(cause.interrupt(), tval, regs);
+        handleInterrupt(cause.interrupt(), tval, state);
     } else {
-        handleException(cause.exception(), tval, regs);
+        handleException(cause.exception(), tval, state);
     }
 }
+
+// // TODO: REPLACE THIS
+pub const trap_stack_size = 4 * 4096;
+pub var trap_stack: [trap_stack_size]u8 align(16) = undefined;
+pub var trap_regs: ThreadState = undefined;
+
+pub export var current_trap_stack_bottom: u64 = undefined;
 
 pub fn init() void {
     const stvec = TrapVectorBaseAddr.make(
         @intFromPtr(&trapHandlerSupervisor),
         TrapVectorBaseAddr.Mode.direct,
     );
+
+    CSR.sscratch.write(@intFromPtr(&trap_regs));
+    current_trap_stack_bottom = @intFromPtr(&trap_stack) + trap_stack_size;
 
     CSR.stvec.write(@bitCast(stvec));
 }

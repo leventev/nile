@@ -96,9 +96,11 @@ pub fn kernel_log(
     comptime format: []const u8,
     args: anytype,
 ) void {
+    const ints_enabled = arch.disableInterrupts();
+    defer if (ints_enabled) arch.enableInterrupts();
     lock.lock();
+    defer lock.unlock();
     printLogPreamble(scope, level) catch unreachable;
     kernel_writer.print(format, args) catch unreachable;
     kernel_writer.writeByte('\n') catch unreachable;
-    lock.unlock();
 }

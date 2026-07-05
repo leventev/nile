@@ -163,6 +163,12 @@ fn sentinel_thread() void {
     }
 }
 
+var empty_mount_table: vfs.MountTable = .{
+    .lock = .{ .locked = 0 },
+    .mount_count = 0,
+    .mounts = null,
+};
+
 pub fn init() *Thread {
     process_cache = slab_allocator.createObjectCache(Process);
 
@@ -173,6 +179,7 @@ pub fn init() *Thread {
 
     const sentinel_process = process_cache.alloc() catch unreachable;
     sentinel_process.id = sentinel_process_id;
+    sentinel_process.mount_table = &empty_mount_table;
 
     running_processes.append(&sentinel_process.list_node);
 

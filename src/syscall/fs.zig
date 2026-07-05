@@ -67,6 +67,8 @@ pub fn read(
     buff_ptr: mm.UserAddress,
     buff_size: usize,
 ) SyscallError!usize {
+    std.log.debug("syscall handler read", .{});
+
     if (buff_size == 0)
         return 0;
 
@@ -76,15 +78,20 @@ pub fn read(
     if (!buff_ptr.isValid() or !buff_end_ptr.isValid())
         return SyscallError.invalid_memory_address;
 
+    std.log.debug("syscall handler read 2", .{});
+
     const buff = buff_ptr.asPtr([*]u8)[0..buff_size];
 
     const current_process = processes.currentProcess();
 
+    std.log.debug("syscall handler read 3", .{});
     // TODO:
     std.debug.assert(fd < current_process.file_descriptor_table.len);
 
     const open_file = current_process.file_descriptor_table[fd] orelse
         return SyscallError.invalid_file_descriptor;
+
+    std.log.debug("syscall handler read 4", .{});
 
     return open_file.file.read(buff, open_file.offset) catch @panic("TODO");
 }

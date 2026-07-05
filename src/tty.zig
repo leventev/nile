@@ -95,11 +95,22 @@ fn ttyDevfsRead(internal_data: *anyopaque, buff: []u8, offset: usize) usize {
         return 0;
     }
 
+    std.log.debug("tty read 1", .{});
+
     const tty: *TTYDevice = @ptrCast(@alignCast(internal_data));
     const read_size = @min(buff.len, tty.input_buffer_written);
 
+    std.log.debug("tty read 2", .{});
+    const CSR = @import("arch/riscv64/csr.zig").CSR;
+    const trap = @import("arch/riscv64/trap.zig");
+
+    CSR.sscratch.write(@intFromPtr(&trap.trap_regs));
+    std.log.debug("tty read 2.5", .{});
+
     // block
     while (tty.input_buffer_read_index == tty.input_buffer_write_index) {}
+
+    std.log.debug("tty read 3", .{});
 
     var buff_idx: usize = 0;
     while (tty.input_buffer_read_index != tty.input_buffer_write_index) {
@@ -109,6 +120,8 @@ fn ttyDevfsRead(internal_data: *anyopaque, buff: []u8, offset: usize) usize {
         buff_idx += 1;
         tty.input_buffer_read_index +%= 1;
     }
+
+    std.log.debug("tty read 4", .{});
 
     std.debug.assert(buff_idx == read_size);
 

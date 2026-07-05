@@ -29,15 +29,19 @@ pub const Framebuffer = struct {
         height: usize,
         color: PixelRGBA,
     ) void {
-        std.debug.assert(start_x + width <= self.active_display.width);
-        std.debug.assert(start_y + height <= self.active_display.height);
+        if (start_x >= self.active_display.width) return;
+        if (start_y >= self.active_display.height) return;
+
+        const actual_width = @min(self.active_display.width - start_x, width);
+        const actual_height = @min(self.active_display.height - start_y, height);
+
         // TODO: format
 
         const pixels: [*]PixelRGBA = @ptrCast(@alignCast(self.active_display.memory));
         var y = start_y;
-        while (y < start_y + height) : (y += 1) {
+        while (y < start_y + actual_height) : (y += 1) {
             var x = start_x;
-            while (x < start_x + width) : (x += 1) {
+            while (x < start_x + actual_width) : (x += 1) {
                 pixels[y * self.active_display.width + x] = color;
             }
         }

@@ -28,22 +28,22 @@ trapHandlerSupervisor:
         .set i, i+1
     .endr
 
-    # since t1 is already saved we can move *Registers into it
-    mv t1, t6
+    # since a2 is already saved we can move *Registers into it
+    mv a2, t6
     # move the original t6 value back into t6
     csrr t6, sscratch
-    writeGPR t1, 31
+    writeGPR a2, 31
 
     # move *Registers back into sscratch
-    csrw sscratch, t1
+    csrw sscratch, a2
 
     # save exception PC into *Registers
     csrr t0, sepc 
-    sd t0, (32 * REGISTER_BYTES)(t1)
+    sd t0, (32 * REGISTER_BYTES)(a2)
 
     # save previous sstatus
     csrr t0, sstatus
-    sd t0, (33 * REGISTER_BYTES)(t1)
+    sd t0, (33 * REGISTER_BYTES)(a2)
 
     # set trap stack
     ld sp, current_trap_stack_bottom
@@ -51,8 +51,7 @@ trapHandlerSupervisor:
     # pass scause and stval to zig trap handler
     csrr a0, scause
     csrr a1, stval
-    # pass *Registers to zig trap handler
-    mv a2, t1
+    # *Registers is already in a2
 
     call handleTrap
 

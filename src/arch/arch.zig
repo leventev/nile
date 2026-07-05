@@ -18,8 +18,8 @@ pub const disableInterrupts = switch (target) {
     Arch.riscv64 => riscv64.disableInterrupts,
 };
 
-pub const Registers = switch (target) {
-    Arch.riscv64 => riscv64.Registers,
+pub const ThreadState = switch (target) {
+    Arch.riscv64 => riscv64.ThreadState,
 };
 
 pub const scheduleNextThread = switch (target) {

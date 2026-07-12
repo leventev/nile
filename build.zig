@@ -26,11 +26,35 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    const shell_exe = b.addExecutable(.{
+        .name = "shell",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("userland/shell/src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .code_model = .medany,
+        }),
+    });
+
+    const sys = b.dependency("sys", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    shell_exe.root_module.addImport("sys", sys.module("sys"));
+
     exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/start.s"));
     exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/schedule.s"));
     exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/lock.s"));
     exe.setLinkerScript(b.path("linker.ld"));
 
+    b.getInstallStep().dependOn(
+        &b.addInstallArtifact(shell_exe, .{
+            .dest_dir = .{
+                .override = .{ .custom = "../src" },
+            },
+        }).step,
+    );
     b.installArtifact(exe);
 
     const tests = b.addTest(.{

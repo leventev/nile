@@ -61,6 +61,31 @@ pub const SoftInterruptHandler = struct {
 pub fn effectiveThreadState(self: *Thread) *arch.ThreadState {
     return switch (self.purpose) {
         .soft_interrupt => self.kernel_state,
-        .general => |general| if (general.user) |user| user.state else self.kernel_state,
+        .general => |general| if (general.user) |user|
+            if (user.in_userspace)
+                user.state
+            else
+                self.kernel_state
+        else
+            self.kernel_state,
+    };
+}
+
+// TODO:
+const trap = @import("arch/riscv64/trap.zig");
+pub fn effectiveThreadStackBottom(self: *Thread) mm.VirtualAddress {
+    const kernel_stack_bottom = self.kernel_stack_top.add(self.kernel_stack_size);
+    const per_cpu_stack_top = mm.VirtualAddress.fromInt(@intFromPtr(&trap.trap_stack));
+    const per_cpu_stack_bottom = per_cpu_stack_top.add(trap.trap_stack_size);
+
+    return switch (self.purpose) {
+        .soft_interrupt => per_cpu_stack_bottom,
+        .general => |general| if (general.user) |user|
+            if (user.in_userspace)
+                kernel_stack_bottom
+            else
+                per_cpu_stack_bottom
+        else
+            per_cpu_stack_bottom,
     };
 }

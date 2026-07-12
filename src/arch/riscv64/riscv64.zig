@@ -39,6 +39,7 @@ fn setupThreadState(
 ) void {
     if (config.debug_scheduler) {
         thread_state.gprs = [_]u64{0xAA_BB_CC_DD_AA_BB_CC_DD} ** ThreadState.gpr_count;
+        thread_state.gprs[0] = 0;
     } else {
         thread_state.gprs = [_]u64{0x00} ** ThreadState.gpr_count;
     }
@@ -98,33 +99,28 @@ pub fn setupSoftInterruptThread(thread: *Thread) void {
 }
 
 pub fn scheduleNextThread(thread: *Thread) void {
-    const sscratch_value = @intFromPtr(thread.effectiveThreadState());
+    const thread_state = thread.effectiveThreadState();
+    const sscratch_value = @intFromPtr(thread_state);
+    const trap_stack_bottom = thread.effectiveThreadStackBottom();
+
     if (config.debug_scheduler) {
-        std.log.debug("schedule next thread: ID: {} sscratch: 0x{x} purpose: {any}", .{ @intFromEnum(thread.id), sscratch_value, thread.purpose });
-        thread.effectiveThreadState().printRegs(.debug);
+        std.log.debug("schedule next thread: ID: {} sscratch: 0x{x} trap stack bottom: 0x{x} ", .{
+            @intFromEnum(thread.id),
+            sscratch_value,
+            trap_stack_bottom,
+        });
+        thread_state.printRegs(.debug);
     }
+
     CSR.sscratch.write(sscratch_value);
-    trap.current_trap_stack_bottom = thread.kernel_stack_top.asInt() + thread.kernel_stack_size;
+    trap.current_trap_stack_bottom = trap_stack_bottom.asInt();
     timer.resetTimer();
 }
 
 extern fn forceSchedule() noreturn;
 
 pub fn forceScheduleNextThread(thread: *Thread) noreturn {
-    const sscratch_value = @intFromPtr(
-        switch (thread.purpose) {
-            .soft_interrupt => thread.kernel_state,
-            .general => |general| if (general.user) |user| user.state else thread.kernel_state,
-        },
-    );
-
-    if (config.debug_scheduler) {
-        std.log.debug("force schedule next thread: {} {any}", .{ thread.id, thread.purpose });
-        thread.kernel_state.printRegs(.debug);
-    }
-
-    CSR.sscratch.write(sscratch_value);
-    timer.resetTimer();
+    scheduleNextThread(thread);
     forceSchedule();
 }
 

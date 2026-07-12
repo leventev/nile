@@ -24,11 +24,8 @@ pub fn read(args: [7]u64) !u64 {
     const buffer: u64 = args[1];
     const buffer_size = args[2];
 
-    std.log.debug("riscv64 read", .{});
-
     const res = syscall_fs.read(fd, .fromInt(buffer), buffer_size);
 
-    std.log.debug("riscv64 read 2: {any}", .{res});
     return res;
 }
 

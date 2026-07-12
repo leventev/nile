@@ -18,7 +18,7 @@
 .global current_trap_stack_bottom
 .align 4
 trapHandlerSupervisor:
-    # move *Registers from sscratch into t6 and t6 into sscratch
+    # move *ThreadState from sscratch into t6 and t6 into sscratch
     csrrw t6, sscratch, t6
 
     # save GPRs
@@ -28,34 +28,35 @@ trapHandlerSupervisor:
         .set i, i+1
     .endr
 
-    # since a2 is already saved we can move *Registers into it
-    mv a2, t6
+    # since a0 is already saved we can move *ThreadState into it
+    mv a0, t6
+
     # move the original t6 value back into t6
     csrr t6, sscratch
-    writeGPR a2, 31
+    writeGPR a0, 31
 
-    # move *Registers back into sscratch
-    csrw sscratch, a2
+    # move *ThreadState back into sscratch
+    csrw sscratch, a0
 
-    # save exception PC into *Registers
+    # save exception PC into *ThreadState
     csrr t0, sepc 
-    sd t0, (32 * REGISTER_BYTES)(a2)
+    sd t0, (32 * REGISTER_BYTES)(a0)
 
     # save previous sstatus
     csrr t0, sstatus
-    sd t0, (33 * REGISTER_BYTES)(a2)
+    sd t0, (33 * REGISTER_BYTES)(a0)
 
     # set trap stack
     ld sp, current_trap_stack_bottom
 
+    # *ThreadState is already in a0
     # pass scause and stval to zig trap handler
-    csrr a0, scause
-    csrr a1, stval
-    # *Registers is already in a2
+    csrr a1, scause
+    csrr a2, stval
 
     call handleTrap
 
-    # load *Registers into t6
+    # load *ThreadState into t6
     csrr t6, sscratch
 
     ld t0, (32 * REGISTER_BYTES)(t6)
@@ -79,9 +80,9 @@ trapHandlerSupervisor:
 .global forceSchedule
 .align 4
 forceSchedule:
-    # the next thread's *Registers is already written to sscratch
+    # the next thread's *ThreadState is already written to sscratch
 
-    # write *Registers to t6
+    # write *ThreadState to t6
     csrr t6, sscratch
 
     ld t0, (32 * REGISTER_BYTES)(t6)

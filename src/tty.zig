@@ -27,12 +27,12 @@ pub const TTYDevice = struct {
         for (chars) |ch| {
             const idx = self.input_buffer_write_index % self.input_buffer.len;
             switch (ch) {
-                0x8 => {
-                    if (self.input_buffer_written == 0) continue;
-                    self.input_buffer[idx - 1] = ' ';
-                    self.input_buffer_write_index -%= 1;
-                    self.input_buffer_written -= 1;
-                },
+                // 0x8 => {
+                //     if (self.input_buffer_written == 0) continue;
+                //     self.input_buffer[idx - 1] = ' ';
+                //     self.input_buffer_write_index -%= 1;
+                //     self.input_buffer_written -= 1;
+                // },
                 else => {
                     self.input_buffer[idx] = ch;
                     self.input_buffer_write_index +%= 1;
@@ -95,22 +95,12 @@ fn ttyDevfsRead(internal_data: *anyopaque, buff: []u8, offset: usize) usize {
         return 0;
     }
 
-    std.log.debug("tty read 1", .{});
-
     const tty: *TTYDevice = @ptrCast(@alignCast(internal_data));
-    const read_size = @min(buff.len, tty.input_buffer_written);
-
-    std.log.debug("tty read 2", .{});
-    const CSR = @import("arch/riscv64/csr.zig").CSR;
-    const trap = @import("arch/riscv64/trap.zig");
-
-    CSR.sscratch.write(@intFromPtr(&trap.trap_regs));
-    std.log.debug("tty read 2.5", .{});
 
     // block
-    while (tty.input_buffer_read_index == tty.input_buffer_write_index) {}
+    while (tty.input_buffer_written == 0) {}
 
-    std.log.debug("tty read 3", .{});
+    const read_size = @min(buff.len, tty.input_buffer_written);
 
     var buff_idx: usize = 0;
     while (tty.input_buffer_read_index != tty.input_buffer_write_index) {
@@ -121,10 +111,7 @@ fn ttyDevfsRead(internal_data: *anyopaque, buff: []u8, offset: usize) usize {
         tty.input_buffer_read_index +%= 1;
     }
 
-    std.log.debug("tty read 4", .{});
-
     std.debug.assert(buff_idx == read_size);
-
     tty.input_buffer_written -= read_size;
 
     return read_size;

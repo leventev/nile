@@ -290,7 +290,7 @@ fn handleInterrupt(code: InterruptCode, tval: u64, state: *ThreadState) void {
     }
 }
 
-export fn handleTrap(cause: TrapCause, tval: u64, state: *ThreadState) void {
+export fn handleTrap(state: *ThreadState, cause: TrapCause, tval: u64) void {
     if (cause.asynchronous) {
         handleInterrupt(cause.interrupt(), tval, state);
     } else {
@@ -299,8 +299,10 @@ export fn handleTrap(cause: TrapCause, tval: u64, state: *ThreadState) void {
 }
 
 // // TODO: REPLACE THIS
-pub const trap_stack_size = 4 * 4096;
+// AND PAGE GUARD !!!!!!!!!!!!!!!!!!!!!!!!!
+pub const trap_stack_size = 12 * 4096;
 pub var trap_stack: [trap_stack_size]u8 align(16) = undefined;
+
 pub var trap_regs: ThreadState = undefined;
 
 pub export var current_trap_stack_bottom: u64 = undefined;

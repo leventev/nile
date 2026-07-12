@@ -84,6 +84,7 @@ fn keyToChar(ev: input.KeyEvent) ?u8 {
         .key_dot => '.',
         .key_comma => ',',
         .key_backspace => 0x8,
+        .key_enter => '\n',
         else => {
             log.warn("ignored key: {}", .{ev.key});
             return null;

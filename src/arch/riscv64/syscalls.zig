@@ -27,28 +27,23 @@ const syscall_table: []const Syscall = &[_]Syscall{
 pub fn dispatchSyscall(user_state: *ThreadState) void {
     // interrupts are enabled during syscalls
     // the userspace state of the thread is stored in the user ThreadState
-    // the kernel ThreadState is set to sscratch, if an interrupt occurs during a syscall
-    // the current thread state is saved to it.
+    // the address of the kernel ThreadState is set to sscratch, if an interrupt occurs
+    // during a syscall the current thread state is saved to it.
     // while in userspace trap.current_trap_stack_bottom contains the kernel stack of the thread
     // while in a syscall handler trap.current_trap_stack_bottom contains the per-core stack
 
     // TODO: the current implementation is messy. clean it up
 
     const current_thread = scheduler.getCurrentThread();
-    current_thread.purpose.general.user.?.in_userspace = true;
+    const current_thread_user = &current_thread.purpose.general.user.?;
+    current_thread_user.in_userspace = false;
 
     const core_trap_stack_bottom = @intFromPtr(&trap.trap_stack) + trap.trap_stack_size;
-    std.log.debug("syscall regs: 0x{x}", .{@intFromPtr(user_state)});
-    std.log.debug("syscall {}", .{user_state.gprs[10]});
 
-    trap.current_trap_stack_bottom = core_trap_stack_bottom;
     CSR.sscratch.write(@intFromPtr(current_thread.kernel_state));
-    std.log.debug("kernel_state: 0x{x} trap bottom: 0x{x}", .{ @intFromPtr(current_thread.kernel_state), core_trap_stack_bottom });
+    trap.current_trap_stack_bottom = core_trap_stack_bottom;
 
-    // std.log.debug("trap sscatch 0x{x} old sccratch: 0x{x}", .{ @intFromPtr(&trap.trap_regs), old_sscratch });
-    trap.disableInterrupt(@intFromEnum(trap.InterruptCode.supervisor_software));
     trap.enableInterrupts();
-    std.log.debug("enable int", .{});
 
     // a0 starts from index 10 but TODO: make enum for this
     const syscall_num = user_state.gprs[10];
@@ -66,7 +61,6 @@ pub fn dispatchSyscall(user_state: *ThreadState) void {
     if (syscall_num >= syscall_table.len) return;
 
     const syscall = syscall_table[syscall_num];
-    std.log.debug("syscall {s}", .{syscall.name});
 
     const result: u64 = syscall.callback(args) catch |err|
         @bitCast(-@as(i64, errors.errorToInt(err)));
@@ -77,19 +71,20 @@ pub fn dispatchSyscall(user_state: *ThreadState) void {
 
     // ECALL writes its own address into sepc, not the next instruction's
     // so we have to advance the PC ourselves
-
     user_state.pc += 4;
-    current_thread.purpose.general.user.?.in_userspace = false;
 
-    std.log.debug("disable int", .{});
+    current_thread_user.in_userspace = true;
+
     _ = trap.disableInterrupts();
 
+    // if there was a timer interrupt or the syscall was exit() then scheduleNextThread
+    // has already been called and that set sscratch and current_trap_stack_bottom,
+    // but in some cases the wrong values are used (e. g. the next thread is the syscall caller,
+    // since at the time of the interrupt in_userspace was false the kernel ThreadState
+    // and stack are set instead of the user's)
+
     const next_thread = scheduler.getCurrentThread();
-    const kernel_stack_bottom = next_thread.kernel_stack_top.add(next_thread.kernel_stack_size).asInt();
-    trap.current_trap_stack_bottom = switch (next_thread.purpose) {
-        .soft_interrupt => kernel_stack_bottom,
-        .general => |general| if (general.user) |_| core_trap_stack_bottom else kernel_stack_bottom,
-    };
+    trap.current_trap_stack_bottom = next_thread.effectiveThreadStackBottom().asInt();
 
     CSR.sscratch.write(@intFromPtr(next_thread.effectiveThreadState()));
 }

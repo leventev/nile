@@ -27,7 +27,7 @@ pub fn build(b: *std.Build) void {
     });
 
     exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/start.s"));
-    exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/trap.s"));
+    exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/schedule.s"));
     exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/lock.s"));
     exe.setLinkerScript(b.path("linker.ld"));
 

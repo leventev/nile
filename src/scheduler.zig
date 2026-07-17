@@ -178,8 +178,6 @@ pub fn newUserThread(
         });
     }
 
-    std.log.debug("owner: {any}", .{owner_process});
-
     return thread;
 }
 

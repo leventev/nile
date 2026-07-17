@@ -10,6 +10,7 @@ pub var skeleton: vfs.FileSystemSkeleton = .{
     .name = "devfs",
     .flags = .{
         .no_device = true,
+        .has_page_cache = false,
     },
     .init = init,
     .read = read,
@@ -72,11 +73,7 @@ pub fn create(
 
         const dir_entry_ptr = current_dir.lookup(path_element);
         if (is_last_component) {
-            try current_dir.create(
-                path_element,
-                .fromInt(inode),
-                .{ .regular = .{ .data = &.{} } },
-            );
+            try current_dir.create(path_element, .fromInt(inode), .regular);
         } else {
             const dir_entry = dir_entry_ptr.* orelse return error.InvalidPath;
             switch (dir_entry.data) {

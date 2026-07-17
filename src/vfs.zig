@@ -2,6 +2,7 @@ const std = @import("std");
 const arch = @import("arch/arch.zig");
 const slab_allocator = @import("mem/slab_allocator.zig");
 const Path = @import("Path.zig");
+const PageCache = @import("PageCache.zig");
 
 pub const Inode = enum(u64) {
     _,
@@ -28,9 +29,19 @@ pub const FileSystemSkeleton = struct {
     /// Called when the file system is created
     init: *const fn (gpa: std.mem.Allocator, fs: *FileSystem) FileSystemError!?*anyopaque,
 
-    read: *const fn (internal_data: ?*anyopaque, inode: Inode, buff: []u8, offset: usize) FileSystemError!usize,
+    read: ?*const fn (
+        internal_data: ?*anyopaque,
+        inode: Inode,
+        buff: []u8,
+        offset: usize,
+    ) FileSystemError!usize,
 
-    write: *const fn (internal_data: ?*anyopaque, inode: Inode, buff: []u8, offset: usize) FileSystemError!usize,
+    write: ?*const fn (
+        internal_data: ?*anyopaque,
+        inode: Inode,
+        buff: []u8,
+        offset: usize,
+    ) FileSystemError!usize,
 
     /// File system flags
     flags: Flags,
@@ -44,8 +55,11 @@ pub const FileSystemSkeleton = struct {
         read_only_mount: bool = false,
 
         /// File system has no block device backing it and lives entirely in
-        /// the file system cache
+        /// the file system cache.
         no_device: bool = false,
+
+        /// Whether the device uses the page cache or not.
+        has_page_cache: bool = true,
     };
 };
 
@@ -175,8 +189,8 @@ const FileSystemCache = struct {
     };
 
     pub const Regular = struct {
-        // TODO: temporary
-        data: []const u8,
+        page_cache: PageCache,
+        size: usize,
     };
 
     // TODO: ERRORS
@@ -194,15 +208,35 @@ const FileSystemCache = struct {
             return dent_ptr;
         }
 
-        pub fn create(self: *Directory, name: []const u8, inode: Inode, file_data: FileData) !void {
+        pub fn create(
+            self: *Directory,
+            name: []const u8,
+            inode: Inode,
+            file_type: FileType,
+        ) !void {
             const dent_ptr = self.lookup(name);
 
             if (dent_ptr.* != null) return error.AlreadyExists;
 
             var new_entry = try DirectoryEntry.cache.alloc();
+            errdefer DirectoryEntry.cache.free(new_entry);
+
             new_entry.name = name;
             new_entry.inode = inode;
-            new_entry.data = file_data;
+            _ = switch (file_type) {
+                .directory => {
+                    new_entry.data = .{
+                        .directory = Directory{
+                            .entry_count = 0,
+                            .entries = null,
+                        },
+                    };
+                },
+                .regular => {
+                    new_entry.data = .{ .regular = undefined };
+                    try PageCache.setupNewPageCache(&new_entry.data.regular.page_cache);
+                },
+            };
             new_entry.next = null;
 
             dent_ptr.* = new_entry;
@@ -388,6 +422,82 @@ pub fn mountFileSystem(
     fs.mount_count += 1;
 }
 
+pub fn genericReadRegular(
+    fs: *FileSystem,
+    directory_entry: *FileSystemCache.DirectoryEntry,
+    buff: []u8,
+    offset: usize,
+) !usize {
+    _ = fs;
+
+    const regular = &directory_entry.data.regular;
+    std.debug.assert(offset <= regular.size);
+
+    // TODO: support no_device == false too
+
+    const read_size = @min(buff.len, regular.size - offset);
+    if (read_size == 0) return 0;
+
+    const last_byte_idx = offset + read_size - 1;
+
+    const start_page_idx = offset / arch.page_size;
+    const end_page_idx = last_byte_idx / arch.page_size;
+
+    var buff_off: usize = 0;
+    var page_idx = start_page_idx;
+    while (page_idx <= end_page_idx) : (page_idx += 1) {
+        const page_ptr = regular.page_cache.getPage(page_idx, false) catch unreachable;
+        const file_content_ptr: [*]const u8 = @ptrCast(page_ptr);
+        const file_content: []const u8 = file_content_ptr[0..arch.page_size];
+
+        @memcpy(buff[buff_off .. buff_off + file_content.len], file_content);
+        buff_off += file_content.len;
+    }
+
+    return read_size;
+}
+
+pub fn genericWriteRegular(
+    fs: *FileSystem,
+    directory_entry: *FileSystemCache.DirectoryEntry,
+    buff: []u8,
+    offset: usize,
+) !usize {
+    _ = fs;
+
+    const regular = &directory_entry.data.regular;
+    std.debug.assert(offset <= regular.size);
+
+    // TODO: support no_device == false too
+
+    regular.page_cache.spinlock.lock();
+    defer regular.page_cache.spinlock.unlock();
+
+    const last_byte_idx = offset + buff.len - 1;
+
+    const start_page_idx = offset / arch.page_size;
+    const end_page_idx = last_byte_idx / arch.page_size;
+
+    while (end_page_idx >= regular.page_cache.totalPageCount()) {
+        try regular.page_cache.expand();
+    }
+
+    var buff_off: usize = 0;
+    var page_idx = start_page_idx;
+    while (page_idx <= end_page_idx) : (page_idx += 1) {
+        const page_ptr = try regular.page_cache.getPage(page_idx, true);
+        const file_content_ptr: [*]u8 = @ptrCast(page_ptr);
+        const file_content: []u8 = file_content_ptr[0..arch.page_size];
+
+        @memcpy(file_content, buff[buff_off .. buff_off + file_content.len]);
+        buff_off += file_content.len;
+    }
+
+    regular.size = @max(regular.size, offset + buff.len);
+
+    return buff.len;
+}
+
 pub const OpenFile = struct {
     mounted_fs_id: FileSystem.Id,
     dir_ent: *FileSystemCache.DirectoryEntry,
@@ -398,12 +508,15 @@ pub const OpenFile = struct {
 
         switch (self.dir_ent.data) {
             .directory => @panic("TODO: directory read"),
-            .regular => return fs.skeleton.read(
-                fs.internal_data,
-                self.dir_ent.inode,
-                buff,
-                offset,
-            ),
+            .regular => {
+                if (fs.skeleton.read) |read_fn|
+                    return if (fs.skeleton.flags.has_page_cache)
+                        genericReadRegular(fs, self.dir_ent, buff, offset)
+                    else
+                        read_fn(fs.internal_data, self.dir_ent.inode, buff, offset)
+                else
+                    return genericReadRegular(fs, self.dir_ent, buff, offset);
+            },
         }
     }
 
@@ -413,12 +526,15 @@ pub const OpenFile = struct {
 
         switch (self.dir_ent.data) {
             .directory => @panic("TODO: directory write"),
-            .regular => return fs.skeleton.write(
-                fs.internal_data,
-                self.dir_ent.inode,
-                buff,
-                offset,
-            ),
+            .regular => {
+                if (fs.skeleton.write) |write_fn|
+                    return if (fs.skeleton.flags.has_page_cache)
+                        return genericWriteRegular(fs, self.dir_ent, buff, offset)
+                    else
+                        write_fn(fs.internal_data, self.dir_ent.inode, buff, offset)
+                else
+                    return genericWriteRegular(fs, self.dir_ent, buff, offset);
+            },
         }
     }
 };
@@ -484,11 +600,7 @@ pub fn createDirectory(mount_table: *MountTable, inode: Inode, path_str: []const
 
     try walkUntilLastComponent(mount_table, path_str, &mount, &dir, &last_component);
 
-    try dir.create(
-        last_component,
-        inode,
-        .{ .directory = .{ .entry_count = 0, .entries = null } },
-    );
+    try dir.create(last_component, inode, .directory);
 }
 
 // TODO: CONTENT
@@ -504,7 +616,8 @@ pub fn createRegularFile(
 
     try walkUntilLastComponent(mount_table, path_str, &mount, &dir, &last_component);
 
-    try dir.create(last_component, inode, .{ .regular = .{ .data = content } });
+    _ = content;
+    try dir.create(last_component, inode, .regular);
 }
 
 // TODO: ERRORS
@@ -546,7 +659,7 @@ pub fn dumpDirectory(dir: *FileSystemCache.Directory, depth: usize) void {
             .regular => |child_file| std.log.info("{s}{s} [{} bytes]", .{
                 indent_buffer[0..space_count],
                 dir_ent.name,
-                child_file.data.len,
+                child_file.size,
             }),
             .directory => |*child_dir| {
                 std.log.info("{s}{s}:", .{ indent_buffer[0..space_count], dir_ent.name });
@@ -561,4 +674,5 @@ pub fn init() void {
     Mount.cache = slab_allocator.createObjectCache(Mount);
     FileSystem.cache = slab_allocator.createObjectCache(FileSystem);
     FileSystemCache.DirectoryEntry.cache = slab_allocator.createObjectCache(FileSystemCache.DirectoryEntry);
+    PageCache.init();
 }

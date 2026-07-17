@@ -90,10 +90,7 @@ pub fn createTTYDevice(
 }
 
 fn ttyDevfsRead(internal_data: *anyopaque, buff: []u8, offset: usize) usize {
-    if (offset != 0) {
-        log.warn("offset != 0 ({})", .{offset});
-        return 0;
-    }
+    _ = offset;
 
     const tty: *TTYDevice = @ptrCast(@alignCast(internal_data));
 

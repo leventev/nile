@@ -39,9 +39,10 @@ pub const TTYDevice = struct {
                     self.input_buffer_written += 1;
                 },
             }
-            if (self.flags.echo) {
-                self.driver.operations.writeChar(self, ch);
-            }
+        }
+
+        if (self.flags.echo) {
+            self.driver.operations.writeString(self, chars);
         }
     }
 
@@ -50,7 +51,7 @@ pub const TTYDevice = struct {
         operations: *const Operations,
 
         pub const Operations = struct {
-            writeChar: *const fn (tty_device: *TTYDevice, ch: u8) void,
+            writeString: *const fn (tty_device: *TTYDevice, string: []const u8) void,
         };
     };
 };
@@ -121,9 +122,7 @@ fn ttyDevfsWrite(internal_data: *anyopaque, buff: []const u8, offset: usize) usi
     }
 
     const tty: *TTYDevice = @ptrCast(@alignCast(internal_data));
-    for (buff) |ch| {
-        tty.driver.operations.writeChar(tty, ch);
-    }
+    tty.driver.operations.writeString(tty, buff);
 
     return 0;
 }

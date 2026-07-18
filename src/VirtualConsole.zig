@@ -15,37 +15,39 @@ output_buffer_index: usize,
 const font_scale = 2;
 
 pub const operations = tty.TTYDevice.Driver.Operations{
-    .writeChar = writeChar,
+    .writeString = writeString,
 };
 
-fn writeChar(tty_device: *tty.TTYDevice, ch: u8) void {
+fn writeString(tty_device: *tty.TTYDevice, string: []const u8) void {
     // TODO: wrapping
 
     const self: *VirtualConsole = @ptrCast(@alignCast(tty_device.driver.internal_data));
 
-    switch (ch) {
-        '\n' => {
-            self.eraseCursor(self.output_buffer_index);
+    for (string) |ch| {
+        switch (ch) {
+            '\n' => {
+                self.eraseCursor(self.output_buffer_index);
 
-            self.output_buffer_index = std.mem.alignForwardAnyAlign(
-                usize,
-                self.output_buffer_index,
-                self.columns,
-            );
-        },
-        0x8 => {
-            self.eraseCursor(self.output_buffer_index);
+                self.output_buffer_index = std.mem.alignForwardAnyAlign(
+                    usize,
+                    self.output_buffer_index,
+                    self.columns,
+                );
+            },
+            0x8 => {
+                self.eraseCursor(self.output_buffer_index);
 
-            self.output_buffer_index -= 1;
-            self.output_buffer[self.output_buffer_index] = ' ';
-            self.redrawAtPosition(self.output_buffer_index);
-        },
-        else => {
-            // TODO:only add valid characters
-            self.output_buffer[self.output_buffer_index] = ch;
-            self.redrawAtPosition(self.output_buffer_index);
-            self.output_buffer_index +%= 1;
-        },
+                self.output_buffer_index -= 1;
+                self.output_buffer[self.output_buffer_index] = ' ';
+                self.redrawAtPosition(self.output_buffer_index);
+            },
+            else => {
+                // TODO:only add valid characters
+                self.output_buffer[self.output_buffer_index] = ch;
+                self.redrawAtPosition(self.output_buffer_index);
+                self.output_buffer_index +%= 1;
+            },
+        }
     }
 
     self.drawCursor();

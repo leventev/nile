@@ -21,6 +21,7 @@ pub const unmapAddressSpace = riscv64_mm.unmapAddressSpace;
 pub const copyPageTable = riscv64_mm.copyPageTable;
 pub const mapRegion = riscv64_mm.mapRegion;
 pub const PageTable = riscv64_mm.PageTable;
+pub const higherHalfAddress = riscv64_mm.higherHalfAddress;
 
 pub const page_size = riscv64_mm.page_size;
 pub const entries_per_table = riscv64_mm.entries_per_table;

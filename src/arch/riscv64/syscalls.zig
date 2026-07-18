@@ -1,13 +1,15 @@
 const std = @import("std");
 
 const riscv64 = @import("riscv64.zig");
-const exit = @import("syscalls/exit.zig");
-const fs = @import("syscalls/fs.zig");
 const errors = @import("../../syscall/errors.zig");
 const scheduler = @import("../../scheduler.zig");
 const SyscallError = errors.SyscallError;
 const CSR = @import("csr.zig").CSR;
 const trap = @import("trap.zig");
+
+const exit = @import("syscalls/exit.zig");
+const fs = @import("syscalls/fs.zig");
+const proc = @import("syscalls/process.zig");
 
 const ThreadState = @import("registers.zig").ThreadState;
 const SyscallCallback = *const fn (args: [7]usize) SyscallError!u64;
@@ -22,6 +24,7 @@ const syscall_table: []const Syscall = &[_]Syscall{
     .{ .name = "openat", .callback = fs.openat },
     .{ .name = "read", .callback = fs.read },
     .{ .name = "write", .callback = fs.write },
+    .{ .name = "spawn", .callback = proc.spawn },
 };
 
 pub fn dispatchSyscall(user_state: *ThreadState) void {

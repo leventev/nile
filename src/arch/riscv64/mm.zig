@@ -7,6 +7,10 @@ const buddy_allocator = @import("../../mem/buddy_allocator.zig");
 pub const page_size = 4096;
 pub const entries_per_table = 512;
 
+const sv39_higher_half_start = mm.calculateHigherHalfAddress(39);
+
+pub const higherHalfAddress = sv39_higher_half_start;
+
 pub const SATP = packed struct(u64) {
     physical_page_number: u44,
     address_space_id: u16,
@@ -65,6 +69,8 @@ pub const PageTableEntry = packed struct(u64) {
     }
 };
 
+// TODO: if i make this a packed struct i could just @bitCast the address to this
+// but that should be implemented once Sv49 and Sv57 are supported
 const PageNumbers = struct {
     page_offset: u12,
     page_number_0: u9,
@@ -306,8 +312,18 @@ pub fn mapRegion(
     }
 }
 
-pub fn copyPageTable(original_page_table: PageTable, new_page_table: PageTable) void {
-    @memcpy(new_page_table.entries, original_page_table.entries);
+pub fn copyPageTable(
+    original_page_table: PageTable,
+    new_page_table: PageTable,
+    only_higher_half: bool,
+) void {
+    const higher_half = PageNumbers.fromVirtual(higherHalfAddress);
+
+    const subtable_start_idx = if (only_higher_half) higher_half.page_number_2 else 0;
+    const new_subtable = new_page_table.entries[subtable_start_idx..entries_per_table];
+    const orig_subtable = original_page_table.entries[subtable_start_idx..entries_per_table];
+
+    @memcpy(new_subtable, orig_subtable);
 }
 
 pub fn unmapPageTable(

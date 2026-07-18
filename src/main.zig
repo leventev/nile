@@ -139,9 +139,6 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     console.init(gpa, devfs_internal, &framebuffer.framebuffers[0]) catch @panic("TODO");
 
-    //
-    // TODO
-
     cpio.readInitramfsArchive(gpa, &mount_table, test_archive) catch |err| {
         std.log.err("Failed to read CPIO archive: {s}", .{@errorName(err)});
         @panic("");
@@ -151,13 +148,18 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     vfs.dumpTree(&mount_table);
     vfs.dumpDirectory(&devfs.fs_cache.root_directory, 0);
 
+    const init_file_path = "/shell";
+    const init_file = vfs.openFile(&mount_table, init_file_path) catch
+        @panic("Unable to open " ++ init_file_path);
+
     const idle_process_thread = processes.init();
-    _ = processes.spawnInitProcess(
-        root_page_table,
+    _ = processes.spawnProcess(
+        init_file,
         null,
-        test_binary_file,
         &mount_table,
-    ) catch @panic("TODO");
+        root_page_table,
+    ) catch |err| std.debug.panicExtra(null, "Failed to spawn init process: {s}", .{@errorName(err)});
+
     // TODO: this could probably be done in a nicer way
     arch.scheduleNextThread(idle_process_thread);
 

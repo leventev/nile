@@ -78,8 +78,8 @@ pub fn read(
 
     const current_process = processes.currentProcess();
 
-    // TODO:
-    std.debug.assert(fd < current_process.file_descriptor_table.len);
+    if (fd >= current_process.file_descriptor_table.len)
+        return SyscallError.invalid_file_descriptor;
 
     const open_file = current_process.file_descriptor_table[fd] orelse
         return SyscallError.invalid_file_descriptor;
@@ -105,8 +105,8 @@ pub fn write(
 
     const current_process = processes.currentProcess();
 
-    // TODO:
-    std.debug.assert(fd < current_process.file_descriptor_table.len);
+    if (fd >= current_process.file_descriptor_table.len)
+        return SyscallError.invalid_file_descriptor;
 
     const open_file = &(current_process.file_descriptor_table[fd] orelse
         return SyscallError.invalid_file_descriptor);

@@ -6,6 +6,8 @@ const Thread = @import("Thread.zig");
 const arch = @import("arch/arch.zig");
 const mm = @import("mem/mm.zig");
 const vfs = @import("vfs.zig");
+const SyscallError = @import("syscall/errors.zig").SyscallError;
+const buddy_allocator = @import("mem/buddy_allocator.zig");
 
 const log = std.log.scoped(.processes);
 
@@ -22,27 +24,34 @@ fn nextProcessId() Error!Process.Id {
     return @enumFromInt(process_id_int);
 }
 
-// TODO
-pub fn spawnInitProcess(
-    root_page_table: arch.PageTable,
+pub fn spawnProcess(
+    file: vfs.OpenFile,
     parent_pid: ?Process.Id,
-    data: []const u8,
-    mount_table: *vfs.MountTable,
-) !*Process {
-    const new_proc_id = nextProcessId() catch @panic("TODO: this is pid 1 anyways but handle error");
-    std.debug.assert(@intFromEnum(new_proc_id) == 1);
-    var new_proc = try process_cache.alloc();
+    parent_mount_table: *vfs.MountTable,
+    parent_root_page_table: arch.PageTable,
+) SyscallError!*Process {
+    const new_proc_id = nextProcessId() catch return SyscallError.too_many_processes;
+    var new_proc = process_cache.alloc() catch return SyscallError.out_of_memory;
 
     new_proc.id = new_proc_id;
     new_proc.parent_id = parent_pid;
-    new_proc.mount_table = mount_table;
-    // PID 0 owns root_page_table and it only contains the kernel higher half mappings
-    // we copy it for PID 1
-    new_proc.root_page_table = try mm.clonePageTable(root_page_table);
+    new_proc.mount_table = parent_mount_table;
+    new_proc.root_page_table = mm.clonePageTable(parent_root_page_table, true) catch
+        return SyscallError.out_of_memory;
 
     arch.switchAddressSpace(new_proc.root_page_table);
 
-    var reader = std.Io.Reader.fixed(data);
+    // TODO: USE PAGE CACHE
+    const file_size = file.dir_ent.data.regular.size;
+    const order = buddy_allocator.blockOrderFromSize(file_size);
+    const file_data_phys = buddy_allocator.allocBlock(order) catch
+        return SyscallError.out_of_memory;
+    defer buddy_allocator.deallocBlock(file_data_phys, order);
+
+    const file_data = mm.physicalToVirtualAddress(file_data_phys).asPtr([*]u8)[0..file_size];
+    _ = file.read(file_data, 0) catch @panic("TODO: READ FAILED");
+
+    var reader = std.Io.Reader.fixed(file_data);
     const elf_header = std.elf.Header.read(&reader) catch @panic("TODO: elf header error");
 
     // TODO: REMOVE THIS
@@ -51,8 +60,8 @@ pub fn spawnInitProcess(
     @import("arch/riscv64/csr.zig").CSR.sstatus.setBits(1 << @bitOffsetOf(@import("arch/riscv64/trap.zig").SStatus, "supervisor_user_memory_accessable"));
 
     // TODO: do validation
-    var prog_header_it = elf_header.iterateProgramHeadersBuffer(data);
-    while (try prog_header_it.next()) |prog_header| {
+    var prog_header_it = elf_header.iterateProgramHeadersBuffer(file_data);
+    while (prog_header_it.next() catch unreachable) |prog_header| {
         if (prog_header.p_type != std.elf.PT_LOAD)
             continue;
 
@@ -71,7 +80,7 @@ pub fn spawnInitProcess(
         const start_page_addr = virt_start_page_num * arch.page_size;
 
         // TODO: instead of loading the binary like this use demand paging
-        try new_proc.mapRegion(
+        new_proc.mapRegion(
             .fromInt(start_page_addr),
             page_count * arch.page_size,
             .{
@@ -82,11 +91,11 @@ pub fn spawnInitProcess(
                 // .read = prog_header.p_flags & std.elf.PF_R != 0,
                 // .write = prog_header.p_flags & std.elf.PF_W != 0,
             },
-        );
+        ) catch return error.out_of_memory;
 
         // TODO: zero out the bytes between start_page_addr and prog_header.p_vaddr
 
-        const ph_data = data[prog_header.p_offset .. prog_header.p_offset + prog_header.p_filesz];
+        const ph_data = file_data[prog_header.p_offset .. prog_header.p_offset + prog_header.p_filesz];
         const mapped_region = (@as([*]u8, @ptrFromInt(prog_header.p_vaddr)))[0..prog_header.p_memsz];
         const file_region = mapped_region[0..prog_header.p_filesz];
         const zeroed_region = mapped_region[prog_header.p_filesz..prog_header.p_memsz];
@@ -100,7 +109,7 @@ pub fn spawnInitProcess(
     const stack_size = 64 * arch.page_size;
     const stack_bottom = stack_top + stack_size;
 
-    try new_proc.mapRegion(
+    new_proc.mapRegion(
         .fromInt(stack_top),
         stack_size,
         .{
@@ -108,9 +117,9 @@ pub fn spawnInitProcess(
             .read = true,
             .write = true,
         },
-    );
+    ) catch return error.out_of_memory;
 
-    _ = try scheduler.newUserThread(elf_header.entry, stack_bottom, new_proc);
+    _ = scheduler.newUserThread(elf_header.entry, stack_bottom, new_proc) catch return error.out_of_memory;
 
     running_processes.append(&new_proc.list_node);
 

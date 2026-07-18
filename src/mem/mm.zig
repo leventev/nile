@@ -53,23 +53,18 @@ pub const VirtualAddress = packed struct(usize) {
 };
 
 pub const PhysicalAddress = packed struct(usize) {
-    address: u64,
+    address: usize,
 
     pub fn fromInt(addr: usize) PhysicalAddress {
         return @bitCast(addr);
     }
 
-    pub fn asInt(self: PhysicalAddress) u64 {
+    pub fn asInt(self: PhysicalAddress) usize {
         return @bitCast(self);
     }
 
     pub fn add(self: PhysicalAddress, offset: usize) PhysicalAddress {
         return fromInt(self.asInt() + offset);
-    }
-
-    pub fn asPtr(self: PhysicalAddress, comptime T: type) T {
-        if (@typeInfo(T) != .pointer) @compileError("not a pointer");
-        return @ptrFromInt(self.asInt());
     }
 
     pub fn isPageAligned(self: PhysicalAddress) bool {
@@ -84,12 +79,10 @@ pub const PhysicalAddress = packed struct(usize) {
 /// The lower half is 0 <=> 2^(N-1) - 1.
 /// The higher half is 2^64-2^(N-1) <=> 2^64 - 1.
 /// Thus the higher half address has the most significant 64-N+1 bits set, the rest clear.
-fn higherHalfAddress(used_bits: usize) VirtualAddress {
+pub fn calculateHigherHalfAddress(used_bits: usize) VirtualAddress {
     const final = std.math.shl(usize, std.math.maxInt(usize), used_bits - 1);
     return .fromInt(final);
 }
-
-const sv39_higher_half_start = higherHalfAddress(39);
 
 pub const UserAddress = struct {
     address: VirtualAddress,
@@ -107,7 +100,7 @@ pub const UserAddress = struct {
     }
 
     pub fn isValid(self: UserAddress) bool {
-        return self.address.asInt() < sv39_higher_half_start.asInt();
+        return self.address.asInt() < arch.higherHalfAddress.asInt();
     }
 };
 
@@ -458,12 +451,13 @@ pub fn virtualToPhysicalAddress(virt: VirtualAddress) PhysicalAddress {
     return PhysicalAddress.fromInt(virt.asInt() - hhdm_start);
 }
 
-pub fn clonePageTable(page_table: arch.PageTable) !arch.PageTable {
+/// Allocates a new page table and shallow copies an existing page table's entries to it.
+pub fn clonePageTable(page_table: arch.PageTable, only_higher_half: bool) !arch.PageTable {
     const new_page_table_phys = try buddy_allocator.allocBlock(0);
     const new_page_table_virt = physicalToVirtualAddress(new_page_table_phys);
     const new_page_table = PageTable.fromVirtualAddress(new_page_table_virt);
 
-    arch.copyPageTable(page_table, new_page_table);
+    arch.copyPageTable(page_table, new_page_table, only_higher_half);
 
     return new_page_table;
 }

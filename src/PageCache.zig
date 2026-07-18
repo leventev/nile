@@ -28,8 +28,7 @@ pub fn getPage(self: *PageCache, page_index: usize, allocate: bool) !*anyopaque 
     var level = self.level_count - 1;
     while (true) {
         const bit_offset = bits_per_level * level;
-        const mask = std.math.shl(usize, base_mask, bit_offset);
-        const index = page_index & mask;
+        const index = std.math.shr(usize, page_index, bit_offset) & base_mask;
 
         const page_ptr = table.children[index] orelse blk: {
             if (allocate) {

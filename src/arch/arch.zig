@@ -62,6 +62,10 @@ pub const copyPageTable = switch (target) {
     Arch.riscv64 => riscv64.copyPageTable,
 };
 
+pub const higherHalfAddress = switch (target) {
+    Arch.riscv64 => riscv64.higherHalfAddress,
+};
+
 pub const unmapAddressSpace = switch (target) {
     Arch.riscv64 => riscv64.unmapAddressSpace,
 };

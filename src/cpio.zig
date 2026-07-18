@@ -1,7 +1,7 @@
 //! Documentation for the CPIO format: https://www.systutorials.com/docs/linux/man/5-cpio/
 
 const std = @import("std");
-// const ramfs = @import("drivers/ramfs.zig");
+const vfs = @import("vfs.zig");
 
 /// Old binary CPIO file header format
 ///
@@ -200,24 +200,48 @@ fn readRecord(reader: *std.Io.Reader, record: *Record, header_type: HeaderType) 
 }
 
 // TODO: custom errorset instead of std Io error
-// pub fn readArchive(cpio_data: []const u8, initramfs: *ramfs.RamFs) !void {
-//     var reader = std.Io.Reader.fixed(cpio_data);
-//
-//     const header_type = try getHeaderType(&reader);
-//
-//     // The documentation doesn't say anything about this but it's fair to assume that all headers
-//     // within an archive use the same format and that we don't need to check for this.
-//
-//     // TODO: permission bits
-//
-//     var record: Record = undefined;
-//
-//     // TODO: handle directories properly
-//     while (try readRecord(&reader, &record, header_type)) {
-//         const file_type = record.mode & file_type_mask;
-//         switch (file_type) {
-//             file_type_regular_file => try initramfs.addFile(record.path, record.content),
-//             else => {},
-//         }
-//     }
-// }
+pub fn readArchive(
+    gpa: std.mem.Allocator,
+    mount_table: *vfs.MountTable,
+    cpio_data: []const u8,
+) !void {
+    var reader = std.Io.Reader.fixed(cpio_data);
+
+    const header_type = try getHeaderType(&reader);
+
+    // The documentation doesn't say anything about this but it's fair to assume that all headers
+    // within an archive use the same format and that we don't need to check for this.
+
+    // TODO: permission bits
+
+    var record: Record = undefined;
+
+    // vfs.createDirectory(&mount_table, "/test_dir") catch @panic("Failed to create file");
+    // vfs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
+    // vfs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");
+    // vfs.createRegularFile(&mount_table, "/test_dir/a/test_file", "burger") catch @panic("Failed to create file");
+
+    // TODO: handle directories properly
+    // TODO:
+    var inode_counter: usize = 100;
+    while (try readRecord(&reader, &record, header_type)) {
+        const file_type = record.mode & file_type_mask;
+        switch (file_type) {
+            file_type_regular_file => {
+                const file_name = std.fmt.allocPrint(gpa, "/{s}", .{record.path}) catch @panic("Archive file path name too long");
+                try vfs.createRegularFile(mount_table, .fromInt(inode_counter), file_name);
+                inode_counter += 1;
+                // TODO: maybe createRegularFile could return an OpenFile already?
+
+                const open_file = vfs.openFile(mount_table, file_name) catch unreachable;
+                _ = open_file.write(record.content, 0) catch @panic("Failed to write content of CPIO archive file");
+            },
+            file_type_directory => {
+                const file_name = std.fmt.allocPrint(gpa, "/{s}", .{record.path}) catch @panic("Archive file path name too long");
+                try vfs.createDirectory(mount_table, .fromInt(inode_counter), file_name);
+                inode_counter += 1;
+            },
+            else => {},
+        }
+    }
+}

@@ -152,28 +152,20 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     // TODO: proper inode
     vfs.createDirectory(&mount_table, .fromInt(1), "/dev") catch @panic("Failed to create /dev directory");
     vfs.mountFileSystem(&mount_table, "/dev", devfs) catch @panic("Failed to mount /dev");
-    // vfs.createDirectory(&mount_table, "/test_dir") catch @panic("Failed to create file");
-    // vfs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
-    // vfs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");
-    // vfs.createRegularFile(&mount_table, "/test_dir/a/test_file", "burger") catch @panic("Failed to create file");
 
     console.init(gpa, devfs_internal, &framebuffer.framebuffers[0]) catch @panic("TODO");
+
+    //
+    // TODO
+
+    cpio.readArchive(gpa, &mount_table, test_archive) catch |err| {
+        std.log.err("Failed to read CPIO archive: {s}", .{@errorName(err)});
+        @panic("");
+    };
 
     mount_table.dump();
     vfs.dumpTree(&mount_table);
     vfs.dumpDirectory(&devfs.fs_cache.root_directory, 0);
-
-    //
-    // // TODO
-    // // var initramfs: ramfs.RamFs = undefined;
-    // // initramfs.init() catch unreachable;
-    // //
-    // // cpio.readArchive(test_archive, &initramfs) catch |err| {
-    // //     std.log.err("Failed to read CPIO archive: {s}", .{@errorName(err)});
-    // //     @panic("");
-    // // };
-    // //
-    // // initramfs.dumpTree();
 
     const idle_process_thread = processes.init();
     _ = processes.spawnInitProcess(

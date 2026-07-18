@@ -2,6 +2,7 @@ const std = @import("std");
 const slab_allocator = @import("mem/slab_allocator.zig");
 const buddy_allocator = @import("mem/buddy_allocator.zig");
 const arch = @import("arch/arch.zig");
+const mm = @import("mem/mm.zig");
 
 const PageCache = @This();
 
@@ -32,7 +33,8 @@ pub fn getPage(self: *PageCache, page_index: usize, allocate: bool) !*anyopaque 
 
         const page_ptr = table.children[index] orelse blk: {
             if (allocate) {
-                const new_page = (try buddy_allocator.allocBlock(0)).asPtr(*anyopaque);
+                const new_page_phys = try buddy_allocator.allocBlock(0);
+                const new_page = mm.physicalToVirtualAddress(new_page_phys).asPtr(*anyopaque);
                 table.children[index] = new_page;
                 break :blk new_page;
             } else @panic("Page cache entry is not allocated");

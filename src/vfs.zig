@@ -39,7 +39,7 @@ pub const FileSystemSkeleton = struct {
     write: ?*const fn (
         internal_data: ?*anyopaque,
         inode: Inode,
-        buff: []u8,
+        buff: []const u8,
         offset: usize,
     ) FileSystemError!usize,
 
@@ -233,7 +233,12 @@ const FileSystemCache = struct {
                     };
                 },
                 .regular => {
-                    new_entry.data = .{ .regular = undefined };
+                    new_entry.data = .{
+                        .regular = Regular{
+                            .page_cache = undefined,
+                            .size = 0,
+                        },
+                    };
                     try PageCache.setupNewPageCache(&new_entry.data.regular.page_cache);
                 },
             };
@@ -435,10 +440,10 @@ pub fn genericReadRegular(
 
     // TODO: support no_device == false too
 
-    const read_size = @min(buff.len, regular.size - offset);
-    if (read_size == 0) return 0;
+    const total_read_size = @min(buff.len, regular.size - offset);
+    if (total_read_size == 0) return 0;
 
-    const last_byte_idx = offset + read_size - 1;
+    const last_byte_idx = offset + total_read_size - 1;
 
     const start_page_idx = offset / arch.page_size;
     const end_page_idx = last_byte_idx / arch.page_size;
@@ -450,17 +455,19 @@ pub fn genericReadRegular(
         const file_content_ptr: [*]const u8 = @ptrCast(page_ptr);
         const file_content: []const u8 = file_content_ptr[0..arch.page_size];
 
-        @memcpy(buff[buff_off .. buff_off + file_content.len], file_content);
-        buff_off += file_content.len;
+        const buff_remaining = buff.len - buff_off;
+        const read_size = @min(buff_remaining, file_content.len);
+        @memcpy(buff[buff_off .. buff_off + read_size], file_content[0..read_size]);
+        buff_off += read_size;
     }
 
-    return read_size;
+    return total_read_size;
 }
 
 pub fn genericWriteRegular(
     fs: *FileSystem,
     directory_entry: *FileSystemCache.DirectoryEntry,
-    buff: []u8,
+    buff: []const u8,
     offset: usize,
 ) !usize {
     _ = fs;
@@ -489,8 +496,10 @@ pub fn genericWriteRegular(
         const file_content_ptr: [*]u8 = @ptrCast(page_ptr);
         const file_content: []u8 = file_content_ptr[0..arch.page_size];
 
-        @memcpy(file_content, buff[buff_off .. buff_off + file_content.len]);
-        buff_off += file_content.len;
+        const buff_remaining = buff.len - buff_off;
+        const write_size = @min(buff_remaining, file_content.len);
+        @memcpy(file_content[0..write_size], buff[buff_off .. buff_off + write_size]);
+        buff_off += write_size;
     }
 
     regular.size = @max(regular.size, offset + buff.len);
@@ -520,7 +529,7 @@ pub const OpenFile = struct {
         }
     }
 
-    pub fn write(self: OpenFile, buff: []u8, offset: usize) !usize {
+    pub fn write(self: OpenFile, buff: []const u8, offset: usize) !usize {
         const fs = global_file_system_table.getById(self.mounted_fs_id).* orelse
             @panic("Invalid open file");
 
@@ -603,20 +612,13 @@ pub fn createDirectory(mount_table: *MountTable, inode: Inode, path_str: []const
     try dir.create(last_component, inode, .directory);
 }
 
-// TODO: CONTENT
-pub fn createRegularFile(
-    mount_table: *MountTable,
-    inode: Inode,
-    path_str: []const u8,
-    content: []const u8,
-) !void {
+pub fn createRegularFile(mount_table: *MountTable, inode: Inode, path_str: []const u8) !void {
     var mount: *Mount = undefined;
     var dir: *FileSystemCache.Directory = undefined;
     var last_component: []const u8 = &.{};
 
     try walkUntilLastComponent(mount_table, path_str, &mount, &dir, &last_component);
 
-    _ = content;
     try dir.create(last_component, inode, .regular);
 }
 
@@ -631,10 +633,11 @@ pub fn openFile(mount_table: *MountTable, path_str: []const u8) !OpenFile {
     const dir_entry = dir.lookup(last_component).* orelse return error.EntryNotFound;
     // TODO: LOCKING
 
+    // TODO: if the path_str points to a mount this wouldnt work probably?
+
     dir_entry.reference_count += 1;
     return OpenFile{
-        // TODO
-        .mounted_fs_id = @enumFromInt(0),
+        .mounted_fs_id = mount.file_system.id,
         .dir_ent = dir_entry,
     };
 }

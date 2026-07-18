@@ -122,22 +122,6 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     pc_font.init();
 
-    framebuffer.fillRect(0, 100, 300, 500, .{
-        .red = 100,
-        .green = 200,
-        .blue = 50,
-        .alpha = 255,
-    });
-
-    framebuffer.fillRect(300, 300, 400, 50, .{
-        .red = 100,
-        .green = 200,
-        .blue = 250,
-        .alpha = 255,
-    });
-
-    framebuffer.flush();
-
     time.init(&dt) catch @panic("Failed to initialize timer");
 
     var mount_table: vfs.MountTable = .{

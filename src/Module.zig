@@ -59,7 +59,6 @@ const Type = enum {
 };
 
 const module_source_files: []const type = &.{
-    @import("drivers/fs/ramfs.zig"),
     @import("drivers/uart.zig"),
     @import("drivers/bus/pcie.zig"),
     @import("drivers/virtio/virtio_gpu.zig"),

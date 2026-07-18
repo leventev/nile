@@ -22,6 +22,7 @@ pub const pc_font = @import("pc_font.zig");
 pub const kernel_gpa = @import("mem/kernel_gpa.zig");
 pub const console = @import("console.zig");
 pub const DeviceFilesystem = @import("DeviceFilesystem.zig");
+pub const ramfs = @import("ramfs.zig");
 
 const test_binary_file = @embedFile("shell");
 const test_archive = @embedFile("root.cpio");
@@ -96,6 +97,7 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     vfs.init();
 
+    vfs.registerFileSystem(&ramfs.ram_file_system);
     vfs.registerFileSystem(&DeviceFilesystem.skeleton);
 
     const devfs = vfs.createFileSystem(gpa, "devfs") catch unreachable;
@@ -138,17 +140,15 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     time.init(&dt) catch @panic("Failed to initialize timer");
 
-    vfs.dumpRegisteredFilesystems();
-
     var mount_table: vfs.MountTable = .{
         .mount_count = 0,
         .mounts = null,
         .lock = .{},
     };
 
-    const ramfs = vfs.createFileSystem(gpa, "ramfs") catch @panic("Failed to create ramfs");
+    const ramfs_instance = vfs.createFileSystem(gpa, "ramfs") catch @panic("Failed to create ramfs");
 
-    vfs.mountFileSystem(&mount_table, "/", ramfs) catch @panic("Failed to mount /");
+    vfs.mountFileSystem(&mount_table, "/", ramfs_instance) catch @panic("Failed to mount /");
     // TODO: proper inode
     vfs.createDirectory(&mount_table, .fromInt(1), "/dev") catch @panic("Failed to create /dev directory");
     vfs.mountFileSystem(&mount_table, "/dev", devfs) catch @panic("Failed to mount /dev");

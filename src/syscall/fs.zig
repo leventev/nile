@@ -57,8 +57,6 @@ pub fn openat(
         .offset = 0,
     };
 
-    std.log.debug("opened file: {s}", .{open_file.dir_ent.name});
-
     return next_fd;
 }
 

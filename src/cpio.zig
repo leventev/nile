@@ -200,7 +200,7 @@ fn readRecord(reader: *std.Io.Reader, record: *Record, header_type: HeaderType) 
 }
 
 // TODO: custom errorset instead of std Io error
-pub fn readArchive(
+pub fn readInitramfsArchive(
     gpa: std.mem.Allocator,
     mount_table: *vfs.MountTable,
     cpio_data: []const u8,
@@ -214,21 +214,33 @@ pub fn readArchive(
 
     // TODO: permission bits
 
+    // Since the initramfs archive is created with
+    // find root | cpio -o > root.cpio
+    // all files (except the root dir, in which case the file name is just "root")
+    // are prefixed by "root/".
+
+    // Also since find first lists the directory then the entries in the directory the loop below
+    // correctly creates the directory first then the entries.
+
+    const prefix = "root";
+
+    var inode_counter: usize = 100;
     var record: Record = undefined;
 
-    // vfs.createDirectory(&mount_table, "/test_dir") catch @panic("Failed to create file");
-    // vfs.createDirectory(&mount_table, "/test_dir/a") catch @panic("Failed to create file");
-    // vfs.createDirectory(&mount_table, "/test_dir/b") catch @panic("Failed to create file");
-    // vfs.createRegularFile(&mount_table, "/test_dir/a/test_file", "burger") catch @panic("Failed to create file");
-
-    // TODO: handle directories properly
-    // TODO:
-    var inode_counter: usize = 100;
     while (try readRecord(&reader, &record, header_type)) {
         const file_type = record.mode & file_type_mask;
+
+        // skip root directory
+        if (record.path.len == prefix.len) continue;
+
+        std.debug.assert(record.path.len > prefix.len);
+
+        const name_start_idx = if (record.path[prefix.len] == '/') prefix.len + 1 else prefix.len;
+        const path_name = record.path[name_start_idx..record.path.len];
+
         switch (file_type) {
             file_type_regular_file => {
-                const file_name = std.fmt.allocPrint(gpa, "/{s}", .{record.path}) catch @panic("Archive file path name too long");
+                const file_name = std.fmt.allocPrint(gpa, "/{s}", .{path_name}) catch @panic("Archive file path name too long");
                 try vfs.createRegularFile(mount_table, .fromInt(inode_counter), file_name);
                 inode_counter += 1;
                 // TODO: maybe createRegularFile could return an OpenFile already?
@@ -237,7 +249,7 @@ pub fn readArchive(
                 _ = open_file.write(record.content, 0) catch @panic("Failed to write content of CPIO archive file");
             },
             file_type_directory => {
-                const file_name = std.fmt.allocPrint(gpa, "/{s}", .{record.path}) catch @panic("Archive file path name too long");
+                const file_name = std.fmt.allocPrint(gpa, "/{s}", .{path_name}) catch @panic("Archive file path name too long");
                 try vfs.createDirectory(mount_table, .fromInt(inode_counter), file_name);
                 inode_counter += 1;
             },

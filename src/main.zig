@@ -142,7 +142,7 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     //
     // TODO
 
-    cpio.readArchive(gpa, &mount_table, test_archive) catch |err| {
+    cpio.readInitramfsArchive(gpa, &mount_table, test_archive) catch |err| {
         std.log.err("Failed to read CPIO archive: {s}", .{@errorName(err)});
         @panic("");
     };

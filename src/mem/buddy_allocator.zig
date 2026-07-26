@@ -29,7 +29,7 @@ pub const BuddyAllocator = struct {
         /// in ascending order.
         pub fn orderedAdd(self: *Order, block_addr: PhysicalAddress) void {
             const virt_addr = mm.physicalToVirtualAddress(block_addr);
-            const node_ptr: *std.DoublyLinkedList.Node = @ptrFromInt(virt_addr.asInt());
+            const node_ptr: *std.DoublyLinkedList.Node = @ptrFromInt(virt_addr.int);
 
             // TODO: possibly clean this up and get rid of the special cases
             const first_node = self.list.first;
@@ -136,7 +136,7 @@ pub const BuddyAllocator = struct {
     pub fn removeBlock(self: *BuddyAllocator, order: usize, block_address: PhysicalAddress) bool {
         var list_node = self.orders[order].list.first;
         const virt_addr = mm.physicalToVirtualAddress(block_address);
-        const node_ptr: *std.DoublyLinkedList.Node = @ptrFromInt(virt_addr.asInt());
+        const node_ptr: *std.DoublyLinkedList.Node = @ptrFromInt(virt_addr.int);
 
         while (list_node) |node| : (list_node = node.next) {
             if (node == node_ptr) {
@@ -198,7 +198,7 @@ pub const BuddyAllocator = struct {
         while (order <= max_order) : (order += 1) {
             // buddy's address can be calculated by XOR-ing with the size
             const block_size = std.math.shl(usize, 1, order) * arch.page_size;
-            const buddy_address = PhysicalAddress.fromInt(address.asInt() ^ block_size);
+            const buddy_address = PhysicalAddress.fromInt(address.int ^ block_size);
 
             // if the buddy is free then we remove it and move on to the next order
             const buddy_is_free = self.removeBlock(order, buddy_address);
@@ -206,7 +206,7 @@ pub const BuddyAllocator = struct {
                 break;
             }
 
-            address = .fromInt(@min(address.asInt(), buddy_address.asInt()));
+            address = .fromInt(@min(address.int, buddy_address.int));
         }
 
         self.orders[order].orderedAdd(address);
@@ -225,7 +225,7 @@ pub fn init(regions: []const mm.MemoryRegion) void {
         total_frames += frame_count;
 
         // TODO: convert the fields of mm.MemoryRegion to be page indices instead of absolute addresses
-        const start_page_index: usize = region.start.asInt() / arch.page_size;
+        const start_page_index: usize = region.start.int / arch.page_size;
         const page_count: usize = region.size / arch.page_size;
         global_buddy_allocator.addBlocksFromRegion(start_page_index, page_count);
     }
@@ -317,7 +317,7 @@ test "alloc basic" {
     try std.testing.expectEqual(base_address, one_page_addr);
     const one_page_addr_2 = try buddy_allocator.allocBlock(0);
     try std.testing.expectEqual(
-        PhysicalAddress.make(base_address.asInt() + mm.page_size),
+        PhysicalAddress.make(base_address.int + mm.page_size),
         one_page_addr_2,
     );
 
@@ -332,7 +332,7 @@ test "alloc basic" {
     try std.testing.expectEqual(1, buddy_allocator.orders[2].free_block_count);
     try std.testing.expectEqual(1, buddy_allocator.orders[1].free_block_count);
     try std.testing.expectEqual(0, buddy_allocator.orders[0].free_block_count);
-    try std.testing.expectEqual(base_address.asInt(), one_page_addr.asInt());
+    try std.testing.expectEqual(base_address.int, one_page_addr.int);
 
     buddy_allocator.deallocBlock(one_page_addr, 0);
     buddy_allocator.deallocBlock(one_page_addr_2, 0);

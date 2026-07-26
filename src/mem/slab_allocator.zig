@@ -132,7 +132,7 @@ pub const SlabAllocator = struct {
             const gap = if (list_end_align_rem > 0) (obj_alignment - list_end_align_rem) else 0;
             const objs_start = list_end + gap;
 
-            const obj_addr_int = obj_addr.asInt();
+            const obj_addr_int = obj_addr.int;
             std.debug.assert(obj_addr_int >= objs_start);
             const obj_id = (obj_addr_int - objs_start) / obj_size;
             std.debug.assert(obj_id < obj_per_slab);
@@ -154,7 +154,7 @@ pub const SlabAllocator = struct {
         ) bool {
             const start = @intFromPtr(self);
             const end = start + std.math.shl(usize, 1, slab_order) * arch.page_size;
-            const obj_addr_int = obj_addr.asInt();
+            const obj_addr_int = obj_addr.int;
             return obj_addr_int > start and obj_addr_int < end;
         }
     };
@@ -216,7 +216,7 @@ pub const SlabAllocator = struct {
             const phys_addr = try buddy_allocator.allocBlock(self.slab_block_order);
             const virt_addr = mm.physicalToVirtualAddress(phys_addr);
 
-            var slab_descriptor: *Descriptor = @ptrFromInt(virt_addr.asInt());
+            var slab_descriptor: *Descriptor = @ptrFromInt(virt_addr.int);
             slab_descriptor.free_object_count = self.objects_per_slab;
 
             // 'next list'
@@ -453,10 +453,14 @@ pub fn ObjectCache(comptime T: type) type {
         initialized: bool = false,
 
         /// Allocate a single T object
-        pub fn alloc(self: Self) BuddyAllocator.Error!*T {
+        pub fn alloc(self: Self) error{OutOfMemory}!*T {
             std.debug.assert(self.initialized);
-            const addr: VirtualAddress = try self.__slab_backing.alloc();
-            return @as(*T, @ptrFromInt(addr.asInt()));
+            const addr: VirtualAddress = self.__slab_backing.alloc() catch |err|
+                switch (err) {
+                    error.InvalidOrder => unreachable,
+                    error.OutOfMemory => return error.OutOfMemory,
+                };
+            return @as(*T, @ptrFromInt(addr.int));
         }
 
         /// Free a single T object

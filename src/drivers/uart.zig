@@ -155,10 +155,10 @@ pub fn init(
     var regs_it = regs.iterator(address_cells, 0) catch @panic("TODO: regs_it");
 
     // TODO: parse all provided addresses?
-    const baseAddr: u64 = @intCast((regs_it.next() orelse return error.InvalidDeviceTree).address);
-    const physAddr = mm.PhysicalAddress.fromInt(baseAddr);
-    const virtAddr = mm.physicalToVirtualAddress(physAddr);
-    base_ptr = @ptrFromInt(virtAddr.asInt());
+    const base_addr: u64 = @intCast((regs_it.next() orelse return error.InvalidDeviceTree).address);
+    const phys_addr = mm.PhysicalAddress.fromInt(base_addr);
+    const virt_addr = mm.physicalToVirtualAddress(phys_addr);
+    base_ptr = @ptrFromInt(virt_addr.int);
     // const KERNEL_PHYS_ADDRESS = 0x80200000;
     // const KERNEL_VIRT_ADDRESS = 0xffffffffc0200000;
     // const KERNEL_OFFSET = KERNEL_VIRT_ADDRESS - KERNEL_PHYS_ADDRESS;

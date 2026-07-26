@@ -402,7 +402,7 @@ pub const ConfigurationSpace = struct {
         const config_space_address = ecam_base_address.add(off);
 
         return .{
-            .data = @as([*]u8, @ptrFromInt(config_space_address.asInt()))[0..config_space_size],
+            .data = @as([*]u8, @ptrFromInt(config_space_address.int))[0..config_space_size],
         };
     }
 

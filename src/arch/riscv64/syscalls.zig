@@ -87,7 +87,7 @@ pub fn dispatchSyscall(user_state: *ThreadState) void {
     // and stack are set instead of the user's)
 
     const next_thread = scheduler.getCurrentThread();
-    trap.current_trap_stack_bottom = next_thread.effectiveThreadStackBottom().asInt();
+    trap.current_trap_stack_bottom = next_thread.effectiveThreadStackBottom().int;
 
     CSR.sscratch.write(@intFromPtr(next_thread.effectiveThreadState()));
 }

@@ -452,7 +452,7 @@ pub fn genericReadRegular(
     var page_idx = start_page_idx;
     while (page_idx <= end_page_idx) : (page_idx += 1) {
         const page_ptr = regular.page_cache.getPage(page_idx, false) catch unreachable;
-        const file_content_ptr: [*]const u8 = @ptrCast(page_ptr);
+        const file_content_ptr = page_ptr.asPtr([*]const u8);
         const file_content: []const u8 = file_content_ptr[0..arch.page_size];
 
         const buff_remaining = buff.len - buff_off;
@@ -493,7 +493,7 @@ pub fn genericWriteRegular(
     var page_idx = start_page_idx;
     while (page_idx <= end_page_idx) : (page_idx += 1) {
         const page_ptr = try regular.page_cache.getPage(page_idx, true);
-        const file_content_ptr: [*]u8 = @ptrCast(page_ptr);
+        const file_content_ptr = page_ptr.asPtr([*]u8);
         const file_content: []u8 = file_content_ptr[0..arch.page_size];
 
         const buff_remaining = buff.len - buff_off;

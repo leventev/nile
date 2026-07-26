@@ -157,7 +157,7 @@ fn setupFramebuffer(
 
     const attach_ok = virtio_gpu.attachResourceBacking(
         virtio_gpu.resource_id,
-        framebuffer_phys.asInt(),
+        framebuffer_phys.int,
         framebuffer_size,
     );
 
@@ -276,7 +276,7 @@ pub const VirtioGPU = struct {
 
         /// Allocate space for the provided type and return a pointer to it.
         inline fn get(self: *@This(), comptime T: type) *T {
-            const ptr: *T = @ptrFromInt(self.address.asInt() + self.counter);
+            const ptr: *T = @ptrFromInt(self.address.int + self.counter);
             self.counter += @sizeOf(T);
             std.debug.assert(self.counter < self.size);
 

@@ -152,7 +152,7 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     const init_file = vfs.openFile(&mount_table, init_file_path) catch
         @panic("Unable to open " ++ init_file_path);
 
-    const idle_process_thread = processes.init();
+    const idle_process_thread = processes.init(root_page_table);
     _ = processes.spawnProcess(
         init_file,
         null,

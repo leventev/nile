@@ -45,7 +45,7 @@ fn setupThreadState(
         thread_state.gprs = [_]u64{0x00} ** ThreadState.gpr_count;
     }
 
-    thread_state.pc = @intCast(entry_point.asInt());
+    thread_state.pc = @intCast(entry_point.int);
 
     thread_state.status = .{
         .executable_memory_read = true,
@@ -68,7 +68,7 @@ fn setupThreadState(
         .__reserved7 = 0,
     };
 
-    thread_state.gprs[ThreadState.stack_ptr] = stack_top.asInt();
+    thread_state.gprs[ThreadState.stack_ptr] = stack_top.int;
     thread_state.gprs[ThreadState.global_data_ptr] = @intFromPtr(&__global_pointer);
 }
 
@@ -113,8 +113,12 @@ pub fn scheduleNextThread(thread: *Thread) void {
         thread_state.printRegs(.debug);
     }
 
+    if (thread.purpose == .general) {
+        switchAddressSpace(thread.purpose.general.owner_process.root_page_table);
+    }
+
     CSR.sscratch.write(sscratch_value);
-    trap.current_trap_stack_bottom = trap_stack_bottom.asInt();
+    trap.current_trap_stack_bottom = trap_stack_bottom.int;
     timer.resetTimer();
 }
 

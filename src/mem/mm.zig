@@ -28,47 +28,43 @@ pub const frame_size = arch.page_size;
 
 pub const PageTable = arch.PageTable;
 pub const VirtualAddress = packed struct(usize) {
-    address: usize,
+    int: usize,
 
-    pub fn fromInt(addr: usize) VirtualAddress {
-        return @bitCast(addr);
-    }
-
-    pub fn asInt(self: VirtualAddress) usize {
-        return @bitCast(self);
+    pub fn fromInt(address: usize) VirtualAddress {
+        return .{ .int = address };
     }
 
     pub fn add(self: VirtualAddress, offset: usize) VirtualAddress {
-        return fromInt(self.asInt() + offset);
+        return .{ .int = self.int + offset };
     }
 
     pub fn asPtr(self: VirtualAddress, comptime T: type) T {
         if (@typeInfo(T) != .pointer) @compileError("not a pointer");
-        return @ptrFromInt(self.asInt());
+        return @ptrFromInt(self.int);
     }
 
     pub fn isPageAligned(self: VirtualAddress) bool {
-        return self.address % arch.page_size == 0;
+        return self.int % arch.page_size == 0;
+    }
+
+    pub fn isHigherHalf(self: VirtualAddress) bool {
+        return self.int >= arch.higherHalfAddress.int;
     }
 };
 
 pub const PhysicalAddress = packed struct(usize) {
-    address: usize,
+    int: usize,
 
     pub fn fromInt(addr: usize) PhysicalAddress {
-        return @bitCast(addr);
-    }
-
-    pub fn asInt(self: PhysicalAddress) usize {
-        return @bitCast(self);
+        return .{ .int = addr };
     }
 
     pub fn add(self: PhysicalAddress, offset: usize) PhysicalAddress {
-        return fromInt(self.asInt() + offset);
+        return fromInt(self.int + offset);
     }
 
     pub fn isPageAligned(self: PhysicalAddress) bool {
-        return self.address % arch.page_size == 0;
+        return self.int % arch.page_size == 0;
     }
 };
 
@@ -85,22 +81,31 @@ pub fn calculateHigherHalfAddress(used_bits: usize) VirtualAddress {
 }
 
 pub const UserAddress = struct {
-    address: VirtualAddress,
+    int: usize,
 
-    pub fn fromInt(addr: usize) UserAddress {
-        return .{ .address = VirtualAddress.fromInt(addr) };
+    pub fn fromInt(address: usize) ?UserAddress {
+        return fromVirtual(.fromInt(address));
+    }
+
+    pub fn fromVirtual(address: VirtualAddress) ?UserAddress {
+        return if (address.isHigherHalf()) null else .{ .int = address.int };
     }
 
     pub fn asPtr(self: UserAddress, comptime T: type) T {
-        return self.address.asPtr(T);
+        if (@typeInfo(T) != .pointer) @compileError("not a pointer");
+        return @ptrFromInt(self.int);
     }
 
-    pub fn add(self: UserAddress, offset: usize) UserAddress {
-        return .{ .address = self.address.add(offset) };
+    pub fn add(self: UserAddress, offset: usize) ?UserAddress {
+        return fromInt(self.int + offset);
     }
 
-    pub fn isValid(self: UserAddress) bool {
-        return self.address.asInt() < arch.higherHalfAddress.asInt();
+    pub fn slice(self: UserAddress, size: usize) ?[]u8 {
+        std.debug.assert(size > 0);
+
+        // last byte accessed
+        _ = self.add(size - 1) orelse return null;
+        return self.asPtr([*]u8)[0..size];
     }
 };
 
@@ -116,8 +121,9 @@ pub const MemoryRegion = struct {
     }
 
     fn intersects(self: Self, other: MemoryRegion) bool {
-        const other_after = other.start.asInt() >= self.end().asInt();
-        const other_before = other.end().asInt() <= self.start.asInt();
+        // TODO: this is probably not correct?
+        const other_after = other.start.int >= self.end().int;
+        const other_before = other.end().int <= self.start.int;
         return !(other_after or other_before);
     }
 };
@@ -247,30 +253,30 @@ fn processRegion(
         const resv_end = resv_range.end();
 
         // the reserved region starts before or at the same address as the physical region
-        if (resv_range.start.asInt() <= region.range.start.asInt()) {
+        if (resv_range.start.int <= region.range.start.int) {
             // cut off the interescting part at the beginning of the region
             range.start = resv_end;
-            range.size = end.asInt() - range.start.asInt();
+            range.size = end.int - range.start.int;
 
             continue;
         }
 
         // the reserved region ends after or at the same address as the physical region
-        if (resv_end.asInt() >= end.asInt()) {
+        if (resv_end.int >= end.int) {
             // cut off the interescting part at the end of the region
-            range.size = resv_range.start.asInt() - range.start.asInt();
+            range.size = resv_range.start.int - range.start.int;
 
             continue;
         }
 
         // the reserved region is inside the physical region
-        range.size = resv_range.start.asInt() - range.start.asInt();
+        range.size = resv_range.start.int - range.start.int;
 
         // do the same process for the region on the right side of the reserved region
         const other_region = PhysicalMemoryRegion{
             .range = MemoryRegion{
                 .start = resv_end,
-                .size = end.asInt() - resv_end.asInt(),
+                .size = end.int - resv_end.int,
             },
         };
 
@@ -369,7 +375,7 @@ fn printPhysicalRegions(physical_regions: []const PhysicalMemoryRegion) void {
         const sizeInKiB = range.size / 1024;
         log.info(
             "    [0x{x:0>16}-0x{x:0>16}] ({} KiB)",
-            .{ range.start.asInt(), range.end().asInt() - 1, sizeInKiB },
+            .{ range.start.int, range.end().int - 1, sizeInKiB },
         );
     }
 }
@@ -381,8 +387,8 @@ fn printReservedRegions(reserved_regions: []const ReservedMemoryRegion) void {
         const size_in_kib = range.size / 1024;
         if (reg.system) {
             log.info("    [0x{x:0>16}-0x{x:0>16}] <{s}> ({} KiB) system", .{
-                range.start.asInt(),
-                range.end().asInt() - 1,
+                range.start.int,
+                range.end().int - 1,
                 reg.name,
                 size_in_kib,
             });
@@ -390,8 +396,8 @@ fn printReservedRegions(reserved_regions: []const ReservedMemoryRegion) void {
             const no_map_string = if (reg.no_map) "no-map" else "map";
             const reusable_string = if (reg.reusable) "reusable" else "non-reusable";
             log.info("    [0x{x:0>16}-0x{x:0>16}] <{s}> ({} KiB) {s} {s}", .{
-                range.start.asInt(),
-                range.end().asInt() - 1,
+                range.start.int,
+                range.end().int - 1,
                 reg.name,
                 size_in_kib,
                 no_map_string,
@@ -407,7 +413,7 @@ fn printUsableRegions(regions: []const MemoryRegion) void {
         const size_in_kib = reg.size / 1024;
         log.info(
             "    [0x{x:0>16}-0x{x:0>16}] ({} KiB)",
-            .{ reg.start.asInt(), reg.end().asInt() - 1, size_in_kib },
+            .{ reg.start.int, reg.end().int - 1, size_in_kib },
         );
     }
 }
@@ -443,17 +449,20 @@ const hhdm_start = if (builtin.is_test) 0 else 0xffffffc000000000;
 
 pub fn physicalToVirtualAddress(phys: PhysicalAddress) VirtualAddress {
     // TODO: check whether the provided physical address is mapped in the HHDM region
-    return VirtualAddress.fromInt(hhdm_start + phys.asInt());
+    return VirtualAddress.fromInt(hhdm_start + phys.int);
 }
 
 pub fn virtualToPhysicalAddress(virt: VirtualAddress) PhysicalAddress {
     // TODO: check whether the provided virtual address is in the HHDM region
-    return PhysicalAddress.fromInt(virt.asInt() - hhdm_start);
+    return PhysicalAddress.fromInt(virt.int - hhdm_start);
 }
 
 /// Allocates a new page table and shallow copies an existing page table's entries to it.
-pub fn clonePageTable(page_table: arch.PageTable, only_higher_half: bool) !arch.PageTable {
-    const new_page_table_phys = try buddy_allocator.allocBlock(0);
+pub fn clonePageTable(page_table: arch.PageTable, only_higher_half: bool) error{OutOfMemory}!arch.PageTable {
+    const new_page_table_phys = buddy_allocator.allocBlock(0) catch |err| switch (err) {
+        error.InvalidOrder => unreachable,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
     const new_page_table_virt = physicalToVirtualAddress(new_page_table_phys);
     const new_page_table = PageTable.fromVirtualAddress(new_page_table_virt);
 

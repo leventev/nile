@@ -16,7 +16,7 @@ level_count: usize,
 /// Lock
 spinlock: arch.Lock,
 
-pub fn getPage(self: *PageCache, page_index: usize, allocate: bool) !*anyopaque {
+pub fn getPage(self: *PageCache, page_index: usize, allocate: bool) !mm.VirtualAddress {
     std.debug.assert(page_index <= self.totalPageCount());
 
     const bits_per_level = std.math.log2(Table.child_count);
@@ -40,7 +40,7 @@ pub fn getPage(self: *PageCache, page_index: usize, allocate: bool) !*anyopaque 
         };
 
         if (level == 0)
-            return page_ptr;
+            return .fromInt(@intFromPtr(page_ptr));
 
         table = @ptrCast(@alignCast(page_ptr));
         level -= 1;

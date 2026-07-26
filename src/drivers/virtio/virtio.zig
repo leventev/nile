@@ -293,7 +293,7 @@ pub fn initializeVirtioDevice(
         switch (virtio_cap.configuration_type) {
             .common => {
                 virt_dev.common_capability = virtio_cap;
-                virt_dev.common = @ptrFromInt(data_virt.asInt());
+                virt_dev.common = @ptrFromInt(data_virt.int);
                 common_found = true;
             },
             .notify => {
@@ -507,7 +507,7 @@ pub const VirtQueue = struct {
 
         const phys = mm.virtualToPhysicalAddress(.fromInt(@intFromPtr(ptr)));
 
-        self.descriptor_table[descriptor_id].address = phys.asInt();
+        self.descriptor_table[descriptor_id].address = phys.int;
         self.descriptor_table[descriptor_id].size = size;
         self.descriptor_table[descriptor_id].next = next_id orelse 0;
         self.descriptor_table[descriptor_id].flags = .{
@@ -582,13 +582,13 @@ pub const VirtQueue = struct {
 
         common_cap.descriptor_queue = mm.virtualToPhysicalAddress(
             .fromInt(@intFromPtr(desc_tbl)),
-        ).asInt();
+        ).int;
         common_cap.driver_queue = mm.virtualToPhysicalAddress(
             .fromInt(@intFromPtr(avail_ring_header)),
-        ).asInt();
+        ).int;
         common_cap.device_queue = mm.virtualToPhysicalAddress(
             .fromInt(@intFromPtr(used_ring_header)),
-        ).asInt();
+        ).int;
 
         common_cap.queue_enable = 1;
 

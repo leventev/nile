@@ -30,22 +30,18 @@ pub fn spawnProcess(
     parent_mount_table: *vfs.MountTable,
     parent_root_page_table: arch.PageTable,
 ) SyscallError!*Process {
-    const new_proc_id = nextProcessId() catch return SyscallError.too_many_processes;
-    var new_proc = process_cache.alloc() catch return SyscallError.out_of_memory;
+    const new_proc_id = nextProcessId() catch return SyscallError.TooManyProcesses;
+    var new_proc = process_cache.alloc() catch return SyscallError.OutOfMemory;
 
     new_proc.id = new_proc_id;
     new_proc.parent_id = parent_pid;
     new_proc.mount_table = parent_mount_table;
-    new_proc.root_page_table = mm.clonePageTable(parent_root_page_table, true) catch
-        return SyscallError.out_of_memory;
-
-    arch.switchAddressSpace(new_proc.root_page_table);
+    new_proc.root_page_table = try mm.clonePageTable(parent_root_page_table, true);
 
     // TODO: USE PAGE CACHE
     const file_size = file.dir_ent.data.regular.size;
     const order = buddy_allocator.blockOrderFromSize(file_size);
-    const file_data_phys = buddy_allocator.allocBlock(order) catch
-        return SyscallError.out_of_memory;
+    const file_data_phys = buddy_allocator.allocBlock(order) catch unreachable;
     defer buddy_allocator.deallocBlock(file_data_phys, order);
 
     const file_data = mm.physicalToVirtualAddress(file_data_phys).asPtr([*]u8)[0..file_size];
@@ -54,54 +50,36 @@ pub fn spawnProcess(
     var reader = std.Io.Reader.fixed(file_data);
     const elf_header = std.elf.Header.read(&reader) catch @panic("TODO: elf header error");
 
-    // TODO: REMOVE THIS
-    // we only set SUM so that we can write to the PT_LOAD sections,
-    // once demand paging is implemented SUM will be set to 0
-    @import("arch/riscv64/csr.zig").CSR.sstatus.setBits(1 << @bitOffsetOf(@import("arch/riscv64/trap.zig").SStatus, "supervisor_user_memory_accessable"));
-
     // TODO: do validation
     var prog_header_it = elf_header.iterateProgramHeadersBuffer(file_data);
     while (prog_header_it.next() catch unreachable) |prog_header| {
         if (prog_header.p_type != std.elf.PT_LOAD)
             continue;
 
-        // TODO: error
-        std.debug.assert(prog_header.p_memsz > 0);
-        const virt_last_byte_addr = prog_header.p_vaddr + prog_header.p_memsz - 1;
-        const virt_start_page_num = prog_header.p_vaddr / arch.page_size;
-        const virt_end_page_num = virt_last_byte_addr / arch.page_size;
-        const page_count = virt_end_page_num - virt_start_page_num + 1;
+        if (prog_header.p_memsz == 0) continue;
 
+        // TODO: error
         std.debug.assert(
             prog_header.p_vaddr % prog_header.p_align == prog_header.p_offset % prog_header.p_align,
         );
 
-        // TODO: do additional checking to make sure regions dont overlap
-        const start_page_addr = virt_start_page_num * arch.page_size;
-
-        // TODO: instead of loading the binary like this use demand paging
+        // TODO: handle case when filesz > memsz
         new_proc.mapRegion(
-            .fromInt(start_page_addr),
-            page_count * arch.page_size,
+            mm.UserAddress.fromInt(prog_header.p_vaddr) orelse return error.InvalidELF,
+            prog_header.p_memsz,
             .{
-                .execute = true,
-                .read = true,
-                .write = true,
-                // .execute = prog_header.p_flags & std.elf.PF_X != 0,
-                // .read = prog_header.p_flags & std.elf.PF_R != 0,
-                // .write = prog_header.p_flags & std.elf.PF_W != 0,
+                .file = file,
+                .offset = prog_header.p_offset,
             },
-        ) catch return error.out_of_memory;
-
-        // TODO: zero out the bytes between start_page_addr and prog_header.p_vaddr
-
-        const ph_data = file_data[prog_header.p_offset .. prog_header.p_offset + prog_header.p_filesz];
-        const mapped_region = (@as([*]u8, @ptrFromInt(prog_header.p_vaddr)))[0..prog_header.p_memsz];
-        const file_region = mapped_region[0..prog_header.p_filesz];
-        const zeroed_region = mapped_region[prog_header.p_filesz..prog_header.p_memsz];
-
-        @memcpy(file_region, ph_data);
-        @memset(zeroed_region, 0);
+            .{
+                .execute = prog_header.p_flags & std.elf.PF_X != 0,
+                .read = prog_header.p_flags & std.elf.PF_R != 0,
+                .write = prog_header.p_flags & std.elf.PF_W != 0,
+            },
+        ) catch |err| return switch (err) {
+            error.InvalidSize, error.InsideKernelSpace, error.Overlap => error.InvalidELF,
+            error.OutOfMemory => return error.OutOfMemory,
+        };
     }
 
     // TODO:
@@ -110,16 +88,17 @@ pub fn spawnProcess(
     const stack_bottom = stack_top + stack_size;
 
     new_proc.mapRegion(
-        .fromInt(stack_top),
+        mm.UserAddress.fromInt(stack_top) orelse unreachable,
         stack_size,
+        null,
         .{
             .execute = false,
             .read = true,
             .write = true,
         },
-    ) catch return error.out_of_memory;
+    ) catch return error.OutOfMemory;
 
-    _ = scheduler.newUserThread(elf_header.entry, stack_bottom, new_proc) catch return error.out_of_memory;
+    _ = scheduler.newUserThread(elf_header.entry, stack_bottom, new_proc) catch return error.OutOfMemory;
 
     running_processes.append(&new_proc.list_node);
 
@@ -133,7 +112,7 @@ pub fn currentProcess() *Process {
 }
 
 /// Terminates current process.
-pub fn killCurrentProcess(exit_code: usize) void {
+pub fn killCurrentProcess(exit_code: isize) void {
     // TODO:LOCKING
 
     // process killing checklist:
@@ -178,8 +157,9 @@ var empty_mount_table: vfs.MountTable = .{
     .mounts = null,
 };
 
-pub fn init() *Thread {
+pub fn init(root_page_table: mm.PageTable) *Thread {
     process_cache = slab_allocator.createObjectCache(Process);
+    Process.MappedRegion.cache = slab_allocator.createObjectCache(Process.MappedRegion);
 
     // TODO: maybe dont catch unreachable these errors???
 
@@ -189,7 +169,9 @@ pub fn init() *Thread {
     const sentinel_process = process_cache.alloc() catch unreachable;
     sentinel_process.id = sentinel_process_id;
     sentinel_process.mount_table = &empty_mount_table;
-
+    // TODO: we copy it because in switchAddressSpace we try to convert its virt address
+    // to physical with HHDM but the original root page table is in .bss which cant be converted
+    sentinel_process.root_page_table = mm.clonePageTable(root_page_table, true) catch unreachable;
     running_processes.append(&sentinel_process.list_node);
 
     const thread = scheduler.newKernelThread(sentinel_thread, sentinel_process) catch unreachable;

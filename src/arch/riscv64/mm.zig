@@ -3,6 +3,7 @@ const mm = @import("../../mem/mm.zig");
 const kio = @import("../../kio.zig");
 const Process = @import("../../Process.zig");
 const buddy_allocator = @import("../../mem/buddy_allocator.zig");
+const vfs = @import("../../vfs.zig");
 
 pub const page_size = 4096;
 pub const entries_per_table = 512;
@@ -93,11 +94,11 @@ const PageNumbers = struct {
     }
 
     fn fromVirtual(virt: mm.VirtualAddress) PageNumbers {
-        return fromInt(virt.asInt());
+        return fromInt(virt.int);
     }
 
     fn fromPhysical(phys: mm.PhysicalAddress) PageNumbers {
-        return fromInt(phys.asInt());
+        return fromInt(phys.int);
     }
 };
 
@@ -220,7 +221,7 @@ fn getOrMapPageTable(parent_page_tbl: PageTable, index: usize) !PageTable {
             ) catch unreachable;
 
             const virt = mm.physicalToVirtualAddress(frame);
-            const ptr = @as([*]u64, @ptrFromInt(virt.asInt()));
+            const ptr = @as([*]u64, @ptrFromInt(virt.int));
             const page: []u64 = ptr[0..entries_per_table];
             @memset(page, 0);
 
@@ -229,7 +230,7 @@ fn getOrMapPageTable(parent_page_tbl: PageTable, index: usize) !PageTable {
             const frame = pg_tbl_entry.address();
 
             const virt = mm.physicalToVirtualAddress(frame);
-            const ptr = @as([*]u64, @ptrFromInt(virt.asInt()));
+            const ptr = @as([*]u64, @ptrFromInt(virt.int));
             break :blk ptr;
         };
 
@@ -238,7 +239,7 @@ fn getOrMapPageTable(parent_page_tbl: PageTable, index: usize) !PageTable {
 
 pub fn switchAddressSpace(root_page_table: PageTable) void {
     const pg_tbl_virt = mm.VirtualAddress.fromInt(@intFromPtr(root_page_table.entries));
-    const pg_tbl_ppn: u44 = @intCast(mm.virtualToPhysicalAddress(pg_tbl_virt).asInt() / 4096);
+    const pg_tbl_ppn: u44 = @intCast(mm.virtualToPhysicalAddress(pg_tbl_virt).int / page_size);
     writeSATP(.{
         .address_space_id = 0,
         .mode = .sv39,
@@ -246,26 +247,26 @@ pub fn switchAddressSpace(root_page_table: PageTable) void {
     });
 
     // TODO: dont always flush TLB
-    flushPage(null, 0);
+    flushPage(null, null);
 }
 
+// TODO: for now i will keep this function which can map multiple pages at once
+// but if in the future there is no need for that then this should be replaced
+// with a function that only maps a single page
 pub fn mapRegion(
     root_page_tbl: PageTable,
-    addr: mm.VirtualAddress,
-    size: usize,
+    page_number: usize,
+    page_count: usize,
     flags: Process.MappedRegion.Flags,
+    frames: []const mm.PhysicalAddress,
 ) !void {
-    // TODO: instead of addr we should provide the page number and instead of size provide page_count
-    std.debug.assert(addr.asInt() != 0);
-    std.debug.assert(addr.asInt() % page_size == 0);
-    std.debug.assert(size % page_size == 0);
-
-    const end_addr = addr.add(size);
+    const start_addr = mm.VirtualAddress.fromInt(page_number * page_size);
+    const end_addr = start_addr.add(page_count * page_size);
 
     // set them equal so on the first iteration loading
-    // the page tables gets bypassed
-    var prev_addr = addr;
-    var current_addr = addr;
+    // the page tables gets skipped
+    var prev_addr = start_addr;
+    var current_addr = start_addr;
 
     // in Sv39 we have 3 levels of page tables
     // level 2 is the highest(root page table)
@@ -275,7 +276,9 @@ pub fn mapRegion(
     var pg_tbl_1 = try getOrMapPageTable(pg_tbl_2, pn.page_number_2);
     var pg_tbl_0 = try getOrMapPageTable(pg_tbl_1, pn.page_number_1);
 
-    while (end_addr.asInt() != current_addr.asInt()) {
+    var page_idx: usize = 0;
+
+    while (end_addr.int != current_addr.int) : (page_idx += 1) {
         const prev_pn = PageNumbers.fromVirtual(prev_addr);
         const current_pn = PageNumbers.fromVirtual(current_addr);
 
@@ -296,7 +299,8 @@ pub fn mapRegion(
             });
         }
 
-        const frame = try buddy_allocator.allocBlock(0);
+        const frame = frames[page_idx];
+
         pg_tbl_0.writeEntry(current_pn.page_number_0, frame, .leaf_4kib, .{
             .executable = flags.execute,
             .readable = flags.read,
@@ -305,7 +309,7 @@ pub fn mapRegion(
             .user = true,
         }) catch unreachable;
 
-        flushPage(current_addr.asInt(), 0);
+        flushPage(current_addr.int, 0);
 
         prev_addr = current_addr;
         current_addr = current_addr.add(page_size);
@@ -319,7 +323,11 @@ pub fn copyPageTable(
 ) void {
     const higher_half = PageNumbers.fromVirtual(higherHalfAddress);
 
-    const subtable_start_idx = if (only_higher_half) higher_half.page_number_2 else 0;
+    const subtable_start_idx = if (only_higher_half) blk: {
+        @memset(original_page_table.entries[0..higher_half.page_number_2], @bitCast(@as(u64, 0)));
+        break :blk higher_half.page_number_2;
+    } else 0;
+
     const new_subtable = new_page_table.entries[subtable_start_idx..entries_per_table];
     const orig_subtable = original_page_table.entries[subtable_start_idx..entries_per_table];
 
@@ -350,7 +358,7 @@ pub fn unmapPageTable(
             const lower_level_pg_tbl = PageTable.fromVirtualAddress(virt);
             unmapPageTable(lower_level_pg_tbl, level - 1, address);
         } else {
-            flushPage(address.asInt(), 0);
+            flushPage(address.int, 0);
         }
 
         const block_order: usize = if (entry.isBranch()) 0 else switch (level) {

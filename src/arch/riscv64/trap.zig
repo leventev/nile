@@ -6,7 +6,13 @@ const timer = @import("timer.zig");
 const devicetree = @import("root").devicetree;
 const registers = @import("registers.zig");
 const syscalls = @import("syscalls.zig");
+const scheduler = @import("../../scheduler.zig");
 const plic = @import("../../drivers/int_controller/plic.zig");
+const mm = @import("../../mem/mm.zig");
+const processes = @import("../../processes.zig");
+const arch = @import("../../arch/arch.zig");
+const vfs = @import("../../vfs.zig");
+const buddy_allocator = @import("../../mem/buddy_allocator.zig");
 
 const ThreadState = registers.ThreadState;
 
@@ -218,11 +224,7 @@ fn genericExceptionHandler(code: ExceptionCode, tval: u64, state: *ThreadState) 
 fn handleException(code: ExceptionCode, tval: u64, state: *ThreadState) void {
     switch (code) {
         .load_page_fault, .instruction_page_fault, .store_or_amo_page_fault => {
-            state.printGPRs(.err);
-            std.log.err("sstatus={}", .{state.status});
-            std.log.err("pc=0x{x}", .{state.pc});
-            std.log.err("Faulting address: 0x{x}", .{tval});
-            @panic("Page fault");
+            handlePagefault(code, .fromInt(tval), state);
         },
         .ecall_u_mode => {
             syscalls.dispatchSyscall(state);
@@ -243,6 +245,73 @@ fn handleException(code: ExceptionCode, tval: u64, state: *ThreadState) void {
         },
         else => genericExceptionHandler(code, tval, state),
     }
+}
+
+const PagefaultType = enum {
+    read,
+    write,
+    instruction,
+};
+fn handlePagefault(code: ExceptionCode, address: mm.VirtualAddress, state: *ThreadState) void {
+    const pagefault_type: PagefaultType = switch (code) {
+        .instruction_page_fault => .instruction,
+        .load_page_fault => .read,
+        .store_or_amo_page_fault => .write,
+        else => unreachable,
+    };
+
+    const current_thread = scheduler.getCurrentThread();
+    demand_paging: {
+        if (current_thread.purpose != .general) break :demand_paging;
+        const general_thread = &current_thread.purpose.general;
+
+        const user_address = mm.UserAddress.fromVirtual(address) orelse {
+            // TODO: signal
+            processes.killCurrentProcess(-1);
+            return;
+        };
+
+        const process = general_thread.owner_process;
+        var next_ptr = &process.mapped_regions;
+        while (next_ptr.*) |mapped_region| : (next_ptr = &mapped_region.next) {
+            if (!mapped_region.contains(user_address))
+                continue;
+
+            const frame = if (mapped_region.backing) |backing| blk: {
+                const region_offset = user_address.int - mapped_region.address.int;
+                const file_offset = backing.offset + region_offset;
+                const page_idx = file_offset / arch.page_size;
+                const page_addr = backing.file.dir_ent.data.regular.page_cache.getPage(page_idx, true) catch @panic("TODO");
+                break :blk mm.virtualToPhysicalAddress(page_addr);
+            } else buddy_allocator.allocBlock(0) catch @panic("TODO");
+
+            var frames = [1]mm.PhysicalAddress{frame};
+
+            arch.mapRegion(
+                process.root_page_table,
+                user_address.int / arch.page_size,
+                1,
+                mapped_region.flags,
+                &frames,
+            ) catch @panic("TODO");
+
+            return;
+        }
+    }
+
+    pagefaultCrash(address, pagefault_type, state);
+}
+
+fn pagefaultCrash(
+    address: mm.VirtualAddress,
+    pagefault_type: PagefaultType,
+    state: *ThreadState,
+) noreturn {
+    state.printGPRs(.err);
+    std.log.err("sstatus={}", .{state.status});
+    std.log.err("pc=0x{x}", .{state.pc});
+    std.log.err("faulting address: 0x{x}", .{address.int});
+    std.debug.panic("Page fault ({})", .{pagefault_type});
 }
 
 var syscall_in_progress = false;
@@ -271,9 +340,6 @@ fn handleInterrupt(code: InterruptCode, tval: u64, state: *ThreadState) void {
         .supervisor_external => {
             if (syscall_in_progress) @panic("syscall received while in a syscall handler");
             syscall_in_progress = true;
-            // regs.printGPRs(.err);
-            // std.log.err("PC=0x{x}", .{regs.pc});
-            // @panic("Supervisor external interrupt");
             plic.handleInterrupt();
             syscall_in_progress = false;
         },

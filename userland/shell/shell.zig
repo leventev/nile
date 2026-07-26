@@ -59,6 +59,14 @@ export fn _start() void {
 
     const quit = false;
 
+    const exec_fd_res = sys.sysOpenat(-1, "/ls", 0, 0);
+    if (exec_fd_res < 0) {
+        exit(-1);
+    }
+
+    const exec_fd: u32 = @intCast(exec_fd_res);
+    _ = sys.sysSpawn(exec_fd, 0);
+
     var line_buff: [512]u8 = undefined;
     var line_buff_written: usize = 0;
 

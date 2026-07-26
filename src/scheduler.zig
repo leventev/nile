@@ -94,7 +94,7 @@ pub fn newSoftInterruptHandler(
         std.log.debug("new soft interrupt thread(TID={}), callback: 0x{x}, kernel stack top: 0x{x}, dev: {s}", .{
             thread_id,
             callback_addr,
-            stack_top.asInt(),
+            stack_top.int,
             dev.name,
         });
     }
@@ -132,8 +132,8 @@ pub fn newKernelThread(entry_point_fn: *const fn () void, owner_process: *Proces
     if (config.debug_scheduler) {
         std.log.debug("new kernel thread(TID={}), entry point: 0x{x}, kernel stack top: 0x{x}", .{
             thread_id,
-            entry_point.asInt(),
-            kernel_stack_top.asInt(),
+            entry_point.int,
+            kernel_stack_top.int,
         });
     }
 
@@ -174,7 +174,7 @@ pub fn newUserThread(
         std.log.debug("new user thread(TID={}), entry point: 0x{x}, kernel stack top: 0x{x}", .{
             thread_id,
             entry_point_addr,
-            thread.kernel_stack_top.asInt(),
+            thread.kernel_stack_top.int,
         });
     }
 

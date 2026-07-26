@@ -19,3 +19,7 @@ pub fn sysRead(fd: u32, buff: []u8) i64 {
 pub fn sysWrite(fd: u32, buff: []const u8) i64 {
     return riscv64.sysWrite(fd, buff);
 }
+
+pub fn sysSpawn(executable_fd: u32, flags: u64) i64 {
+    return riscv64.sysSpawn(executable_fd, flags);
+}

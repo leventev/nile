@@ -3,6 +3,7 @@ const SyscallNumber = enum(u64) {
     openat = 1,
     read = 2,
     write = 3,
+    spawn = 4,
 };
 
 pub fn syscall(
@@ -110,4 +111,8 @@ pub fn sysRead(fd: u32, buff: []u8) i64 {
 
 pub fn sysWrite(fd: u32, buff: []const u8) i64 {
     return syscall(.write, .{ fd, @intFromPtr(buff.ptr), buff.len });
+}
+
+pub fn sysSpawn(executable_fd: u32, flags: u64) i64 {
+    return syscall(.spawn, .{ executable_fd, flags });
 }

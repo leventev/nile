@@ -108,7 +108,7 @@ pub fn scheduleNextThread(thread: *Thread) void {
         std.log.debug("schedule next thread: ID: {} sscratch: 0x{x} trap stack bottom: 0x{x} ", .{
             @intFromEnum(thread.id),
             sscratch_value,
-            trap_stack_bottom,
+            trap_stack_bottom.int,
         });
         thread_state.printRegs(.debug);
     }

@@ -15,7 +15,7 @@ const Device = device.Device;
 const stack_size_order = 4;
 const stack_size = @shlExact(1, stack_size_order) * 4096;
 
-pub var running_threads: std.DoublyLinkedList = .{};
+pub var running_threads: ?*Thread = null;
 pub var threads_available = std.bit_set.ArrayBitSet(usize, Thread.Id.max).initFull();
 
 var thread_cache: slab_allocator.ObjectCache(Thread) = .{};
@@ -39,23 +39,22 @@ pub fn queueSoftInterruptHandler(thread: *Thread) void {
 
 /// Append a thread at the end of the running threads linked list.
 fn appendRunningThread(thread: *Thread) void {
-    var node: *?*std.DoublyLinkedList.Node = &running_threads.first;
-    while (node.*) |next_ptr| : (node = &next_ptr.next) {
+    var next_ptr = &running_threads;
+    while (next_ptr.*) |added_thread| : (next_ptr = &added_thread.scheduler_list_next) {
         // check whether a thread is already added
-
         if (config.debug_scheduler) {
-            if (@intFromPtr(next_ptr) == @intFromPtr(&thread.scheduler_list_node)) {
+            if (@intFromPtr(added_thread) == @intFromPtr(thread)) {
                 std.debug.panicExtra(
                     null,
                     "trying to append an already queued thread to running threads list, TID: {}",
-                    .{@intFromEnum(thread.id)},
+                    .{@intFromEnum(added_thread.id)},
                 );
             }
         }
     }
 
-    node.* = &thread.scheduler_list_node;
-    thread.scheduler_list_node.next = null;
+    next_ptr.* = thread;
+    thread.scheduler_list_next = null;
 }
 
 /// Get the lowest available thread ID
@@ -113,11 +112,15 @@ pub fn newKernelThread(entry_point_fn: *const fn () void, owner_process: *Proces
         .general = .{
             .user = null,
             .owner_process = owner_process,
-            .process_list_node = .{},
+            .process_list_next = null,
         },
     };
 
-    owner_process.associated_threads.append(&thread.purpose.general.process_list_node);
+    var next_ptr = &owner_process.associated_threads;
+    while (next_ptr.*) |added_thread| {
+        next_ptr = &added_thread.purpose.general.process_list_next;
+    }
+    next_ptr.* = thread;
 
     const kernel_stack_top = buddy_allocator.allocBlock(stack_size_order) catch
         return error.out_of_memory;
@@ -161,11 +164,15 @@ pub fn newUserThread(
                 .in_userspace = true,
                 .state = thread_state_cache.alloc() catch return error.out_of_memory,
             },
-            .process_list_node = .{},
+            .process_list_next = null,
         },
     };
 
-    owner_process.associated_threads.append(&thread.purpose.general.process_list_node);
+    var next_ptr = &owner_process.associated_threads;
+    while (next_ptr.*) |added_thread| {
+        next_ptr = &added_thread.purpose.general.process_list_next;
+    }
+    next_ptr.* = thread;
 
     arch.setupNewGeneralThread(thread, .fromInt(user_stack_bottom_addr), .fromInt(entry_point_addr));
     appendRunningThread(thread);
@@ -185,17 +192,25 @@ pub fn newUserThread(
 /// The thread is freed thus the pointer becomes invalid.
 /// The function does not schedule the new first thread.
 pub fn removeThread(thread: *Thread) void {
-    running_threads.remove(&thread.scheduler_list_node);
-    thread_cache.free(thread);
+    var next_ptr = &running_threads;
+    // TODO: maybe use a doubly linked list to avoid iterating
+    while (next_ptr.*) |added_thread| : (next_ptr = &added_thread.scheduler_list_next) {
+        if (added_thread != thread) continue;
+
+        next_ptr.* = thread.scheduler_list_next;
+        thread_cache.free(thread);
+        return;
+    }
+
+    @panic("Trying to remove thread that is not in the running threads list");
 }
 
 pub fn dumpRunningThreads() void {
     // TODO: locking here too
 
     std.log.debug("running threads:", .{});
-    var node = running_threads.first;
-    while (node) |node_ptr| : (node = node_ptr.next) {
-        const thread: *Thread = @fieldParentPtr("scheduler_list_node", node_ptr);
+    var next_ptr = &running_threads;
+    while (next_ptr.*) |thread| : (next_ptr = &thread.scheduler_list_next) {
         std.log.debug("{}", .{thread.id});
     }
 }
@@ -229,14 +244,12 @@ pub fn scheduleCurrent() void {
 }
 
 pub fn getCurrentThread() *Thread {
-    const current_thread_node = running_threads.first orelse @panic("Running threads list is empty, sentinel is not running?");
-    const thread: *Thread = @fieldParentPtr("scheduler_list_node", current_thread_node);
-    return thread;
+    return running_threads orelse @panic("Running threads list is empty, sentinel is not running?");
 }
 
 pub fn popCurrentThread() *Thread {
-    const current_thread_node = running_threads.popFirst() orelse @panic("Running threads list is empty, sentinel is not running?");
-    const thread: *Thread = @fieldParentPtr("scheduler_list_node", current_thread_node);
+    const thread = running_threads orelse @panic("Running threads list is empty, sentinel is not running?");
+    running_threads = thread.scheduler_list_next;
     return thread;
 }
 

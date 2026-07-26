@@ -10,7 +10,7 @@ const Thread = @This();
 id: Id,
 
 ///
-scheduler_list_node: std.DoublyLinkedList.Node,
+scheduler_list_next: ?*Thread,
 
 kernel_state: *arch.ThreadState,
 
@@ -42,7 +42,7 @@ pub const General = struct {
         state: *arch.ThreadState,
     },
 
-    process_list_node: std.DoublyLinkedList.Node,
+    process_list_next: ?*Thread,
 
     /// Which process the thread belongs to.
     owner_process: *Process,

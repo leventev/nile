@@ -11,7 +11,7 @@ const buddy_allocator = @import("mem/buddy_allocator.zig");
 
 const log = std.log.scoped(.processes);
 
-var running_processes: std.DoublyLinkedList = .{};
+var running_processes: ?*Process = null;
 var processes_available: std.bit_set.ArrayBitSet(usize, Process.Id.max) = .initFull();
 
 var process_cache: slab_allocator.ObjectCache(Process) = .{};
@@ -98,9 +98,11 @@ pub fn spawnProcess(
         },
     ) catch return error.OutOfMemory;
 
-    _ = scheduler.newUserThread(elf_header.entry, stack_bottom, new_proc) catch return error.OutOfMemory;
+    var next_ptr = &running_processes;
+    while (next_ptr.*) |added_process| : (next_ptr = &added_process.next) {}
+    next_ptr.* = new_proc;
 
-    running_processes.append(&new_proc.list_node);
+    _ = scheduler.newUserThread(elf_header.entry, stack_bottom, new_proc) catch return error.OutOfMemory;
 
     return new_proc;
 }
@@ -129,12 +131,19 @@ pub fn killCurrentProcess(exit_code: isize) void {
         @panic("Trying to kill sentinel process");
     }
 
-    running_processes.remove(&current_process.list_node);
-
-    while (current_process.associated_threads.popFirst()) |thread_node| {
-        const general: *Thread.General = @fieldParentPtr("process_list_node", thread_node);
-        const thread: *Thread = @fieldParentPtr("purpose", @as(*Thread.Purpose, @ptrCast(general)));
-        scheduler.removeThread(thread);
+    {
+        var next_ptr = &running_processes;
+        while (next_ptr.*) |added_process| : (next_ptr = &added_process.next) {
+            if (added_process != current_process) continue;
+            next_ptr.* = current_process.next;
+            break;
+        }
+    }
+    {
+        var next_ptr = &current_process.associated_threads;
+        while (next_ptr.*) |thread| : (next_ptr = &thread.purpose.general.process_list_next) {
+            scheduler.removeThread(thread);
+        }
     }
 
     scheduler.scheduleCurrent();
@@ -172,7 +181,10 @@ pub fn init(root_page_table: mm.PageTable) *Thread {
     // TODO: we copy it because in switchAddressSpace we try to convert its virt address
     // to physical with HHDM but the original root page table is in .bss which cant be converted
     sentinel_process.root_page_table = mm.clonePageTable(root_page_table, true) catch unreachable;
-    running_processes.append(&sentinel_process.list_node);
+
+    var next_ptr = &running_processes;
+    while (next_ptr.*) |added_process| : (next_ptr = &added_process.next) {}
+    next_ptr.* = sentinel_process;
 
     const thread = scheduler.newKernelThread(sentinel_thread, sentinel_process) catch unreachable;
     return thread;

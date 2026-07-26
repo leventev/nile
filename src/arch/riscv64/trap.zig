@@ -307,11 +307,21 @@ fn pagefaultCrash(
     pagefault_type: PagefaultType,
     state: *ThreadState,
 ) noreturn {
+    const thread = scheduler.getCurrentThread();
+    var buff: [256]u8 = undefined;
+    const thread_name = if (thread.purpose == .general)
+        std.fmt.bufPrint(&buff, "TID: {} PID: {}", .{
+            thread.id,
+            thread.purpose.general.owner_process.id,
+        }) catch unreachable
+    else
+        std.fmt.bufPrint(&buff, "TID: {}", .{thread.id}) catch unreachable;
+
     state.printGPRs(.err);
     std.log.err("sstatus={}", .{state.status});
     std.log.err("pc=0x{x}", .{state.pc});
     std.log.err("faulting address: 0x{x}", .{address.int});
-    std.debug.panic("Page fault ({})", .{pagefault_type});
+    std.debug.panic("Page fault ({s}) ({})", .{ thread_name, pagefault_type });
 }
 
 var syscall_in_progress = false;

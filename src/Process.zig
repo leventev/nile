@@ -11,7 +11,7 @@ const max_fd = 100;
 
 parent_id: ?Id,
 id: Id,
-associated_threads: std.DoublyLinkedList,
+associated_threads: ?*Thread,
 mapped_regions: ?*MappedRegion,
 mapped_region_count: usize,
 root_page_table: arch.PageTable,
@@ -22,7 +22,7 @@ file_descriptor_table: [max_fd]?struct {
     file: vfs.OpenFile,
     offset: usize,
 },
-list_node: std.DoublyLinkedList.Node,
+next: ?*Process,
 
 pub const Id = enum(u32) {
     _,

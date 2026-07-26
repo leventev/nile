@@ -1,7 +1,9 @@
 const std = @import("std");
 const cfg = @import("src/config.zig");
 
-pub fn build(b: *std.Build) void {
+const userland_programs = .{"shell"};
+
+pub fn build(b: *std.Build) !void {
     // we are targeting riscv64
     const riscv_f = std.Target.riscv.Feature;
     const features_add = [_]std.Target.riscv.Feature{riscv_f.a};
@@ -26,35 +28,47 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    const shell_exe = b.addExecutable(.{
-        .name = "shell",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("userland/shell/src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .code_model = .medany,
-        }),
-    });
+    const build_image_step = b.step("image", "Build the / image from the 'root' directory");
 
     const sys = b.dependency("sys", .{
         .target = target,
         .optimize = optimize,
     });
+    const programs = &.{ "shell", "ls" };
 
-    shell_exe.root_module.addImport("sys", sys.module("sys"));
+    inline for (programs) |program| {
+        const path = try std.fmt.allocPrint(b.allocator, "userland/{s}/{s}.zig", .{ program, program });
+        const user_exe = b.addExecutable(.{
+            .name = program,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(path),
+                .target = target,
+                .optimize = optimize,
+                .code_model = .medany,
+            }),
+        });
+        user_exe.root_module.addImport("sys", sys.module("sys"));
+        const user_exe_install = b.addInstallArtifact(user_exe, .{
+            .dest_dir = .{
+                .override = .{ .custom = "../root" },
+            },
+        });
+        build_image_step.dependOn(&user_exe_install.step);
+    }
 
     exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/start.s"));
     exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/schedule.s"));
     exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/lock.s"));
     exe.setLinkerScript(b.path("linker.ld"));
 
-    b.getInstallStep().dependOn(
-        &b.addInstallArtifact(shell_exe, .{
-            .dest_dir = .{
-                .override = .{ .custom = "../src" },
-            },
-        }).step,
-    );
+    // TODO: fix when 0.17 drops
+    // https://codeberg.org/ziglang/zig/issues/35473
+    const find_command = b.addSystemCommand(&.{ "find", "root" });
+    const cpio_command = b.addSystemCommand(&.{ "cpio", "-o", "-F", "src/root.cpio" });
+    cpio_command.setStdIn(.{ .lazy_path = find_command.captureStdOut(.{}) });
+
+    build_image_step.dependOn(&cpio_command.step);
+    b.getInstallStep().dependOn(build_image_step);
     b.installArtifact(exe);
 
     const tests = b.addTest(.{

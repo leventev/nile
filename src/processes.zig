@@ -102,7 +102,10 @@ pub fn spawnProcess(
     while (next_ptr.*) |added_process| : (next_ptr = &added_process.next) {}
     next_ptr.* = new_proc;
 
-    _ = scheduler.newUserThread(elf_header.entry, stack_bottom, new_proc) catch return error.OutOfMemory;
+    _ = scheduler.newUserThread(elf_header.entry, stack_bottom, new_proc) catch
+        return error.OutOfMemory;
+
+    dumpProcesses();
 
     return new_proc;
 }
@@ -111,6 +114,23 @@ pub fn currentProcess() *Process {
     const current_thread = scheduler.getCurrentThread();
     const gp_thread = current_thread.purpose.general;
     return gp_thread.owner_process;
+}
+
+pub fn dumpProcesses() void {
+    std.log.debug("Running processes:", .{});
+    var proc_ptr = running_processes;
+    while (proc_ptr) |process| : (proc_ptr = process.next) {
+        std.log.debug("  PID {} page table phys: 0x{x}", .{
+            @intFromEnum(process.id),
+            mm.virtualToPhysicalAddress(
+                .fromInt(@intFromPtr(process.root_page_table.entries)),
+            ).int,
+        });
+        var thread_ptr = process.associated_threads;
+        while (thread_ptr) |thread| : (thread_ptr = thread.purpose.general.process_list_next) {
+            std.log.debug("    TID {}", .{@intFromEnum(thread.id)});
+        }
+    }
 }
 
 /// Terminates current process.

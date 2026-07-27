@@ -183,6 +183,15 @@ pub fn writeSATP(satp: SATP) void {
     );
 }
 
+pub fn readSATP() SATP {
+    var val: u64 = undefined;
+    asm volatile ("csrr %[satp], satp"
+        : [satp] "=r" (val),
+    );
+
+    return @bitCast(val);
+}
+
 fn flushPage(virt_addr: ?usize, asid: ?usize) void {
     if (asid) |as| {
         if (virt_addr) |virt| {
@@ -324,7 +333,7 @@ pub fn copyPageTable(
     const higher_half = PageNumbers.fromVirtual(higherHalfAddress);
 
     const subtable_start_idx = if (only_higher_half) blk: {
-        @memset(original_page_table.entries[0..higher_half.page_number_2], @bitCast(@as(u64, 0)));
+        @memset(new_page_table.entries[0..higher_half.page_number_2], @bitCast(@as(u64, 0)));
         break :blk higher_half.page_number_2;
     } else 0;
 

@@ -13,6 +13,7 @@ const processes = @import("../../processes.zig");
 const arch = @import("../../arch/arch.zig");
 const vfs = @import("../../vfs.zig");
 const buddy_allocator = @import("../../mem/buddy_allocator.zig");
+const riscv64_mm = @import("mm.zig");
 
 const ThreadState = registers.ThreadState;
 
@@ -317,10 +318,15 @@ fn pagefaultCrash(
     else
         std.fmt.bufPrint(&buff, "TID: {}", .{thread.id}) catch unreachable;
 
+    const satp = riscv64_mm.readSATP();
+
     state.printGPRs(.err);
     std.log.err("sstatus={}", .{state.status});
     std.log.err("pc=0x{x}", .{state.pc});
-    std.log.err("faulting address: 0x{x}", .{address.int});
+    std.log.err("faulting address: 0x{x} (root page table phys: 0x{x})", .{
+        address.int,
+        satp.physical_page_number * arch.page_size,
+    });
     std.debug.panic("Page fault ({s}) ({})", .{ thread_name, pagefault_type });
 }
 

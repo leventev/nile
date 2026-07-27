@@ -89,5 +89,10 @@ pub fn dispatchSyscall(user_state: *ThreadState) void {
     const next_thread = scheduler.getCurrentThread();
     trap.current_trap_stack_bottom = next_thread.effectiveThreadStackBottom().int;
 
+    // TODO: ?
+    if (next_thread.purpose == .general) {
+        riscv64.switchAddressSpace(next_thread.purpose.general.owner_process.root_page_table);
+    }
+
     CSR.sscratch.write(@intFromPtr(next_thread.effectiveThreadState()));
 }

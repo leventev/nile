@@ -35,7 +35,7 @@ pub const VirtualAddress = packed struct(usize) {
     }
 
     pub fn add(self: VirtualAddress, offset: usize) VirtualAddress {
-        return .{ .int = self.int + offset };
+        return .{ .int = self.int +% offset };
     }
 
     pub fn asPtr(self: VirtualAddress, comptime T: type) T {
@@ -60,7 +60,7 @@ pub const PhysicalAddress = packed struct(usize) {
     }
 
     pub fn add(self: PhysicalAddress, offset: usize) PhysicalAddress {
-        return fromInt(self.int + offset);
+        return fromInt(self.int +% offset);
     }
 
     pub fn isPageAligned(self: PhysicalAddress) bool {
@@ -97,14 +97,19 @@ pub const UserAddress = struct {
     }
 
     pub fn add(self: UserAddress, offset: usize) ?UserAddress {
-        return fromInt(self.int + offset);
+        return fromInt(self.int +% offset);
     }
 
     pub fn slice(self: UserAddress, size: usize) ?[]u8 {
         std.debug.assert(size > 0);
 
         // last byte accessed
-        _ = self.add(size - 1) orelse return null;
+        const end = self.add(size - 1) orelse return null;
+
+        // on overflow
+        if (end.int < self.int)
+            return null;
+
         return self.asPtr([*]u8)[0..size];
     }
 };

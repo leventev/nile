@@ -73,10 +73,10 @@ pub fn read(
     if (fd >= current_process.file_descriptor_table.len)
         return SyscallError.InvalidFileDescriptor;
 
-    const open_file = current_process.file_descriptor_table[fd] orelse
-        return SyscallError.InvalidFileDescriptor;
+    const open_file = &(current_process.file_descriptor_table[fd] orelse
+        return SyscallError.InvalidFileDescriptor);
 
-    return open_file.file.read(buff, open_file.offset) catch @panic("TODO");
+    return open_file.file.read(buff, &open_file.offset) catch @panic("TODO");
 }
 
 pub fn write(

@@ -23,9 +23,20 @@ fn changeDirectory(args: []const u8) void {
     _ = args;
 }
 
+fn ls(_: []const u8) void {
+    const exec_fd_res = sys.sysOpenat(-1, "/ls", 0, 0);
+    if (exec_fd_res < 0) {
+        exit(-1);
+    }
+
+    const exec_fd: u32 = @intCast(exec_fd_res);
+    _ = sys.sysSpawn(exec_fd, 0);
+}
+
 const commands = [_]Command{
     .{ .name = "echo", .callback = echo },
     .{ .name = "cd", .callback = changeDirectory },
+    .{ .name = "ls", .callback = ls },
 };
 
 fn processLine(line: []const u8) void {
@@ -58,14 +69,6 @@ export fn _start() void {
     stdout_fd = fd;
 
     const quit = false;
-
-    const exec_fd_res = sys.sysOpenat(-1, "/ls", 0, 0);
-    if (exec_fd_res < 0) {
-        exit(-1);
-    }
-
-    const exec_fd: u32 = @intCast(exec_fd_res);
-    _ = sys.sysSpawn(exec_fd, 0);
 
     var line_buff: [512]u8 = undefined;
     var line_buff_written: usize = 0;

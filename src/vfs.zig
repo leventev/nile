@@ -3,6 +3,7 @@ const arch = @import("arch/arch.zig");
 const slab_allocator = @import("mem/slab_allocator.zig");
 const Path = @import("Path.zig");
 const PageCache = @import("PageCache.zig");
+const SyscallError = @import("syscall/errors.zig").SyscallError;
 
 pub const Inode = enum(u64) {
     _,
@@ -243,8 +244,9 @@ const FileSystemCache = struct {
                 },
             };
             new_entry.next = null;
-
             dent_ptr.* = new_entry;
+
+            self.entry_count += 1;
         }
     };
 };
@@ -507,29 +509,79 @@ pub fn genericWriteRegular(
     return buff.len;
 }
 
+pub const DirectoryEntryUser = extern struct {
+    name_size: u32,
+    type: u32,
+    inode: u64,
+
+    // name ...
+};
+
 pub const OpenFile = struct {
     mounted_fs_id: FileSystem.Id,
     dir_ent: *FileSystemCache.DirectoryEntry,
 
-    pub fn read(self: OpenFile, buff: []u8, offset: usize) !usize {
+    pub fn read(self: OpenFile, buff: []u8, offset: *usize) SyscallError!usize {
         const fs = global_file_system_table.getById(self.mounted_fs_id).* orelse
             @panic("Invalid open file");
 
         switch (self.dir_ent.data) {
-            .directory => @panic("TODO: directory read"),
+            .directory => |dir| {
+                if (@intFromPtr(buff.ptr) % @alignOf(DirectoryEntryUser) != 0)
+                    return error.InvalidMemoryAddress;
+
+                if (offset.* >= dir.entry_count) return 0;
+
+                // TODO: use a tree or smth to store inodes
+                var dir_ent_ptr = dir.entries;
+                for (0..offset.*) |_|
+                    dir_ent_ptr = (dir_ent_ptr orelse @panic("Invalid offset")).next;
+
+                var total_written_size: usize = 0;
+                while (dir_ent_ptr) |dir_ent| : (dir_ent_ptr = dir_ent.next) {
+                    const remaining_buff_size = buff.len - total_written_size;
+                    const required_size = @sizeOf(DirectoryEntryUser) + dir_ent.name.len;
+                    const padded_size = std.mem.alignForward(
+                        usize,
+                        required_size,
+                        @sizeOf(DirectoryEntryUser),
+                    );
+                    if (required_size > remaining_buff_size)
+                        break;
+
+                    const struct_start_ptr = buff.ptr + total_written_size;
+                    const name_start_ptr = struct_start_ptr + @sizeOf(DirectoryEntryUser);
+                    const struct_ptr: *DirectoryEntryUser = @ptrCast(@alignCast(struct_start_ptr));
+                    const name_ptr = name_start_ptr[0..dir_ent.name.len];
+
+                    struct_ptr.inode = dir_ent.inode.asInt();
+                    struct_ptr.name_size = @intCast(dir_ent.name.len);
+                    struct_ptr.type = 0;
+                    @memcpy(name_ptr, dir_ent.name);
+
+                    total_written_size += @min(padded_size, remaining_buff_size);
+                    offset.* += 1;
+                }
+
+                return total_written_size;
+            },
             .regular => {
-                if (fs.skeleton.read) |read_fn|
-                    return if (fs.skeleton.flags.has_page_cache)
-                        genericReadRegular(fs, self.dir_ent, buff, offset)
+                const read_size = if (fs.skeleton.read) |readFn|
+                    if (fs.skeleton.flags.has_page_cache)
+                        try genericReadRegular(fs, self.dir_ent, buff, offset.*)
                     else
-                        read_fn(fs.internal_data, self.dir_ent.inode, buff, offset)
+                        try readFn(fs.internal_data, self.dir_ent.inode, buff, offset.*)
                 else
-                    return genericReadRegular(fs, self.dir_ent, buff, offset);
+                    try genericReadRegular(fs, self.dir_ent, buff, offset.*);
+
+                return read_size;
             },
         }
     }
 
     pub fn write(self: OpenFile, buff: []const u8, offset: usize) !usize {
+        if (buff.len == 0) return 0;
+
         const fs = global_file_system_table.getById(self.mounted_fs_id).* orelse
             @panic("Invalid open file");
 

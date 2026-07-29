@@ -45,7 +45,8 @@ pub fn spawnProcess(
     defer buddy_allocator.deallocBlock(file_data_phys, order);
 
     const file_data = mm.physicalToVirtualAddress(file_data_phys).asPtr([*]u8)[0..file_size];
-    _ = file.read(file_data, 0) catch @panic("TODO: READ FAILED");
+    var dummy_offset: usize = 0;
+    _ = file.read(file_data, &dummy_offset) catch @panic("TODO: READ FAILED");
 
     var reader = std.Io.Reader.fixed(file_data);
     const elf_header = std.elf.Header.read(&reader) catch @panic("TODO: elf header error");

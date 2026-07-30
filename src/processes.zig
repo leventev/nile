@@ -1,4 +1,6 @@
 const std = @import("std");
+const core = @import("core");
+const SyscallError = core.SyscallError;
 const slab_allocator = @import("mem/slab_allocator.zig");
 const scheduler = @import("scheduler.zig");
 const Process = @import("Process.zig");
@@ -6,7 +8,6 @@ const Thread = @import("Thread.zig");
 const arch = @import("arch/arch.zig");
 const mm = @import("mem/mm.zig");
 const vfs = @import("vfs.zig");
-const SyscallError = @import("syscall/errors.zig").SyscallError;
 const buddy_allocator = @import("mem/buddy_allocator.zig");
 
 const log = std.log.scoped(.processes);
@@ -29,9 +30,9 @@ pub fn spawnProcess(
     parent_pid: ?Process.Id,
     parent_mount_table: *vfs.MountTable,
     parent_root_page_table: arch.PageTable,
-) SyscallError!*Process {
-    const new_proc_id = nextProcessId() catch return SyscallError.TooManyProcesses;
-    var new_proc = process_cache.alloc() catch return SyscallError.OutOfMemory;
+) !*Process {
+    const new_proc_id = nextProcessId() catch return error.TooManyProcesses;
+    var new_proc = process_cache.alloc() catch return error.OutOfMemory;
 
     new_proc.id = new_proc_id;
     new_proc.parent_id = parent_pid;

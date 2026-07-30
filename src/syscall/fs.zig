@@ -1,7 +1,6 @@
 const std = @import("std");
 const mm = @import("../mem/mm.zig");
-const errors = @import("errors.zig");
-const SyscallError = errors.SyscallError;
+const core = @import("core");
 const vfs = @import("../vfs.zig");
 const processes = @import("../processes.zig");
 
@@ -22,18 +21,18 @@ pub fn openat(
     path_size: usize,
     flags: OpenFlags,
     mode: OpenMode,
-) SyscallError!usize {
+) core.SyscallResult {
     _ = dirfd;
 
     if (path_size == 0)
-        return SyscallError.FileNotFound;
+        return .err(.FileNotFound);
 
     if (path_size >= path_size_max)
-        return SyscallError.PathTooLong;
+        return .err(.PathTooLong);
 
     const path_ptr = mm.UserAddress.fromVirtual(path_ptr_raw) orelse
-        return error.InvalidMemoryAddress;
-    const path = path_ptr.slice(path_size) orelse return error.InvalidMemoryAddress;
+        return .err(.InvalidMemoryAddress);
+    const path = path_ptr.slice(path_size) orelse return .err(.InvalidMemoryAddress);
 
     _ = flags;
     _ = mode;
@@ -42,7 +41,7 @@ pub fn openat(
     const open_file = vfs.openFile(
         current_process.mount_table,
         path,
-    ) catch return SyscallError.FileNotFound;
+    ) catch return .err(.FileNotFound);
 
     // TODO:
     var next_fd: u32 = 0;
@@ -53,55 +52,55 @@ pub fn openat(
         .offset = 0,
     };
 
-    return next_fd;
+    return .success(next_fd);
 }
 
 pub fn read(
     fd: u32,
     buff_ptr_raw: mm.VirtualAddress,
     buff_size: usize,
-) SyscallError!usize {
+) core.SyscallResult {
     if (buff_size == 0)
-        return 0;
+        return .success(0);
 
     const buff_ptr = mm.UserAddress.fromVirtual(buff_ptr_raw) orelse
-        return error.InvalidMemoryAddress;
-    const buff = buff_ptr.slice(buff_size) orelse return error.InvalidMemoryAddress;
+        return .err(.InvalidMemoryAddress);
+    const buff = buff_ptr.slice(buff_size) orelse return .err(.InvalidMemoryAddress);
 
     const current_process = processes.currentProcess();
 
     if (fd >= current_process.file_descriptor_table.len)
-        return SyscallError.InvalidFileDescriptor;
+        return .err(.InvalidFileDescriptor);
 
     const open_file = &(current_process.file_descriptor_table[fd] orelse
-        return SyscallError.InvalidFileDescriptor);
-
-    return open_file.file.read(buff, &open_file.offset) catch @panic("TODO");
+        return .err(.InvalidFileDescriptor));
+    const res = open_file.file.read(buff, &open_file.offset) catch @panic("TODO");
+    return .success(@intCast(res));
 }
 
 pub fn write(
     fd: u32,
     buff_ptr_raw: mm.VirtualAddress,
     buff_size: usize,
-) SyscallError!usize {
+) core.SyscallResult {
     if (buff_size == 0)
-        return 0;
+        return .success(0);
 
     const buff_ptr = mm.UserAddress.fromVirtual(buff_ptr_raw) orelse
-        return error.InvalidMemoryAddress;
-    const buff = buff_ptr.slice(buff_size) orelse return error.InvalidMemoryAddress;
+        return .err(.InvalidMemoryAddress);
+    const buff = buff_ptr.slice(buff_size) orelse return .err(.InvalidMemoryAddress);
 
     const current_process = processes.currentProcess();
 
     if (fd >= current_process.file_descriptor_table.len)
-        return SyscallError.InvalidFileDescriptor;
+        return .err(.InvalidFileDescriptor);
 
     const open_file = &(current_process.file_descriptor_table[fd] orelse
-        return SyscallError.InvalidFileDescriptor);
+        return .err(.InvalidFileDescriptor));
 
     const written = open_file.file.write(buff, open_file.offset) catch @panic("TODO");
 
     open_file.offset += written;
 
-    return written;
+    return .success(@intCast(written));
 }

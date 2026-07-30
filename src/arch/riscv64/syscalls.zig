@@ -1,9 +1,8 @@
 const std = @import("std");
 
 const riscv64 = @import("riscv64.zig");
-const errors = @import("../../syscall/errors.zig");
 const scheduler = @import("../../scheduler.zig");
-const SyscallError = errors.SyscallError;
+const core = @import("core");
 const CSR = @import("csr.zig").CSR;
 const trap = @import("trap.zig");
 
@@ -12,7 +11,7 @@ const fs = @import("syscalls/fs.zig");
 const proc = @import("syscalls/process.zig");
 
 const ThreadState = @import("registers.zig").ThreadState;
-const SyscallCallback = *const fn (args: [7]usize) SyscallError!u64;
+const SyscallCallback = *const fn (args: [7]usize) core.SyscallResult;
 
 pub const Syscall = struct {
     name: []const u8,
@@ -65,10 +64,9 @@ pub fn dispatchSyscall(user_state: *ThreadState) void {
 
     const syscall = syscall_table[syscall_num];
 
-    const result: u64 = syscall.callback(args) catch |err|
-        @bitCast(-@as(i64, errors.errorToInt(err)));
+    const result: u64 = @bitCast(syscall.callback(args));
 
-    std.log.debug("syscall {s} {any}: return {}", .{ syscall.name, args, result });
+    std.log.debug("syscall {s} {any}: return 0x{x}", .{ syscall.name, args, result });
 
     user_state.gprs[10] = result;
 

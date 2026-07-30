@@ -52,9 +52,6 @@
         //    // actually used.
         //    .lazy = false,
         //},
-        .sys = .{
-            .path = "userland/sys",
-        },
     },
 
     // Specifies the set of files and directories that are included in this package.

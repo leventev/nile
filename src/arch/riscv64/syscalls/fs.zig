@@ -1,9 +1,10 @@
 const std = @import("std");
 const processes = @import("../../../processes.zig");
 const syscall_fs = @import("../../../syscall/fs.zig");
-const errors = @import("../../../syscall/errors.zig");
 
-pub fn openat(args: [7]u64) !u64 {
+const core = @import("core");
+
+pub fn openat(args: [7]u64) core.SyscallResult {
     const dirfd: i64 = @bitCast(args[0]);
     const path_ptr_int: u64 = args[1];
     const path_size: u64 = args[2];
@@ -19,7 +20,7 @@ pub fn openat(args: [7]u64) !u64 {
     );
 }
 
-pub fn read(args: [7]u64) !u64 {
+pub fn read(args: [7]u64) core.SyscallResult {
     const fd: u32 = @truncate(args[0]);
     const buffer: u64 = args[1];
     const buffer_size = args[2];
@@ -29,7 +30,7 @@ pub fn read(args: [7]u64) !u64 {
     return res;
 }
 
-pub fn write(args: [7]u64) !u64 {
+pub fn write(args: [7]u64) core.SyscallResult {
     const fd: u32 = @truncate(args[0]);
     const buffer: u64 = args[1];
     const buffer_size = args[2];

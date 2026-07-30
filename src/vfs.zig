@@ -3,7 +3,8 @@ const arch = @import("arch/arch.zig");
 const slab_allocator = @import("mem/slab_allocator.zig");
 const Path = @import("Path.zig");
 const PageCache = @import("PageCache.zig");
-const SyscallError = @import("syscall/errors.zig").SyscallError;
+const core = @import("core");
+const SyscallError = core.SyscallError;
 
 pub const Inode = enum(u64) {
     _,
@@ -521,7 +522,7 @@ pub const OpenFile = struct {
     mounted_fs_id: FileSystem.Id,
     dir_ent: *FileSystemCache.DirectoryEntry,
 
-    pub fn read(self: OpenFile, buff: []u8, offset: *usize) SyscallError!usize {
+    pub fn read(self: OpenFile, buff: []u8, offset: *usize) !usize {
         const fs = global_file_system_table.getById(self.mounted_fs_id).* orelse
             @panic("Invalid open file");
 

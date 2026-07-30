@@ -30,10 +30,19 @@ pub fn build(b: *std.Build) !void {
 
     const build_image_step = b.step("image", "Build the / image from the 'root' directory");
 
-    const sys = b.dependency("sys", .{
+    const core = b.addModule("core", .{
         .target = target,
         .optimize = optimize,
+        .root_source_file = b.path("core/core.zig"),
     });
+
+    const sys = b.addModule("sys", .{
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("userland/sys/sys.zig"),
+    });
+    sys.addImport("core", core);
+
     const programs = &.{ "shell", "ls" };
 
     inline for (programs) |program| {
@@ -47,7 +56,7 @@ pub fn build(b: *std.Build) !void {
                 .code_model = .medany,
             }),
         });
-        user_exe.root_module.addImport("sys", sys.module("sys"));
+        user_exe.root_module.addImport("sys", sys);
         const user_exe_install = b.addInstallArtifact(user_exe, .{
             .dest_dir = .{
                 .override = .{ .custom = "../root" },
@@ -55,6 +64,8 @@ pub fn build(b: *std.Build) !void {
         });
         build_image_step.dependOn(&user_exe_install.step);
     }
+
+    exe.root_module.addImport("core", core);
 
     exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/start.s"));
     exe.root_module.addAssemblyFile(b.path("src/arch/riscv64/schedule.s"));

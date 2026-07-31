@@ -31,11 +31,11 @@ pub const SyscallResult = packed struct(usize) {
         error_number: SyscallError,
         success: AlmostUsize,
     },
-    is_error: u1,
+    is_error: bool,
 
     pub fn err(error_number: SyscallError) SyscallResult {
         return .{
-            .is_error = 1,
+            .is_error = true,
             .payload = .{
                 .error_number = error_number,
             },
@@ -44,10 +44,18 @@ pub const SyscallResult = packed struct(usize) {
 
     pub fn success(return_value: AlmostUsize) SyscallResult {
         return .{
-            .is_error = 0,
+            .is_error = false,
             .payload = .{
                 .success = return_value,
             },
         };
     }
+};
+
+pub const SyscallNumber = enum(usize) {
+    exit = 0,
+    openat = 1,
+    read = 2,
+    write = 3,
+    spawn = 4,
 };

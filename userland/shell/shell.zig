@@ -23,13 +23,17 @@ fn changeDirectory(args: []const u8) void {
     _ = args;
 }
 
+// fn externalProgram(name: []const u8) void {
+//     const search_dir = "/bin";
+// }
+
 fn ls(_: []const u8) void {
     const exec_fd_res = sys.sysOpenat(-1, "/ls", 0, 0);
-    if (exec_fd_res < 0) {
+    if (exec_fd_res.is_error) {
         exit(-1);
     }
 
-    const exec_fd: u32 = @intCast(exec_fd_res);
+    const exec_fd: u32 = @intCast(exec_fd_res.payload.success);
     _ = sys.sysSpawn(exec_fd, 0);
 }
 
@@ -61,11 +65,11 @@ fn processLine(line: []const u8) void {
 export fn _start() void {
     const fd_res = sys.sysOpenat(-1, "/dev/tty0", 0, 0);
 
-    if (fd_res < 0) {
+    if (fd_res.is_error) {
         exit(-1);
     }
 
-    const fd: u32 = @intCast(fd_res);
+    const fd: u32 = @intCast(fd_res.payload.success);
     stdout_fd = fd;
 
     const quit = false;
@@ -82,9 +86,9 @@ export fn _start() void {
         }
         var buff: [256]u8 = undefined;
         const read_res = sys.sysRead(fd, &buff);
-        if (read_res < 0) exit(-1);
+        if (read_res.is_error) exit(-1);
 
-        const bytes_read: usize = @bitCast(read_res);
+        const bytes_read: usize = read_res.payload.success;
 
         for (0..bytes_read) |i| {
             const ch = buff[i];

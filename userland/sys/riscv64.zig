@@ -1,15 +1,9 @@
-const SyscallNumber = enum(u64) {
-    exit = 0,
-    openat = 1,
-    read = 2,
-    write = 3,
-    spawn = 4,
-};
+const core = @import("core");
 
 pub fn syscall(
-    num: SyscallNumber,
+    num: core.SyscallNumber,
     args: anytype,
-) i64 {
+) core.SyscallResult {
     if (args.len > 7) @compileError("Too many arguments");
 
     var return_value_0: i64 = undefined;
@@ -87,7 +81,7 @@ pub fn syscall(
         else => @compileError("Too many arguments"),
     }
 
-    return return_value_0;
+    return @bitCast(return_value_0);
 }
 
 pub fn sysExit(exit_code: i64) noreturn {
@@ -95,7 +89,7 @@ pub fn sysExit(exit_code: i64) noreturn {
     unreachable;
 }
 
-pub fn sysOpenat(dirfd: i64, path: []const u8, flags: u64, mode: u64) i64 {
+pub fn sysOpenat(dirfd: i64, path: []const u8, flags: u64, mode: u64) core.SyscallResult {
     return syscall(.openat, .{
         @as(u64, @bitCast(dirfd)),
         @intFromPtr(path.ptr),
@@ -105,14 +99,14 @@ pub fn sysOpenat(dirfd: i64, path: []const u8, flags: u64, mode: u64) i64 {
     });
 }
 
-pub fn sysRead(fd: u32, buff: []u8) i64 {
+pub fn sysRead(fd: u32, buff: []u8) core.SyscallResult {
     return syscall(.read, .{ fd, @intFromPtr(buff.ptr), buff.len });
 }
 
-pub fn sysWrite(fd: u32, buff: []const u8) i64 {
+pub fn sysWrite(fd: u32, buff: []const u8) core.SyscallResult {
     return syscall(.write, .{ fd, @intFromPtr(buff.ptr), buff.len });
 }
 
-pub fn sysSpawn(executable_fd: u32, flags: u64) i64 {
+pub fn sysSpawn(executable_fd: u32, flags: u64) core.SyscallResult {
     return syscall(.spawn, .{ executable_fd, flags });
 }

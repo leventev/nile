@@ -412,7 +412,7 @@ pub fn mountFileSystem(
     const source_file: ?OpenFile = if (std.mem.eql(u8, path, "/"))
         null
     else
-        try openFile(mount_table, path);
+        try openFile(mount_table, null, path);
 
     var new_mount = try Mount.cache.alloc();
     errdefer Mount.cache.free(new_mount);
@@ -595,8 +595,9 @@ pub const OpenFile = struct {
 
 pub fn walkUntilLastComponent(
     mount_table: *MountTable,
+    start_dir: ?OpenFile,
     path_str: []const u8,
-    out_mnt: **Mount,
+    out_fs: **FileSystem,
     out_parent_dir: **FileSystemCache.Directory,
     out_last_component: *[]const u8,
 ) !void {
@@ -604,30 +605,43 @@ pub fn walkUntilLastComponent(
 
     // TODO: clean name (VERY IMPORTANT!!!!)
 
-    if (path_str.len == 0 or path_str[0] != '/') return error.InvalidPath;
+    if (path_str.len == 0) return error.InvalidPath;
 
     // TODO: consider saving the root mapping in MountTable for easier access
-    const root_mount = mount_table.mounts orelse @panic("No root mount");
 
-    var current_mount = root_mount;
-    var current_fs = root_mount.file_system;
-    var current_dir = &current_fs.fs_cache.root_directory;
+    var current_fs: *FileSystem = undefined;
+    var current_dir: *FileSystemCache.Directory = undefined;
+    if (start_dir) |dir| {
+        current_fs = global_file_system_table.getById(dir.mounted_fs_id).* orelse
+            @panic("Invalid open file");
+        current_dir = &dir.dir_ent.data.directory;
+    } else {
+        const root_mount = mount_table.mounts orelse @panic("No root mount");
+        current_fs = root_mount.file_system;
+        current_dir = &current_fs.fs_cache.root_directory;
+    }
 
-    var path = try Path.fromStringWithSlash(path_str);
+    out_fs.* = current_fs;
+    // TODO: out_parent_dir can be null?
+
+    var path = if (start_dir == null)
+        try Path.fromStringWithSlash(path_str)
+    else
+        try Path.fromStringWithoutSlash(path_str);
+
     while (path.next()) |path_element| {
         const traversed_path = path.alreadyTraversed();
         const is_last_component = path.reachedEnd();
 
         if (mount_table.findMount(traversed_path).*) |mount| {
-            current_mount = mount;
-            current_fs = current_mount.file_system;
+            current_fs = mount.file_system;
             current_dir = &current_fs.fs_cache.root_directory;
+            out_fs.* = current_fs;
             continue;
         }
 
         const dir_entry_ptr = current_dir.lookup(path_element);
         if (is_last_component) {
-            out_mnt.* = current_mount;
             out_last_component.* = path_element;
             out_parent_dir.* = current_dir;
         } else {
@@ -648,32 +662,32 @@ pub fn walkUntilLastComponent(
 }
 
 pub fn createDirectory(mount_table: *MountTable, inode: Inode, path_str: []const u8) !void {
-    var mount: *Mount = undefined;
+    var fs: *FileSystem = undefined;
     var dir: *FileSystemCache.Directory = undefined;
     var last_component: []const u8 = &.{};
 
-    try walkUntilLastComponent(mount_table, path_str, &mount, &dir, &last_component);
+    try walkUntilLastComponent(mount_table, null, path_str, &fs, &dir, &last_component);
 
     try dir.create(last_component, inode, .directory);
 }
 
 pub fn createRegularFile(mount_table: *MountTable, inode: Inode, path_str: []const u8) !void {
-    var mount: *Mount = undefined;
+    var fs: *FileSystem = undefined;
     var dir: *FileSystemCache.Directory = undefined;
     var last_component: []const u8 = &.{};
 
-    try walkUntilLastComponent(mount_table, path_str, &mount, &dir, &last_component);
+    try walkUntilLastComponent(mount_table, null, path_str, &fs, &dir, &last_component);
 
     try dir.create(last_component, inode, .regular);
 }
 
 // TODO: ERRORS
-pub fn openFile(mount_table: *MountTable, path_str: []const u8) !OpenFile {
-    var mount: *Mount = undefined;
+pub fn openFile(mount_table: *MountTable, start_dir: ?OpenFile, path_str: []const u8) !OpenFile {
+    var mounted_fs: *FileSystem = undefined;
     var dir: *FileSystemCache.Directory = undefined;
     var last_component: []const u8 = &.{};
 
-    try walkUntilLastComponent(mount_table, path_str, &mount, &dir, &last_component);
+    try walkUntilLastComponent(mount_table, start_dir, path_str, &mounted_fs, &dir, &last_component);
 
     const dir_entry = dir.lookup(last_component).* orelse return error.EntryNotFound;
     // TODO: LOCKING
@@ -682,7 +696,7 @@ pub fn openFile(mount_table: *MountTable, path_str: []const u8) !OpenFile {
 
     dir_entry.reference_count += 1;
     return OpenFile{
-        .mounted_fs_id = mount.file_system.id,
+        .mounted_fs_id = mounted_fs.id,
         .dir_ent = dir_entry,
     };
 }

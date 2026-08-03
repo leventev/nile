@@ -245,7 +245,7 @@ pub fn readInitramfsArchive(
                 inode_counter += 1;
                 // TODO: maybe createRegularFile could return an OpenFile already?
 
-                const open_file = vfs.openFile(mount_table, file_name) catch unreachable;
+                const open_file = vfs.openFile(mount_table, null, file_name) catch unreachable;
                 _ = open_file.write(record.content, 0) catch @panic("Failed to write content of CPIO archive file");
             },
             file_type_directory => {

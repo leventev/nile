@@ -14,8 +14,6 @@ pub fn openat(
     flags: core.fs.OpenFlags,
     mode: core.fs.OpenMode,
 ) core.SyscallResult {
-    _ = dirfd;
-
     if (path_size == 0)
         return .err(.FileNotFound);
 
@@ -30,8 +28,18 @@ pub fn openat(
     _ = mode;
 
     const current_process = processes.currentProcess();
+
+    const start_dir = if (dirfd == dirfd_cwd) unreachable else if (dirfd > 0) blk: {
+        const fd: u32 = @intCast(dirfd);
+        if (fd >= current_process.file_descriptor_table.len) return .err(.InvalidFileDescriptor);
+        const file = current_process.file_descriptor_table[fd] orelse return .err(.InvalidFileDescriptor);
+
+        break :blk file.file;
+    } else null;
+
     const open_file = vfs.openFile(
         current_process.mount_table,
+        start_dir,
         path,
     ) catch return .err(.FileNotFound);
 
@@ -66,7 +74,10 @@ pub fn read(
 
     const open_file = &(current_process.file_descriptor_table[fd] orelse
         return .err(.InvalidFileDescriptor));
-    const res = open_file.file.read(buff, &open_file.offset) catch @panic("TODO");
+    const res = open_file.file.read(buff, &open_file.offset) catch |err| return switch (err) {
+        error.OutOfMemory => .err(.OutOfMemory),
+        error.InvalidMemoryAddress => .err(.InvalidMemoryAddress),
+    };
     return .success(@intCast(res));
 }
 

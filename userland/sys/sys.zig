@@ -15,8 +15,8 @@ pub const OpenatError = error{
     InvalidMemoryAddress,
     OutOfMemory,
 };
-pub fn openat(dirfd: i64, path: []const u8, flags: u64, mode: u64) OpenatError!u32 {
-    const res = riscv64.sysOpenat(dirfd, path, flags, mode);
+pub fn openat(dirfd: ?u32, path: []const u8, flags: u64, mode: u64) OpenatError!u32 {
+    const res = riscv64.sysOpenat(if (dirfd) |fd| @intCast(fd) else -1, path, flags, mode);
     if (res.is_error) {
         return switch (res.payload.error_number) {
             .FileNotFound => OpenatError.FileNotFound,
@@ -74,6 +74,7 @@ pub const SpawnError = error{
     InvalidMemoryAddress,
     OutOfMemory,
     InvalidELF,
+    TooManyProcesses,
 };
 pub fn spawn(executable_fd: u32, flags: u64) SpawnError!u32 {
     const res = riscv64.sysSpawn(executable_fd, flags);

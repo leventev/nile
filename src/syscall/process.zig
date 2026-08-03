@@ -21,7 +21,11 @@ pub fn spawn(
         current_process.id,
         current_process.mount_table,
         current_process.root_page_table,
-    ) catch @panic("TODO");
+    ) catch |err| return switch (err) {
+        error.OutOfMemory => .err(.OutOfMemory),
+        error.InvalidELF => .err(.InvalidELF),
+        error.TooManyProcesses => .err(.TooManyProcesses),
+    };
 
     _ = flags;
 

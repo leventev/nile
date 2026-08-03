@@ -151,8 +151,8 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     vfs.dumpTree(&mount_table);
     vfs.dumpDirectory(&devfs.fs_cache.root_directory, 0);
 
-    const init_file_path = "/ls";
-    const init_file = vfs.openFile(&mount_table, init_file_path) catch
+    const init_file_path = "/bin/shell";
+    const init_file = vfs.openFile(&mount_table, null, init_file_path) catch
         @panic("Unable to open " ++ init_file_path);
 
     const idle_process_thread = processes.init(root_page_table);

@@ -21,10 +21,40 @@ fn changeDirectory(args: []const u8) void {
     _ = args;
 }
 
+fn dosuno(args: []const u8) void {
+    _ = args;
+    _ = sys.write(sys.stdout_fd, "endre buzi") catch {};
+}
+
 const commands = [_]Command{
     .{ .name = "echo", .callback = echo },
     .{ .name = "cd", .callback = changeDirectory },
+    .{ .name = "dosuno", .callback = dosuno },
 };
+
+fn findExternalProgram(search_path: []const []const u8, program_name: []const u8) ?u32 {
+    for (search_path) |directory_path| {
+        const dir_fd = sys.openat(null, directory_path, 0, 0) catch continue;
+
+        const buff_size = 4096;
+        var buff: [buff_size]u8 align(@sizeOf(sys.core.fs.DirectoryEntryHeader)) = undefined;
+        var continue_reading = true;
+        while (continue_reading) {
+            var dir_iter = sys.readDirectory(dir_fd, &buff) catch return null;
+            var entries_read: usize = 0;
+            while (dir_iter.next()) |dir_ent| {
+                entries_read += 1;
+                if (!std.mem.eql(u8, dir_ent.name, program_name)) continue;
+
+                return sys.openat(dir_fd, dir_ent.name, 0, 0) catch null;
+            }
+
+            continue_reading = entries_read != 0;
+        }
+    }
+
+    return null;
+}
 
 fn processLine(line: []const u8) void {
     const command_end_idx = std.mem.findScalar(u8, line, ' ') orelse line.len;
@@ -39,10 +69,20 @@ fn processLine(line: []const u8) void {
         return;
     }
 
+    const search_path = &.{ "/sbin", "/bin" };
+    if (findExternalProgram(search_path, called_command_name)) |external_fd| {
+        _ = sys.spawn(external_fd, 0) catch {};
+        return;
+    }
+
     var buff: [256]u8 = undefined;
-    const error_message = std.fmt.bufPrint(&buff, "error: {s}: command not found", .{called_command_name}) catch
-        while (true) {};
-    _ = sys.write(sys.stdout_fd, error_message) catch {};
+    const error_message = std.fmt.bufPrint(
+        &buff,
+        "error: {s}: command not found",
+        .{called_command_name},
+    ) catch exit(-1);
+
+    _ = sys.write(sys.stdout_fd, error_message) catch exit(-1);
 }
 
 pub fn main() void {

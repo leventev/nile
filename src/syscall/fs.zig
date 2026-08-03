@@ -4,14 +4,6 @@ const core = @import("core");
 const vfs = @import("../vfs.zig");
 const processes = @import("../processes.zig");
 
-pub const OpenFlags = packed struct(u64) {
-    reserved: u64,
-};
-
-pub const OpenMode = packed struct(u64) {
-    reserved: u64,
-};
-
 const dirfd_cwd = -100;
 const path_size_max = 256;
 
@@ -19,8 +11,8 @@ pub fn openat(
     dirfd: isize,
     path_ptr_raw: mm.VirtualAddress,
     path_size: usize,
-    flags: OpenFlags,
-    mode: OpenMode,
+    flags: core.fs.OpenFlags,
+    mode: core.fs.OpenMode,
 ) core.SyscallResult {
     _ = dirfd;
 

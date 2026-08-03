@@ -1,15 +1,14 @@
 const std = @import("std");
+const core = @import("core");
 const processes = @import("../../../processes.zig");
 const syscall_fs = @import("../../../syscall/fs.zig");
-
-const core = @import("core");
 
 pub fn openat(args: [7]u64) core.SyscallResult {
     const dirfd: i64 = @bitCast(args[0]);
     const path_ptr_int: u64 = args[1];
     const path_size: u64 = args[2];
-    const flags: syscall_fs.OpenFlags = @bitCast(args[3]);
-    const mode: syscall_fs.OpenMode = @bitCast(args[4]);
+    const flags: core.fs.OpenFlags = @bitCast(args[3]);
+    const mode: core.fs.OpenMode = @bitCast(args[4]);
 
     return syscall_fs.openat(
         dirfd,

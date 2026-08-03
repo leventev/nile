@@ -2,14 +2,6 @@ const std = @import("std");
 const core = @import("core");
 const riscv64 = @import("riscv64.zig");
 
-pub const DirectoryEntry = extern struct {
-    name_size: u32,
-    type: u32,
-    inode: u64,
-
-    // name ...
-};
-
 pub var stdout_fd: u32 = undefined;
 
 pub fn exit(exit_code: isize) noreturn {

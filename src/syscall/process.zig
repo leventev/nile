@@ -4,13 +4,9 @@ const mm = @import("../mem/mm.zig");
 const vfs = @import("../vfs.zig");
 const processes = @import("../processes.zig");
 
-pub const SpawnFlags = packed struct(u64) {
-    reserved: u64,
-};
-
 pub fn spawn(
     executable_fd: usize,
-    flags: SpawnFlags,
+    flags: core.process.SpawnFlags,
 ) core.SyscallResult {
     const current_process = processes.currentProcess();
 

@@ -1,7 +1,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
+
 const bit_size = builtin.target.ptrBitWidth();
 const AlmostUsize = @Int(.unsigned, bit_size - 1);
+
+pub const fs = @import("fs.zig");
+pub const process = @import("process.zig");
 
 pub const SyscallError = enum(AlmostUsize) {
     /// The memory address points to kernel space memory.

@@ -8,15 +8,13 @@ fn exit(exit_code: isize) noreturn {
 
 const prompt = "$ ";
 
-var stdout_fd: u32 = undefined;
-
 const Command = struct {
     name: []const u8,
     callback: *const fn (args: []const u8) void,
 };
 
 fn echo(args: []const u8) void {
-    _ = sys.write(stdout_fd, args) catch {};
+    _ = sys.write(sys.stdout_fd, args) catch {};
 }
 
 fn changeDirectory(args: []const u8) void {
@@ -44,12 +42,10 @@ fn processLine(line: []const u8) void {
     var buff: [256]u8 = undefined;
     const error_message = std.fmt.bufPrint(&buff, "error: {s}: command not found", .{called_command_name}) catch
         while (true) {};
-    _ = sys.write(stdout_fd, error_message) catch {};
+    _ = sys.write(sys.stdout_fd, error_message) catch {};
 }
 
-export fn _start() void {
-    stdout_fd = sys.openat(-1, "/dev/tty0", 0, 0) catch exit(-1);
-
+pub fn main() void {
     const quit = false;
 
     var line_buff: [512]u8 = undefined;
@@ -59,12 +55,12 @@ export fn _start() void {
 
     while (!quit) {
         if (new_line) {
-            _ = sys.write(stdout_fd, prompt) catch exit(-1);
+            _ = sys.write(sys.stdout_fd, prompt) catch exit(-1);
             new_line = false;
         }
 
         var buff: [256]u8 = undefined;
-        const bytes_read = sys.read(stdout_fd, &buff) catch exit(-1);
+        const bytes_read = sys.read(sys.stdout_fd, &buff) catch exit(-1);
 
         for (0..bytes_read) |i| {
             const ch = buff[i];
@@ -72,13 +68,11 @@ export fn _start() void {
                 processLine(line_buff[0..line_buff_written]);
                 line_buff_written = 0;
                 new_line = true;
-                _ = sys.write(stdout_fd, "\n") catch exit(-1);
+                _ = sys.write(sys.stdout_fd, "\n") catch exit(-1);
             } else {
                 line_buff[line_buff_written] = ch;
                 line_buff_written += 1;
             }
         }
     }
-
-    exit(0);
 }

@@ -2,6 +2,16 @@ const std = @import("std");
 const core = @import("core");
 const riscv64 = @import("riscv64.zig");
 
+pub const DirectoryEntry = extern struct {
+    name_size: u32,
+    type: u32,
+    inode: u64,
+
+    // name ...
+};
+
+pub var stdout_fd: u32 = undefined;
+
 pub fn exit(exit_code: isize) noreturn {
     riscv64.sysExit(exit_code);
 }
@@ -45,7 +55,7 @@ pub fn read(fd: u32, buff: []u8) ReadError!usize {
         };
     }
 
-    return @intCast(res.payload.success);
+    return res.payload.success;
 }
 
 pub const WriteError = error{
@@ -64,7 +74,7 @@ pub fn write(fd: u32, buff: []const u8) WriteError!usize {
         };
     }
 
-    return @intCast(res.payload.success);
+    return res.payload.success;
 }
 
 pub const SpawnError = error{

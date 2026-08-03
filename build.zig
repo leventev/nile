@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("core/core.zig"),
     });
 
-    const sys = b.addModule("sys", .{
+    const sys = b.createModule(.{
         .target = target,
         .optimize = optimize,
         .root_source_file = b.path("userland/sys/sys.zig"),
@@ -46,17 +46,30 @@ pub fn build(b: *std.Build) !void {
     const programs = &.{ "shell", "ls" };
 
     inline for (programs) |program| {
-        const path = try std.fmt.allocPrint(b.allocator, "userland/{s}/{s}.zig", .{ program, program });
         const user_exe = b.addExecutable(.{
             .name = program,
             .root_module = b.createModule(.{
-                .root_source_file = b.path(path),
+                .root_source_file = b.path("userland/entry.zig"),
                 .target = target,
                 .optimize = optimize,
                 .code_model = .medany,
             }),
         });
+
+        const path = try std.fmt.allocPrint(b.allocator, "userland/{s}/{s}.zig", .{
+            program,
+            program,
+        });
+        const user_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path(path),
+        });
+        user_module.addImport("sys", sys);
+
         user_exe.root_module.addImport("sys", sys);
+        user_exe.root_module.addImport("user", user_module);
+
         const user_exe_install = b.addInstallArtifact(user_exe, .{
             .dest_dir = .{
                 .override = .{ .custom = "../root" },
@@ -104,8 +117,7 @@ pub fn build(b: *std.Build) !void {
         "-device",  "virtio-gpu",
         "-d",       "int",
         "-d",       "guest_errors",
-        "-device",
-        "virtio-keyboard",
+        "-device",  "virtio-keyboard",
 
         // "-d",
         // "int",

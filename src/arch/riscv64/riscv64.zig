@@ -139,7 +139,7 @@ fn sbiWriteBytes(bytes: []const u8) ?usize {
 
 var init_scratch_registers: ThreadState = undefined;
 
-export fn initRiscv64(
+pub export fn initRiscv64(
     hart_id: usize,
     dt_phys: usize,
     root_page_table_phys: usize,

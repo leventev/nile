@@ -24,6 +24,10 @@ pub const console = @import("console.zig");
 pub const DeviceFilesystem = @import("DeviceFilesystem.zig");
 pub const ramfs = @import("ramfs.zig");
 
+comptime {
+    _ = arch;
+}
+
 const test_binary_file = @embedFile("shell");
 const test_archive = @embedFile("root.cpio");
 

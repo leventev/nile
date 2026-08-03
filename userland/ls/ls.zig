@@ -2,7 +2,7 @@ const std = @import("std");
 const sys = @import("sys");
 
 fn exit(exit_code: isize) noreturn {
-    sys.sysExit(exit_code);
+    sys.exit(exit_code);
     while (true) {}
 }
 
@@ -17,36 +17,21 @@ pub const DirectoryEntry = extern struct {
 };
 
 export fn _start() void {
-    const fd_res = sys.sysOpenat(-1, "/dev/tty0", 0, 0);
+    stdout_fd = sys.openat(-1, "/dev/tty0", 0, 0) catch exit(-1);
 
-    if (fd_res.is_error) {
-        exit(-1);
-    }
-
-    const fd: u32 = @intCast(fd_res.payload.success);
-    stdout_fd = fd;
-
-    const root_dir_fd_res = sys.sysOpenat(-1, "/test_dir", 0, 0);
-    if (root_dir_fd_res.is_error) {
-        exit(-1);
-    }
-
-    const root_dir_fd: u32 = @intCast(root_dir_fd_res.payload.success);
+    const root_dir_fd = sys.openat(-1, "/test_dir", 0, 0) catch exit(-1);
 
     var buffer: [512]u8 align(@alignOf(DirectoryEntry)) = undefined;
-    const read_res = sys.sysRead(root_dir_fd, &buffer);
-    if (read_res.is_error) {
-        exit(-1);
-    }
+    const bytes_read = sys.read(root_dir_fd, &buffer) catch exit(-1);
 
     var byte_counter: usize = 0;
-    while (byte_counter < read_res.payload.success) {
+    while (byte_counter < bytes_read) {
         const struct_ptr: *DirectoryEntry = @ptrCast(@alignCast(&buffer[byte_counter]));
         const name_ptr: [*]const u8 = @ptrCast(&buffer[byte_counter + @sizeOf(DirectoryEntry)]);
         const name = name_ptr[0..struct_ptr.name_size];
 
-        _ = sys.sysWrite(stdout_fd, name);
-        _ = sys.sysWrite(stdout_fd, " ");
+        _ = sys.write(stdout_fd, name) catch exit(-1);
+        _ = sys.write(stdout_fd, " ") catch exit(-1);
 
         const total_len = struct_ptr.name_size + @sizeOf(DirectoryEntry);
         const padded_len = std.mem.alignForward(
@@ -56,7 +41,7 @@ export fn _start() void {
         );
         byte_counter += padded_len;
     }
-    _ = sys.sysWrite(stdout_fd, "\n");
+    _ = sys.write(stdout_fd, "\n") catch exit(-1);
 
     exit(0);
 }

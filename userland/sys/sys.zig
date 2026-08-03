@@ -1,5 +1,5 @@
 const std = @import("std");
-const core = @import("core");
+pub const core = @import("core");
 const riscv64 = @import("riscv64.zig");
 
 pub var stdout_fd: u32 = undefined;
@@ -88,4 +88,35 @@ pub fn spawn(executable_fd: u32, flags: u64) SpawnError!u32 {
     }
 
     return @intCast(res.payload.success);
+}
+
+pub const DirectoryEntryFull = struct {
+    header: *core.fs.DirectoryEntryHeader,
+    name: []u8,
+};
+
+pub const DirectoryEntryIterator = struct {
+    buff: []u8,
+
+    pub fn next(self: *DirectoryEntryIterator) ?DirectoryEntryFull {
+        if (self.buff.len == 0) return null;
+
+        const header_size = @sizeOf(core.fs.DirectoryEntryHeader);
+
+        const header: *core.fs.DirectoryEntryHeader = @ptrCast(@alignCast(self.buff.ptr));
+        const name_end = header_size + header.name_size;
+        const name_ptr: [*]u8 = @ptrCast(self.buff[header_size..name_end]);
+        const name = name_ptr[0..header.name_size];
+
+        const padded_len = std.mem.alignForward(usize, name_end, header_size);
+        const next_buffer_start = @min(padded_len, self.buff.len);
+
+        self.buff = self.buff[next_buffer_start..self.buff.len];
+        return DirectoryEntryFull{ .header = header, .name = name };
+    }
+};
+
+pub fn readDirectory(fd: u32, buff: []u8) ReadError!DirectoryEntryIterator {
+    const bytes_read = try read(fd, buff);
+    return DirectoryEntryIterator{ .buff = buff[0..bytes_read] };
 }

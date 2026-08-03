@@ -28,7 +28,6 @@ comptime {
     _ = arch;
 }
 
-const test_binary_file = @embedFile("shell");
 const test_archive = @embedFile("root.cpio");
 
 export var device_tree_pointer: *void = undefined;
@@ -152,7 +151,7 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     vfs.dumpTree(&mount_table);
     vfs.dumpDirectory(&devfs.fs_cache.root_directory, 0);
 
-    const init_file_path = "/shell";
+    const init_file_path = "/ls";
     const init_file = vfs.openFile(&mount_table, init_file_path) catch
         @panic("Unable to open " ++ init_file_path);
 

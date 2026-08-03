@@ -1,6 +1,6 @@
 const riscv64 = @import("riscv64/riscv64.zig");
 comptime {
-    _ = riscv64;
+    _ = riscv64.initRiscv64;
 }
 
 const Arch = enum {

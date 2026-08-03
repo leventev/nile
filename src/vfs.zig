@@ -510,14 +510,6 @@ pub fn genericWriteRegular(
     return buff.len;
 }
 
-pub const DirectoryEntryUser = extern struct {
-    name_size: u32,
-    type: u32,
-    inode: u64,
-
-    // name ...
-};
-
 pub const OpenFile = struct {
     mounted_fs_id: FileSystem.Id,
     dir_ent: *FileSystemCache.DirectoryEntry,
@@ -528,7 +520,7 @@ pub const OpenFile = struct {
 
         switch (self.dir_ent.data) {
             .directory => |dir| {
-                if (@intFromPtr(buff.ptr) % @alignOf(DirectoryEntryUser) != 0)
+                if (@intFromPtr(buff.ptr) % @alignOf(core.fs.DirectoryEntryHeader) != 0)
                     return error.InvalidMemoryAddress;
 
                 if (offset.* >= dir.entry_count) return 0;
@@ -538,26 +530,26 @@ pub const OpenFile = struct {
                 for (0..offset.*) |_|
                     dir_ent_ptr = (dir_ent_ptr orelse @panic("Invalid offset")).next;
 
+                const header_size = @sizeOf(core.fs.DirectoryEntryHeader);
+
                 var total_written_size: usize = 0;
                 while (dir_ent_ptr) |dir_ent| : (dir_ent_ptr = dir_ent.next) {
                     const remaining_buff_size = buff.len - total_written_size;
-                    const required_size = @sizeOf(DirectoryEntryUser) + dir_ent.name.len;
-                    const padded_size = std.mem.alignForward(
-                        usize,
-                        required_size,
-                        @sizeOf(DirectoryEntryUser),
-                    );
+                    const required_size = header_size + dir_ent.name.len;
+                    const padded_size = std.mem.alignForward(usize, required_size, header_size);
                     if (required_size > remaining_buff_size)
                         break;
 
                     const struct_start_ptr = buff.ptr + total_written_size;
-                    const name_start_ptr = struct_start_ptr + @sizeOf(DirectoryEntryUser);
-                    const struct_ptr: *DirectoryEntryUser = @ptrCast(@alignCast(struct_start_ptr));
+                    const name_start_ptr = struct_start_ptr + header_size;
+                    const header: *core.fs.DirectoryEntryHeader = @ptrCast(
+                        @alignCast(struct_start_ptr),
+                    );
                     const name_ptr = name_start_ptr[0..dir_ent.name.len];
 
-                    struct_ptr.inode = dir_ent.inode.asInt();
-                    struct_ptr.name_size = @intCast(dir_ent.name.len);
-                    struct_ptr.type = 0;
+                    header.inode = dir_ent.inode.asInt();
+                    header.name_size = @intCast(dir_ent.name.len);
+                    header.file_type = 0;
                     @memcpy(name_ptr, dir_ent.name);
 
                     total_written_size += @min(padded_size, remaining_buff_size);

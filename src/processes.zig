@@ -39,8 +39,10 @@ pub fn spawnProcess(
     new_proc.mount_table = parent_mount_table;
     new_proc.root_page_table = try mm.clonePageTable(parent_root_page_table, true);
 
+    // TODO: do something about the assumption that file is a Regular
     // TODO: USE PAGE CACHE
-    const file_size = file.dir_ent.data.regular.size;
+    const regular = file.dir_ent.regular();
+    const file_size = regular.size;
     const order = buddy_allocator.blockOrderFromSize(file_size);
     const file_data_phys = buddy_allocator.allocBlock(order) catch unreachable;
     defer buddy_allocator.deallocBlock(file_data_phys, order);

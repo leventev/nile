@@ -1,4 +1,5 @@
 const std = @import("std");
+const vfs = @import("vfs.zig");
 const DeviceFilesystem = @import("DeviceFilesystem.zig");
 
 const log = std.log.scoped(.framebuffer);
@@ -78,15 +79,28 @@ const max_framebuffers = 4;
 pub var framebuffers: [max_framebuffers]Framebuffer = undefined;
 var framebuffer_count: usize = 0;
 
-fn devfsRead(internal_data: *anyopaque, buff: []u8, offset: usize) usize {
+fn devfsRead(
+    internal_data: ?*anyopaque,
+    inode: vfs.Inode,
+    buff: []u8,
+    offset: usize,
+) vfs.FileSystemError!usize {
     _ = internal_data;
+    _ = inode;
     _ = buff;
     _ = offset;
     return 0;
 }
 
-fn devfsWrite(internal_data: *anyopaque, buff: []const u8, offset: usize) usize {
-    const fb: *Framebuffer = @ptrCast(@alignCast(internal_data));
+fn devfsWrite(
+    internal_data: ?*anyopaque,
+    inode: vfs.Inode,
+    buff: []const u8,
+    offset: usize,
+) vfs.FileSystemError!usize {
+    _ = inode;
+
+    const fb: *Framebuffer = @ptrCast(@alignCast(internal_data orelse unreachable));
     const display_pixel_count = fb.active_display.width * fb.active_display.height;
     const display_size = display_pixel_count * @sizeOf(u32);
 
@@ -105,7 +119,7 @@ fn devfsWrite(internal_data: *anyopaque, buff: []const u8, offset: usize) usize 
     return actual_write_size;
 }
 
-const devfs_ops = DeviceFilesystem.Device.Operations{
+const devfs_ops = vfs.FileSystemSkeleton.Operations{
     .read = devfsRead,
     .write = devfsWrite,
 };
@@ -136,7 +150,7 @@ pub fn addFramebuffer(
     framebuffer_count += 1;
 
     // TODO: multiple framebuffer numbers
-    devfs.create("framebuffer", &devfs_ops, fb) catch @panic("TODO");
+    devfs.create("framebuffer", fb, &devfs_ops) catch @panic("TODO");
 
     return true;
 }

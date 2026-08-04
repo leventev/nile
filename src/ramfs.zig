@@ -12,6 +12,5 @@ pub var ram_file_system: vfs.FileSystemSkeleton = .{
         .has_page_cache = true,
     },
     .init = init,
-    .read = null,
-    .write = null,
+    .operations = null,
 };

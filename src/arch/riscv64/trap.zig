@@ -282,7 +282,8 @@ fn handlePagefault(code: ExceptionCode, address: mm.VirtualAddress, state: *Thre
                 const region_offset = user_address.int - mapped_region.address.int;
                 const file_offset = backing.offset + region_offset;
                 const page_idx = file_offset / arch.page_size;
-                const page_addr = backing.file.dir_ent.data.regular.page_cache.getPage(page_idx, true) catch @panic("TODO");
+                const regular = backing.file.dir_ent.regular();
+                const page_addr = regular.page_cache.getPage(page_idx, true) catch @panic("TODO");
                 break :blk mm.virtualToPhysicalAddress(page_addr);
             } else buddy_allocator.allocBlock(0) catch @panic("TODO");
 

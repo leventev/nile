@@ -55,28 +55,26 @@ pub fn totalPageCount(self: *PageCache) usize {
 const max_level = 4;
 
 /// Adds a level to the page cache.
-pub fn expand(self: *PageCache) !void {
+pub fn expand(self: *PageCache) error{OutOfMemory}!void {
     std.debug.assert(self.level_count < max_level);
     const new_root = try Table.cache.alloc();
 
     new_root.children[0] = self.root;
-    for (1..Table.child_count) |i| {
+    for (1..Table.child_count) |i|
         new_root.children[i] = null;
-    }
 
     self.root = new_root;
     self.level_count += 1;
 }
 
-pub fn setupNewPageCache(page_cache: *PageCache) !void {
+pub fn setup(self: *PageCache) error{OutOfMemory}!void {
     const root_table = try PageCache.Table.cache.alloc();
-    for (0..PageCache.Table.child_count) |i| {
+    for (0..PageCache.Table.child_count) |i|
         root_table.children[i] = null;
-    }
 
-    page_cache.level_count = 1;
-    page_cache.spinlock = .{ .locked = 0 };
-    page_cache.root = root_table;
+    self.level_count = 1;
+    self.spinlock = .{ .locked = 0 };
+    self.root = root_table;
 }
 
 /// A node in the page cache radix tree.

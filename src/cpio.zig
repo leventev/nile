@@ -224,7 +224,7 @@ pub fn readInitramfsArchive(
 
     const prefix = "root";
 
-    var inode_counter: usize = 100;
+    var inode_counter: u32 = 100;
     var record: Record = undefined;
 
     while (try readRecord(&reader, &record, header_type)) {
@@ -240,16 +240,19 @@ pub fn readInitramfsArchive(
 
         switch (file_type) {
             file_type_regular_file => {
-                const file_name = std.fmt.allocPrint(gpa, "/{s}", .{path_name}) catch @panic("Archive file path name too long");
+                const file_name = std.fmt.allocPrint(gpa, "/{s}", .{path_name}) catch
+                    @panic("Archive file path name too long");
                 try vfs.createRegularFile(mount_table, .fromInt(inode_counter), file_name);
                 inode_counter += 1;
                 // TODO: maybe createRegularFile could return an OpenFile already?
 
                 const open_file = vfs.openFile(mount_table, null, file_name) catch unreachable;
-                _ = open_file.write(record.content, 0) catch @panic("Failed to write content of CPIO archive file");
+                _ = open_file.write(record.content, 0) catch
+                    @panic("Failed to write content of CPIO archive file");
             },
             file_type_directory => {
-                const file_name = std.fmt.allocPrint(gpa, "/{s}", .{path_name}) catch @panic("Archive file path name too long");
+                const file_name = std.fmt.allocPrint(gpa, "/{s}", .{path_name}) catch
+                    @panic("Archive file path name too long");
                 try vfs.createDirectory(mount_table, .fromInt(inode_counter), file_name);
                 inode_counter += 1;
             },

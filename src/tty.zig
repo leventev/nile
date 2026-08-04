@@ -5,6 +5,7 @@
 const std = @import("std");
 const framebuffer = @import("framebuffer.zig");
 const input = @import("input.zig");
+const vfs = @import("vfs.zig");
 const DeviceFilesystem = @import("DeviceFilesystem.zig");
 
 const log = std.log.scoped(.tty);
@@ -56,7 +57,7 @@ pub const TTYDevice = struct {
     };
 };
 
-const tty_devfs_operations = DeviceFilesystem.Device.Operations{
+const tty_devfs_operations = vfs.FileSystemSkeleton.Operations{
     .read = ttyDevfsRead,
     .write = ttyDevfsWrite,
 };
@@ -85,15 +86,21 @@ pub fn createTTYDevice(
         .reserved = 0,
     };
 
-    try DeviceFilesystem.create(devfs, filename, &tty_devfs_operations, tty_dev);
+    try DeviceFilesystem.create(devfs, filename, tty_dev, &tty_devfs_operations);
 
     return tty_dev;
 }
 
-fn ttyDevfsRead(internal_data: *anyopaque, buff: []u8, offset: usize) usize {
+fn ttyDevfsRead(
+    internal_data: ?*anyopaque,
+    inode: vfs.Inode,
+    buff: []u8,
+    offset: usize,
+) vfs.FileSystemError!usize {
+    _ = inode;
     _ = offset;
 
-    const tty: *TTYDevice = @ptrCast(@alignCast(internal_data));
+    const tty: *TTYDevice = @ptrCast(@alignCast(internal_data orelse unreachable));
 
     // block
     while (tty.input_buffer_written == 0) {}
@@ -115,13 +122,20 @@ fn ttyDevfsRead(internal_data: *anyopaque, buff: []u8, offset: usize) usize {
     return read_size;
 }
 
-fn ttyDevfsWrite(internal_data: *anyopaque, buff: []const u8, offset: usize) usize {
+fn ttyDevfsWrite(
+    internal_data: ?*anyopaque,
+    inode: vfs.Inode,
+    buff: []const u8,
+    offset: usize,
+) vfs.FileSystemError!usize {
+    _ = inode;
+
     if (offset != 0) {
         log.warn("offset != 0 ({})", .{offset});
         return 0;
     }
 
-    const tty: *TTYDevice = @ptrCast(@alignCast(internal_data));
+    const tty: *TTYDevice = @ptrCast(@alignCast(internal_data orelse unreachable));
     tty.driver.operations.writeString(tty, buff);
 
     return 0;

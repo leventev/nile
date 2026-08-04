@@ -149,7 +149,6 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     mount_table.dump();
     vfs.dumpTree(&mount_table);
-    vfs.dumpDirectory(&devfs.fs_cache.root_directory, 0);
 
     const init_file_path = "/bin/shell";
     const init_file = vfs.openFile(&mount_table, null, init_file_path) catch

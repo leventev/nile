@@ -1,13 +1,15 @@
 const std = @import("std");
 const vfs = @import("vfs.zig");
 const Path = @import("Path.zig");
+const Process = @import("Process.zig");
+const processes = @import("processes.zig");
 
-const DeviceFilesystem = @This();
+const ProcessFilesystem = @This();
 
 const log = std.log.scoped(.devfs);
 
 pub var skeleton: vfs.FileSystemSkeleton = .{
-    .name = "devfs",
+    .name = "procfs",
     .flags = .{
         .no_device = true,
         .has_page_cache = false,
@@ -16,20 +18,35 @@ pub var skeleton: vfs.FileSystemSkeleton = .{
     .operations = null,
 };
 
-fn init(gpa: std.mem.Allocator, fs: *vfs.FileSystem) !?*anyopaque {
-    const devfs = try gpa.create(DeviceFilesystem);
-    devfs.fs = fs;
-    devfs.inode_count = 0;
+fn processCount(
+    _: ?*anyopaque,
+    _: vfs.Inode,
+    buff: []u8,
+    _: usize,
+) vfs.FileSystemError!usize {
+    if (buff.len < @sizeOf(usize) or @intFromPtr(buff.ptr) % @sizeOf(usize) != 0) return 0;
 
-    return devfs;
+    const ptr: *usize = @ptrCast(@alignCast(buff.ptr));
+    ptr.* = processes.process_count;
+    return @sizeOf(usize);
+}
+
+fn init(gpa: std.mem.Allocator, fs: *vfs.FileSystem) !?*anyopaque {
+    const procfs = try gpa.create(ProcessFilesystem);
+    procfs.fs = fs;
+    procfs.inode_count = 0;
+
+    procfs.create("processcount", null, &.{
+        .read = processCount,
+    }) catch @panic("TODO");
+
+    return procfs;
 }
 
 fs: *vfs.FileSystem,
-
-// TODO: dynamically allocate
 inode_count: u32,
 
-pub fn createDirectory(self: *DeviceFilesystem, path: []const u8) !void {
+fn createDirectory(self: *ProcessFilesystem, path: []const u8) !void {
     const inode = self.inode_count;
     var path_walker = try Path.fromStringWithoutSlash(path);
 
@@ -52,10 +69,10 @@ pub fn createDirectory(self: *DeviceFilesystem, path: []const u8) !void {
     self.inode_count += 1;
 }
 
-pub fn createRegular(
-    self: *DeviceFilesystem,
+pub fn create(
+    self: *ProcessFilesystem,
     path: []const u8,
-    internal_data: *anyopaque,
+    internal_data: ?*anyopaque,
     operations: *const vfs.FileSystemSkeleton.Operations,
 ) !void {
     const inode = self.inode_count;

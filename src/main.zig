@@ -22,6 +22,7 @@ pub const pc_font = @import("pc_font.zig");
 pub const kernel_gpa = @import("mem/kernel_gpa.zig");
 pub const console = @import("console.zig");
 pub const DeviceFilesystem = @import("DeviceFilesystem.zig");
+pub const ProcessFilesystem = @import("ProcessFilesystem.zig");
 pub const ramfs = @import("ramfs.zig");
 
 comptime {
@@ -102,9 +103,12 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
 
     vfs.registerFileSystem(&ramfs.ram_file_system);
     vfs.registerFileSystem(&DeviceFilesystem.skeleton);
+    vfs.registerFileSystem(&ProcessFilesystem.skeleton);
 
     const devfs = vfs.createFileSystem(gpa, "devfs") catch unreachable;
     const devfs_internal: *DeviceFilesystem = @ptrCast(@alignCast(devfs.internal_data));
+
+    const procfs = vfs.createFileSystem(gpa, "procfs") catch unreachable;
 
     // find interrupt controllers first
     devicetree.addDevices(&dt) catch @panic("TODO");
@@ -139,6 +143,9 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     // TODO: proper inode
     vfs.createDirectory(&mount_table, .fromInt(1), "/dev") catch @panic("Failed to create /dev directory");
     vfs.mountFileSystem(&mount_table, "/dev", devfs) catch @panic("Failed to mount /dev");
+    vfs.createDirectory(&mount_table, .fromInt(2), "/proc") catch @panic("Failed to create /dev directory");
+    vfs.mountFileSystem(&mount_table, "/proc", procfs) catch |err|
+        std.debug.panic("Failed to mount /proc: {s}", .{@errorName(err)});
 
     console.init(gpa, devfs_internal, &framebuffer.framebuffers[0]) catch @panic("TODO");
 

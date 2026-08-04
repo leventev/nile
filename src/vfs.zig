@@ -314,7 +314,7 @@ pub const FileSystemCache = struct {
             self: *Directory,
             name: []const u8,
             inode: Inode,
-            internal_data: *anyopaque,
+            internal_data: ?*anyopaque,
             operations: *const FileSystemSkeleton.Operations,
         ) !void {
             const dent_ptr = self.lookup(name);
@@ -805,7 +805,7 @@ pub fn createRegularUniqueFile(
     mount_table: *MountTable,
     inode: Inode,
     path_str: []const u8,
-    internal_data: *anyopaque,
+    internal_data: ?*anyopaque,
     operations: *const FileSystemSkeleton.Operations,
 ) !void {
     var fs: *FileSystem = undefined;

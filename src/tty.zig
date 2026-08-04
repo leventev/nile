@@ -86,7 +86,7 @@ pub fn createTTYDevice(
         .reserved = 0,
     };
 
-    try DeviceFilesystem.create(devfs, filename, tty_dev, &tty_devfs_operations);
+    try DeviceFilesystem.createRegular(devfs, filename, tty_dev, &tty_devfs_operations);
 
     return tty_dev;
 }

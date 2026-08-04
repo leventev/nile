@@ -14,6 +14,7 @@ const log = std.log.scoped(.processes);
 
 var running_processes: ?*Process = null;
 var processes_available: std.bit_set.ArrayBitSet(usize, Process.Id.max) = .initFull();
+pub var process_count: usize = 0;
 
 var process_cache: slab_allocator.ObjectCache(Process) = .{};
 
@@ -111,6 +112,8 @@ pub fn spawnProcess(
 
     dumpProcesses();
 
+    process_count += 1;
+
     return new_proc;
 }
 
@@ -176,6 +179,8 @@ pub fn killCurrentProcess(exit_code: isize) void {
     std.log.debug("PID {} killed with exit code: {}", .{ @intFromEnum(current_process.id), exit_code });
 
     process_cache.free(current_process);
+
+    process_count += 1;
 }
 
 fn sentinel_thread() void {
@@ -211,5 +216,8 @@ pub fn init(root_page_table: mm.PageTable) *Thread {
     next_ptr.* = sentinel_process;
 
     const thread = scheduler.newKernelThread(sentinel_thread, sentinel_process) catch unreachable;
+
+    process_count += 1;
+
     return thread;
 }

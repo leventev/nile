@@ -150,7 +150,7 @@ pub fn addFramebuffer(
     framebuffer_count += 1;
 
     // TODO: multiple framebuffer numbers
-    devfs.create("framebuffer", fb, &devfs_ops) catch @panic("TODO");
+    devfs.createRegular("framebuffer", fb, &devfs_ops) catch @panic("TODO");
 
     return true;
 }

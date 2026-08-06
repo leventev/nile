@@ -31,19 +31,25 @@ pub fn getPage(self: *PageCache, page_index: usize, allocate: bool) !mm.VirtualA
         const bit_offset = bits_per_level * level;
         const index = std.math.shr(usize, page_index, bit_offset) & base_mask;
 
-        const page_ptr = table.children[index] orelse blk: {
-            if (allocate) {
+        if (level == 0) {
+            const page_ptr = table.children[index] orelse blk: {
+                if (!allocate) @panic("Page cache entry is not allocated");
                 const new_page_phys = try buddy_allocator.allocBlock(0);
                 const new_page = mm.physicalToVirtualAddress(new_page_phys).asPtr(*anyopaque);
                 table.children[index] = new_page;
                 break :blk new_page;
-            } else @panic("Page cache entry is not allocated");
+            };
+
+            return .fromInt(@intFromPtr(page_ptr));
+        }
+
+        table = if (table.children[index]) |ptr| @as(*Table, @ptrCast(@alignCast(ptr))) else blk: {
+            if (!allocate) @panic("Page cache entry is not allocated");
+            const new_table = try Table.cache.alloc();
+            table.children[index] = new_table;
+            break :blk new_table;
         };
 
-        if (level == 0)
-            return .fromInt(@intFromPtr(page_ptr));
-
-        table = @ptrCast(@alignCast(page_ptr));
         level -= 1;
     }
 }

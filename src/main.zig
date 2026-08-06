@@ -134,7 +134,7 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     var mount_table: vfs.MountTable = .{
         .mount_count = 0,
         .mounts = null,
-        .lock = .{},
+        .spinlock = .{},
     };
 
     const ramfs_instance = vfs.createFileSystem(gpa, "ramfs") catch @panic("Failed to create ramfs");

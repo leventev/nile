@@ -495,12 +495,13 @@ pub fn ObjectCache(comptime T: type) type {
             self.initialized = true;
             self.__slab_backing = slab_allocator.meta_cache.alloc() catch @panic("Unable to allocate new cache");
 
+            const cache_name = @typeName(T) ++ "-cache";
             // TODO: come up with some kind of logic for assigning higher block orders
             const obj_size = @sizeOf(T);
             const obj_alignment_log = std.math.log2_int(u5, @alignOf(T));
             const slab_block_order = buddy_allocator.blockOrderFromSize(obj_size * 4);
             self.__slab_backing.* = .{
-                .name = @typeName(T) ++ "-cache",
+                .name = cache_name,
                 .slab_block_order = slab_block_order,
                 .unused_slabs = .{},
                 .partial_slabs = .{},

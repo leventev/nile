@@ -5,6 +5,7 @@ const Path = @import("Path.zig");
 const PageCache = @import("PageCache.zig");
 const core = @import("core");
 const SyscallError = core.SyscallError;
+const sync = @import("sync.zig");
 
 pub const Inode = enum(u32) {
     _,
@@ -71,29 +72,11 @@ pub const FileSystemSkeleton = struct {
             offset: usize,
         ) FileSystemError!usize = &writeStub,
 
-        pub fn readStub(
-            internal_data: ?*anyopaque,
-            inode: Inode,
-            buff: []const u8,
-            offset: usize,
-        ) FileSystemError!usize {
-            _ = internal_data;
-            _ = inode;
-            _ = buff;
-            _ = offset;
+        pub fn readStub(_: ?*anyopaque, _: Inode, _: []const u8, _: usize) FileSystemError!usize {
             return 0;
         }
 
-        pub fn writeStub(
-            internal_data: ?*anyopaque,
-            inode: Inode,
-            buff: []const u8,
-            offset: usize,
-        ) FileSystemError!usize {
-            _ = internal_data;
-            _ = inode;
-            _ = buff;
-            _ = offset;
+        pub fn writeStub(_: ?*anyopaque, _: Inode, _: []const u8, _: usize) FileSystemError!usize {
             return 0;
         }
     };
@@ -108,7 +91,7 @@ var file_system_skeletons: struct {
     count: usize = 0,
 
     /// Lock
-    lock: arch.Lock = .{},
+    spinlock: sync.Spinlock = .{},
 
     /// If an fs matches the provided name return a pointer to the 'next' pointer pointing to it.
     /// Otherwise returns a pointer to the last element's 'next' pointer (which points to null).
@@ -127,8 +110,8 @@ var file_system_skeletons: struct {
 /// The recommended way to store FileSystem is to make it a global variable and store
 /// it in the data section, that way we don't need to worry about its lifetime.
 pub fn registerFileSystem(file_system: *FileSystemSkeleton) void {
-    file_system_skeletons.lock.lock();
-    defer file_system_skeletons.lock.unlock();
+    file_system_skeletons.spinlock.lock();
+    defer file_system_skeletons.spinlock.unlock();
 
     const fs_next_ptr = file_system_skeletons.getByName(file_system.name);
     std.debug.assert(fs_next_ptr.* == null);
@@ -141,8 +124,8 @@ pub fn registerFileSystem(file_system: *FileSystemSkeleton) void {
 /// Unregister a file system.
 /// TODO: check if fs is mounted
 pub fn unregisterFileSystem(name: []const u8) void {
-    file_system_skeletons.lock.lock();
-    defer file_system_skeletons.lock.unlock();
+    file_system_skeletons.spinlock.lock();
+    defer file_system_skeletons.spinlock.unlock();
 
     const fs_next_ptr = file_system_skeletons.getByName(name);
     const fs = fs_next_ptr.*.?;
@@ -154,8 +137,8 @@ pub fn unregisterFileSystem(name: []const u8) void {
 
 /// Print registered file systems
 pub fn dumpRegisteredFilesystems() void {
-    file_system_skeletons.lock.lock();
-    defer file_system_skeletons.lock.unlock();
+    file_system_skeletons.spinlock.lock();
+    defer file_system_skeletons.spinlock.unlock();
 
     std.log.debug("Registered file systems({}):", .{file_system_skeletons.count});
     var fs_ptr = file_system_skeletons.head;
@@ -375,7 +358,7 @@ pub const FileSystem = struct {
 var global_file_system_table: struct {
     mounted_file_systems: ?*FileSystem = null,
     // TODO: no global lock?
-    lock: arch.Lock = .{},
+    spinlock: sync.Spinlock = .{},
 
     /// If an fs matches the provided id return a pointer to the 'next' pointer pointing to it.
     /// Otherwise returns a pointer to the last element's 'next' pointer (which points to null).
@@ -411,11 +394,11 @@ pub const MountTable = struct {
     mount_count: usize,
 
     /// Lock
-    lock: arch.Lock,
+    spinlock: sync.Spinlock,
 
     pub fn dump(self: *MountTable) void {
-        self.lock.lock();
-        defer self.lock.unlock();
+        self.spinlock.lock();
+        defer self.spinlock.unlock();
 
         std.log.info("Mounts in namespaces({}):", .{self.mount_count});
         var mount_ptr = self.mounts;
@@ -439,8 +422,8 @@ pub const MountTable = struct {
 
 // TODO: explicit errors
 pub fn createFileSystem(gpa: std.mem.Allocator, fs_name: []const u8) !*FileSystem {
-    file_system_skeletons.lock.lock();
-    defer file_system_skeletons.lock.unlock();
+    file_system_skeletons.spinlock.lock();
+    defer file_system_skeletons.spinlock.unlock();
 
     const skel = file_system_skeletons.getByName(fs_name).* orelse return error.FsNotRegistered;
 
@@ -482,13 +465,13 @@ pub fn mountFileSystem(
     // TODO: special case mounting root
 
     // TODO: the order shouldnt matter here, right?
-    mount_table.lock.lock();
-    file_system_skeletons.lock.lock();
-    global_file_system_table.lock.lock();
+    mount_table.spinlock.lock();
+    file_system_skeletons.spinlock.lock();
+    global_file_system_table.spinlock.lock();
     defer {
-        mount_table.lock.unlock();
-        file_system_skeletons.lock.unlock();
-        global_file_system_table.lock.unlock();
+        mount_table.spinlock.unlock();
+        file_system_skeletons.spinlock.unlock();
+        global_file_system_table.spinlock.unlock();
     }
 
     // TODO: validate path
@@ -562,6 +545,7 @@ pub fn genericWriteRegular(
 ) !usize {
     _ = fs;
 
+    // std.log.debug("write {} {} {}", .{ buff.len, regular.size, offset });
     std.debug.assert(offset <= regular.size);
 
     // TODO: support no_device == false too

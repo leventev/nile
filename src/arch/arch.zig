@@ -41,10 +41,6 @@ pub const setupNewGeneralThread = switch (target) {
     Arch.riscv64 => riscv64.setupNewGeneralThread,
 };
 
-pub const Lock = switch (target) {
-    Arch.riscv64 => riscv64.Lock,
-};
-
 pub const mapRegion = switch (target) {
     Arch.riscv64 => riscv64.mapRegion,
 };

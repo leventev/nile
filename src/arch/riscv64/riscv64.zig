@@ -11,7 +11,6 @@ const scheduler = @import("../../scheduler.zig");
 const Thread = @import("../../Thread.zig");
 const CSR = @import("csr.zig").CSR;
 const config = @import("../../config.zig");
-pub const Lock = @import("Lock.zig");
 
 pub const enableInterrupts = trap.enableInterrupts;
 pub const disableInterrupts = trap.disableInterrupts;

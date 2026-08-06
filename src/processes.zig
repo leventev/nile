@@ -190,9 +190,9 @@ fn sentinel_thread() void {
 }
 
 var empty_mount_table: vfs.MountTable = .{
-    .lock = .{ .locked = 0 },
     .mount_count = 0,
     .mounts = null,
+    .spinlock = .{},
 };
 
 pub fn init(root_page_table: mm.PageTable) *Thread {

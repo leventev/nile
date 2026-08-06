@@ -101,3 +101,8 @@ pub fn create(
 
     self.inode_count += 1;
 }
+
+pub fn addProcess(self: *ProcessFilesystem, gpa: std.mem.Allocator, process: *Process) !void {
+    const name = try std.fmt.allocPrint(gpa, "{}", .{@intFromEnum(process.id)});
+    self.createDirectory(name);
+}

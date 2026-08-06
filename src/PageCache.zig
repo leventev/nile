@@ -3,6 +3,7 @@ const slab_allocator = @import("mem/slab_allocator.zig");
 const buddy_allocator = @import("mem/buddy_allocator.zig");
 const arch = @import("arch/arch.zig");
 const mm = @import("mem/mm.zig");
+const sync = @import("sync.zig");
 
 const PageCache = @This();
 
@@ -14,7 +15,7 @@ root: *Table,
 level_count: usize,
 
 /// Lock
-spinlock: arch.Lock,
+spinlock: sync.Spinlock,
 
 pub fn getPage(self: *PageCache, page_index: usize, allocate: bool) !mm.VirtualAddress {
     std.debug.assert(page_index <= self.totalPageCount());
@@ -72,9 +73,11 @@ pub fn setup(self: *PageCache) error{OutOfMemory}!void {
     for (0..PageCache.Table.child_count) |i|
         root_table.children[i] = null;
 
-    self.level_count = 1;
-    self.spinlock = .{ .locked = 0 };
-    self.root = root_table;
+    self.* = .{
+        .level_count = 1,
+        .root = root_table,
+        .spinlock = .{},
+    };
 }
 
 /// A node in the page cache radix tree.

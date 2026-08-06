@@ -15,48 +15,41 @@ pub const max_order = order_count - 1;
 /// The minimum order is 0 and the maximum is max_order.
 pub const BuddyAllocator = struct {
     /// The list of all orders.
-    orders: [order_count]Order = [_]Order{Order{ .free_block_count = 0, .list = .{} }} ** order_count,
+    orders: [order_count]Order = [_]Order{Order{
+        .free_block_count = 0,
+        .first = null,
+    }} ** order_count,
 
     /// Keeps track of the free blocks in a given order.
     pub const Order = struct {
         /// List of all free blocks in the order.
-        list: std.DoublyLinkedList,
+        first: ?*Node,
 
         /// The number of free blocks in the order.
         free_block_count: usize,
+
+        const Node = struct { next: ?*Node };
 
         /// Add a block to the free list. The list of block addresses is always ordered
         /// in ascending order.
         pub fn orderedAdd(self: *Order, block_addr: PhysicalAddress) void {
             const virt_addr = mm.physicalToVirtualAddress(block_addr);
-            const node_ptr: *std.DoublyLinkedList.Node = @ptrFromInt(virt_addr.int);
-
-            // TODO: possibly clean this up and get rid of the special cases
-            const first_node = self.list.first;
-            if (first_node) |first| {
-                if (@intFromPtr(node_ptr) < @intFromPtr(first)) {
-                    self.list.prepend(node_ptr);
-                } else {
-                    var list_node = first_node;
-                    while (list_node) |node| {
-                        const next_list_node = node.next;
-                        if (next_list_node) |next_node| {
-                            if (@intFromPtr(node_ptr) < @intFromPtr(next_node)) {
-                                self.list.insertAfter(node, node_ptr);
-                                break;
-                            }
-                        } else {
-                            self.list.insertAfter(node, node_ptr);
-                        }
-
-                        list_node = next_list_node;
-                    }
-                }
-            } else {
-                self.list.prepend(node_ptr);
-            }
+            const new_node = virt_addr.asPtr(*Node);
 
             self.free_block_count += 1;
+
+            var next_ptr = &self.first;
+            while (next_ptr.*) |existing_node| : (next_ptr = &existing_node.next) {
+                if (@intFromPtr(new_node) < @intFromPtr(existing_node)) {
+                    next_ptr.* = new_node;
+                    new_node.next = existing_node;
+                    return;
+                }
+            }
+
+            // last element
+            next_ptr.* = new_node;
+            new_node.next = null;
         }
     };
 
@@ -134,13 +127,13 @@ pub const BuddyAllocator = struct {
     /// Tries to remove a free block from a certain order.
     /// Returns whether the block was in the free list of the specified order.
     pub fn removeBlock(self: *BuddyAllocator, order: usize, block_address: PhysicalAddress) bool {
-        var list_node = self.orders[order].list.first;
         const virt_addr = mm.physicalToVirtualAddress(block_address);
-        const node_ptr: *std.DoublyLinkedList.Node = @ptrFromInt(virt_addr.int);
+        const removed_node = virt_addr.asPtr(*Order.Node);
 
-        while (list_node) |node| : (list_node = node.next) {
-            if (node == node_ptr) {
-                self.orders[order].list.remove(node_ptr);
+        var next_ptr = &self.orders[order].first;
+        while (next_ptr.*) |node| : (next_ptr = &node.next) {
+            if (@intFromPtr(node) == @intFromPtr(removed_node)) {
+                next_ptr.* = removed_node.next;
                 self.orders[order].free_block_count -= 1;
                 return true;
             }
@@ -163,12 +156,17 @@ pub const BuddyAllocator = struct {
         if (order > max_order) return error.OutOfMemory;
 
         // for simplicity's sake we always try to select the leftmost block
-        // to bias lower addresses hence popFirst() instead pop()
-        if (self.orders[order].list.popFirst()) |list_node| {
-            const virt_addr: mm.VirtualAddress = .fromInt(@intFromPtr(list_node));
-            const phys_addr = mm.virtualToPhysicalAddress(virt_addr);
+        const first_block =
+            if (self.orders[order].first) |first_block| blk: {
+                self.orders[order].first = first_block.next;
+                break :blk first_block;
+            } else null;
+
+        if (first_block) |block| {
             // when we split an N order block into two N-1 order blocks we always select the
             // left N-1 block so the address always stays the same
+            const virt_addr: mm.VirtualAddress = .fromInt(@intFromPtr(block));
+            const phys_addr = mm.virtualToPhysicalAddress(virt_addr);
             self.orders[order].free_block_count -= 1;
 
             // keep splitting the blocks until we reach the desired order

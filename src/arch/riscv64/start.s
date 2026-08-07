@@ -92,6 +92,8 @@ bss_clear:
     # because of relocations
     la a2, root_pg_tbl
 
+    mv fp, x0
+
     # jump to zig code
     lui  t0, %hi(initRiscv64)
     addi t0, t0, %lo(initRiscv64)

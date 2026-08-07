@@ -66,15 +66,16 @@ pub fn panic(
     }
 
     std.log.err("Stack trace:", .{});
-    const max_stacktrace_depth = 64;
-    var address_buffer: [max_stacktrace_depth]usize = undefined;
-    const stack_trace = std.debug.captureCurrentStackTrace(
-        .{ .first_address = @returnAddress() },
-        &address_buffer,
-    );
-    for (stack_trace.return_addresses) |addr| {
-        std.log.err("    0x{x}", .{addr});
+
+    var frame_pointer: usize = @frameAddress();
+    while (frame_pointer != 0) {
+        const base: [*]usize = @ptrFromInt(frame_pointer - 2 * @sizeOf(usize));
+
+        frame_pointer = base[0];
+        const ret_address = base[1];
+        std.log.debug("  0x{x}", .{ret_address - @sizeOf(usize)});
     }
+
     while (true) {}
 }
 

@@ -18,9 +18,10 @@ pub fn spawn(
 
     const new_process = processes.spawnProcess(
         executable_file.file,
-        current_process.id,
+        current_process,
         current_process.mount_table,
         current_process.root_page_table,
+        current_process.procfs,
     ) catch |err| return switch (err) {
         error.OutOfMemory => .err(.OutOfMemory),
         error.InvalidELF => .err(.InvalidELF),

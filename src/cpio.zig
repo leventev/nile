@@ -240,9 +240,10 @@ pub fn readInitramfsArchive(
 
         switch (file_type) {
             file_type_regular_file => {
+                // TODO: bufPrint
                 const file_name = std.fmt.allocPrint(gpa, "/{s}", .{path_name}) catch
                     @panic("Archive file path name too long");
-                try vfs.createRegularFile(mount_table, .fromInt(inode_counter), file_name);
+                try vfs.createRegularFile(gpa, mount_table, .fromInt(inode_counter), file_name);
                 inode_counter += 1;
                 // TODO: maybe createRegularFile could return an OpenFile already?
 
@@ -253,7 +254,7 @@ pub fn readInitramfsArchive(
             file_type_directory => {
                 const file_name = std.fmt.allocPrint(gpa, "/{s}", .{path_name}) catch
                     @panic("Archive file path name too long");
-                try vfs.createDirectory(mount_table, .fromInt(inode_counter), file_name);
+                try vfs.createDirectory(gpa, mount_table, .fromInt(inode_counter), file_name);
                 inode_counter += 1;
             },
             else => {},

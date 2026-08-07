@@ -1,8 +1,6 @@
 const std = @import("std");
-
-const sbi = @import("arch/riscv64/sbi.zig");
 const time = @import("time.zig");
-const arch = @import("arch/arch.zig");
+const sync = @import("sync.zig");
 
 pub const IOBackend = struct {
     name: []const u8,
@@ -88,7 +86,7 @@ fn writeBytes(bytes: []const u8) error{}!usize {
     return best.writeBytes(bytes) orelse unreachable;
 }
 
-var lock: arch.Lock = .{};
+var spinlock: sync.Spinlock = .unlocked;
 
 pub fn kernel_log(
     comptime level: std.log.Level,
@@ -96,10 +94,9 @@ pub fn kernel_log(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    const ints_enabled = arch.disableInterrupts();
-    defer if (ints_enabled) arch.enableInterrupts();
-    lock.lock();
-    defer lock.unlock();
+    const ints_enabled = spinlock.lockInterrupt();
+    defer spinlock.unlockInterrupt(ints_enabled);
+
     printLogPreamble(scope, level) catch unreachable;
     kernel_writer.print(format, args) catch unreachable;
     kernel_writer.writeByte('\n') catch unreachable;

@@ -91,7 +91,7 @@ var file_system_skeletons: struct {
     count: usize = 0,
 
     /// Lock
-    spinlock: sync.Spinlock = .{},
+    spinlock: sync.Spinlock = .unlocked,
 
     /// If an fs matches the provided name return a pointer to the 'next' pointer pointing to it.
     /// Otherwise returns a pointer to the last element's 'next' pointer (which points to null).
@@ -248,16 +248,18 @@ pub const FileSystemCache = struct {
             return dent_ptr;
         }
 
-        pub fn createDirectory(self: *Directory, name: []const u8, inode: Inode) !void {
-            const dent_ptr = self.lookup(name);
+        pub fn createDirectory(self: *Directory, copied_name: []const u8, inode: Inode) !void {
+            const dent_ptr = self.lookup(copied_name);
             if (dent_ptr.* != null) return error.AlreadyExists;
+
+            // TODO: copy name
 
             var dir = try Directory.cache.alloc();
             dir.* = .{
                 .entry_count = 0,
                 .entries = null,
                 .common = .{
-                    .name = name,
+                    .name = copied_name,
                     .filetype = .directory,
                     .inode = inode,
                     .reference_count = 1,
@@ -269,8 +271,8 @@ pub const FileSystemCache = struct {
             self.entry_count += 1;
         }
 
-        pub fn createRegular(self: *Directory, name: []const u8, inode: Inode) !void {
-            const dent_ptr = self.lookup(name);
+        pub fn createRegular(self: *Directory, copied_name: []const u8, inode: Inode) !void {
+            const dent_ptr = self.lookup(copied_name);
             if (dent_ptr.* != null) return error.AlreadyExists;
 
             // TODO: size
@@ -280,7 +282,7 @@ pub const FileSystemCache = struct {
                 .size = 0,
                 .page_cache = undefined,
                 .common = .{
-                    .name = name,
+                    .name = copied_name,
                     .filetype = .regular,
                     .inode = inode,
                     .reference_count = 1,
@@ -295,12 +297,12 @@ pub const FileSystemCache = struct {
 
         pub fn createRegularUnique(
             self: *Directory,
-            name: []const u8,
+            name_copied: []const u8,
             inode: Inode,
             internal_data: ?*anyopaque,
             operations: *const FileSystemSkeleton.Operations,
         ) !void {
-            const dent_ptr = self.lookup(name);
+            const dent_ptr = self.lookup(name_copied);
             if (dent_ptr.* != null) return error.AlreadyExists;
 
             // TODO: size
@@ -309,7 +311,7 @@ pub const FileSystemCache = struct {
                 .internal_data = internal_data,
                 .operations = operations.*,
                 .common = .{
-                    .name = name,
+                    .name = name_copied,
                     .filetype = .regular,
                     .inode = inode,
                     .reference_count = 1,
@@ -358,7 +360,7 @@ pub const FileSystem = struct {
 var global_file_system_table: struct {
     mounted_file_systems: ?*FileSystem = null,
     // TODO: no global lock?
-    spinlock: sync.Spinlock = .{},
+    spinlock: sync.Spinlock = .unlocked,
 
     /// If an fs matches the provided id return a pointer to the 'next' pointer pointing to it.
     /// Otherwise returns a pointer to the last element's 'next' pointer (which points to null).
@@ -545,7 +547,6 @@ pub fn genericWriteRegular(
 ) !usize {
     _ = fs;
 
-    // std.log.debug("write {} {} {}", .{ buff.len, regular.size, offset });
     std.debug.assert(offset <= regular.size);
 
     // TODO: support no_device == false too
@@ -767,25 +768,38 @@ pub fn walkUntilLastComponent(
     }
 }
 
-pub fn createDirectory(mount_table: *MountTable, inode: Inode, path_str: []const u8) !void {
+pub fn createDirectory(
+    gpa: std.mem.Allocator,
+    mount_table: *MountTable,
+    inode: Inode,
+    path_str: []const u8,
+) !void {
     var fs: *FileSystem = undefined;
     var dir: *FileSystemCache.Directory = undefined;
     var last_component: []const u8 = &.{};
 
     try walkUntilLastComponent(mount_table, null, path_str, &fs, &dir, &last_component);
-    try dir.createDirectory(last_component, inode);
+    const last_component_copied = try gpa.dupe(u8, last_component);
+    try dir.createDirectory(last_component_copied, inode);
 }
 
-pub fn createRegularFile(mount_table: *MountTable, inode: Inode, path_str: []const u8) !void {
+pub fn createRegularFile(
+    gpa: std.mem.Allocator,
+    mount_table: *MountTable,
+    inode: Inode,
+    path_str: []const u8,
+) !void {
     var fs: *FileSystem = undefined;
     var dir: *FileSystemCache.Directory = undefined;
     var last_component: []const u8 = &.{};
 
     try walkUntilLastComponent(mount_table, null, path_str, &fs, &dir, &last_component);
-    try dir.createRegular(last_component, inode);
+    const last_component_copied = try gpa.dupe(u8, last_component);
+    try dir.createRegular(last_component_copied, inode);
 }
 
 pub fn createRegularUniqueFile(
+    gpa: std.mem.Allocator,
     mount_table: *MountTable,
     inode: Inode,
     path_str: []const u8,
@@ -797,7 +811,8 @@ pub fn createRegularUniqueFile(
     var last_component: []const u8 = &.{};
 
     try walkUntilLastComponent(mount_table, null, path_str, &fs, &dir, &last_component);
-    try dir.createRegularUnique(last_component, inode, internal_data, operations);
+    const last_component_copied = try gpa.dupe(u8, last_component);
+    try dir.createRegularUnique(last_component_copied, inode, internal_data, operations);
 }
 
 // TODO: ERRORS

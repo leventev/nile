@@ -82,7 +82,7 @@ pub fn setup(self: *PageCache) error{OutOfMemory}!void {
     self.* = .{
         .level_count = 1,
         .root = root_table,
-        .spinlock = .{},
+        .spinlock = .unlocked,
     };
 }
 

@@ -109,6 +109,7 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     const devfs_internal: *DeviceFilesystem = @ptrCast(@alignCast(devfs.internal_data));
 
     const procfs = vfs.createFileSystem(gpa, "procfs") catch unreachable;
+    const procfs_internal: *ProcessFilesystem = @ptrCast(@alignCast(procfs.internal_data));
 
     // find interrupt controllers first
     devicetree.addDevices(&dt) catch @panic("TODO");
@@ -134,16 +135,16 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     var mount_table: vfs.MountTable = .{
         .mount_count = 0,
         .mounts = null,
-        .spinlock = .{},
+        .spinlock = .unlocked,
     };
 
     const ramfs_instance = vfs.createFileSystem(gpa, "ramfs") catch @panic("Failed to create ramfs");
 
     vfs.mountFileSystem(&mount_table, "/", ramfs_instance) catch @panic("Failed to mount /");
     // TODO: proper inode
-    vfs.createDirectory(&mount_table, .fromInt(1), "/dev") catch @panic("Failed to create /dev directory");
+    vfs.createDirectory(gpa, &mount_table, .fromInt(1), "/dev") catch @panic("Failed to create /dev directory");
     vfs.mountFileSystem(&mount_table, "/dev", devfs) catch @panic("Failed to mount /dev");
-    vfs.createDirectory(&mount_table, .fromInt(2), "/proc") catch @panic("Failed to create /dev directory");
+    vfs.createDirectory(gpa, &mount_table, .fromInt(2), "/proc") catch @panic("Failed to create /dev directory");
     vfs.mountFileSystem(&mount_table, "/proc", procfs) catch |err|
         std.debug.panic("Failed to mount /proc: {s}", .{@errorName(err)});
 
@@ -161,12 +162,13 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     const init_file = vfs.openFile(&mount_table, null, init_file_path) catch
         @panic("Unable to open " ++ init_file_path);
 
-    const idle_process_thread = processes.init(root_page_table);
+    const idle_process_thread = processes.init(root_page_table, procfs_internal);
     _ = processes.spawnProcess(
         init_file,
-        null,
+        idle_process_thread.purpose.general.owner_process,
         &mount_table,
         root_page_table,
+        procfs_internal,
     ) catch |err| std.debug.panicExtra(null, "Failed to spawn init process: {s}", .{@errorName(err)});
 
     // TODO: this could probably be done in a nicer way

@@ -30,7 +30,7 @@ pub const scheduleNextThread = switch (target) {
 };
 
 pub const forceScheduleNextThread = switch (target) {
-    Arch.riscv64 => riscv64.forceScheduleNextThread,
+    Arch.riscv64 => riscv64.forceSchedule,
 };
 
 pub const setupSoftInterruptThread = switch (target) {

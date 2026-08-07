@@ -153,6 +153,7 @@ pub fn newUserThread(
 
     var thread: *Thread = thread_cache.alloc() catch return error.out_of_memory;
     thread.id = thread_id;
+
     const stack_top = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
     thread.kernel_stack_top = mm.physicalToVirtualAddress(stack_top);
     thread.kernel_state = thread_state_cache.alloc() catch return error.out_of_memory;
@@ -192,6 +193,7 @@ pub fn newUserThread(
 /// The thread is freed thus the pointer becomes invalid.
 /// The function does not schedule the new first thread.
 pub fn removeThread(thread: *Thread) void {
+    // TODO: remove from waitlist if in one
     var next_ptr = &running_threads;
     // TODO: maybe use a doubly linked list to avoid iterating
     while (next_ptr.*) |added_thread| : (next_ptr = &added_thread.scheduler_list_next) {
@@ -215,19 +217,7 @@ pub fn dumpRunningThreads() void {
     }
 }
 
-pub fn forceScheduleNextThread() void {
-    const prev_thread = popCurrentThread();
-    if (prev_thread.purpose == .soft_interrupt) {
-        prev_thread.purpose.soft_interrupt.queued = false;
-    } else {
-        appendRunningThread(prev_thread);
-    }
-
-    const next_thread = getCurrentThread();
-    arch.forceScheduleNextThread(next_thread);
-}
-
-fn scheduleNextThread() void {
+pub fn scheduleNextThread() void {
     const prev_thread = popCurrentThread();
     if (prev_thread.purpose == .soft_interrupt) {
         prev_thread.purpose.soft_interrupt.queued = false;

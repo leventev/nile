@@ -95,7 +95,7 @@ pub fn setupSoftInterruptThread(thread: *Thread) void {
     setupThreadState(thread.kernel_state, kernel_stack_bottom, entry_point, false);
 
     // TODO:
-    thread.kernel_state.gprs[1] = @intFromPtr(&scheduler.forceScheduleNextThread);
+    thread.kernel_state.gprs[1] = @intFromPtr(&forceSchedule);
 }
 
 pub fn scheduleNextThread(thread: *Thread) void {
@@ -121,11 +121,11 @@ pub fn scheduleNextThread(thread: *Thread) void {
     timer.resetTimer();
 }
 
-extern fn forceSchedule() noreturn;
+pub extern fn forceSchedule() void;
 
-pub fn forceScheduleNextThread(thread: *Thread) noreturn {
-    scheduleNextThread(thread);
-    forceSchedule();
+pub export fn riscv64ScheduleNextThread(state: *ThreadState) void {
+    _ = state;
+    scheduler.scheduleNextThread();
 }
 
 pub const clock_source = timer.riscv_clock_source;

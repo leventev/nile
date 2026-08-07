@@ -268,7 +268,7 @@ fn handlePagefault(code: ExceptionCode, address: mm.VirtualAddress, state: *Thre
 
         const user_address = mm.UserAddress.fromVirtual(address) orelse {
             // TODO: signal
-            processes.killCurrentProcess(-1);
+            processes.killCurrentProcess(-123);
             return;
         };
 

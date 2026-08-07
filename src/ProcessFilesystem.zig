@@ -35,14 +35,14 @@ fn init(gpa: std.mem.Allocator, fs: *vfs.FileSystem) !?*anyopaque {
     const procfs = try gpa.create(ProcessFilesystem);
     procfs.fs = fs;
     procfs.inode_count = 0;
+    procfs.gpa = gpa;
 
-    procfs.create("processcount", null, &.{
-        .read = processCount,
-    }) catch @panic("TODO");
+    procfs.create("processcount", null, &.{ .read = processCount }) catch @panic("TODO");
 
     return procfs;
 }
 
+gpa: std.mem.Allocator,
 fs: *vfs.FileSystem,
 inode_count: u32,
 
@@ -56,7 +56,8 @@ fn createDirectory(self: *ProcessFilesystem, path: []const u8) !void {
 
         const dir_entry_ptr = current_dir.lookup(path_element);
         if (is_last_component) {
-            try current_dir.createDirectory(path_element, inode);
+            const path_element_copied = try self.gpa.dupe(u8, path_element);
+            try current_dir.createDirectory(path_element_copied, .fromInt(inode));
         } else {
             const dir_entry = dir_entry_ptr.* orelse return error.InvalidPath;
             switch (dir_entry.filetype) {
@@ -84,8 +85,9 @@ pub fn create(
 
         const dir_entry_ptr = current_dir.lookup(path_element);
         if (is_last_component) {
+            const path_element_copied = try self.gpa.dupe(u8, path_element);
             try current_dir.createRegularUnique(
-                path_element,
+                path_element_copied,
                 .fromInt(inode),
                 internal_data,
                 operations,
@@ -102,7 +104,37 @@ pub fn create(
     self.inode_count += 1;
 }
 
-pub fn addProcess(self: *ProcessFilesystem, gpa: std.mem.Allocator, process: *Process) !void {
-    const name = try std.fmt.allocPrint(gpa, "{}", .{@intFromEnum(process.id)});
-    self.createDirectory(name);
+fn addToProcessSubdir(
+    self: *ProcessFilesystem,
+    process: *Process,
+    regular_name: []const u8,
+    operations: *const vfs.FileSystemSkeleton.Operations,
+) !void {
+    var buff: [512]u8 = undefined;
+    const name = try std.fmt.bufPrint(&buff, "{}/{s}", .{ @intFromEnum(process.id), regular_name });
+    try self.create(name, process, operations);
+}
+
+pub fn addProcess(self: *ProcessFilesystem, process: *Process) !void {
+    var buff: [128]u8 = undefined;
+    const dir_name = try std.fmt.bufPrint(&buff, "{}", .{@intFromEnum(process.id)});
+    try self.createDirectory(dir_name);
+    try self.addToProcessSubdir(process, "child_exitcode", &.{ .read = exitCodeRead });
+}
+
+fn exitCodeRead(
+    process_ptr: ?*anyopaque,
+    _: vfs.Inode,
+    buff: []u8,
+    _: usize,
+) vfs.FileSystemError!usize {
+    const process: *Process = @ptrCast(@alignCast(process_ptr orelse unreachable));
+    if (buff.len < @sizeOf(isize) or @intFromPtr(buff.ptr) % @sizeOf(isize) != 0) return 0;
+
+    process.last_child_exit_code_semaphore.sub();
+
+    const ptr: *isize = @ptrCast(@alignCast(buff.ptr));
+    ptr.* = process.last_child_exit_code orelse unreachable;
+
+    return @sizeOf(isize);
 }

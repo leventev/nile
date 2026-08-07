@@ -66,7 +66,12 @@ pub fn dispatchSyscall(user_state: *ThreadState) void {
 
     const result: u64 = @bitCast(syscall.callback(args));
 
-    std.log.debug("syscall {s} {any}: return 0x{x}", .{ syscall.name, args, result });
+    std.log.debug("(PID={}) syscall {s} {any}: return 0x{x}", .{
+        @intFromEnum(current_thread.purpose.general.owner_process.id),
+        syscall.name,
+        args,
+        result,
+    });
 
     user_state.gprs[10] = result;
 

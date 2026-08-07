@@ -4,18 +4,25 @@ const Thread = @import("Thread.zig");
 const mm = @import("mem/mm.zig");
 const vfs = @import("vfs.zig");
 const slab_allocator = @import("mem/slab_allocator.zig");
+const sync = @import("sync.zig");
+const ProcessFilesystem = @import("ProcessFilesystem.zig");
 
 const Process = @This();
 
 const max_fd = 100;
 
-parent_id: ?Id,
+parent: ?*Process,
 id: Id,
 associated_threads: ?*Thread,
 mapped_regions: ?*MappedRegion,
 mapped_region_count: usize,
 root_page_table: arch.PageTable,
 mount_table: *vfs.MountTable,
+
+procfs: *ProcessFilesystem,
+
+last_child_exit_code: ?isize,
+last_child_exit_code_semaphore: sync.Semaphore,
 
 // TODO:
 file_descriptor_table: [max_fd]?struct {

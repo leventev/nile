@@ -9,6 +9,7 @@ const arch = @import("arch/arch.zig");
 const mm = @import("mem/mm.zig");
 const vfs = @import("vfs.zig");
 const buddy_allocator = @import("mem/buddy_allocator.zig");
+const ProcessFilesystem = @import("ProcessFilesystem.zig");
 
 const log = std.log.scoped(.processes);
 
@@ -18,27 +19,25 @@ pub var process_count: usize = 0;
 
 var process_cache: slab_allocator.ObjectCache(Process) = .{};
 
-pub const Error = error{no_available_threads};
-
-fn nextProcessId() Error!Process.Id {
+fn nextProcessId() error{TooManyProcesses}!Process.Id {
     const process_id_int = processes_available.toggleFirstSet() orelse
-        return error.no_available_threads;
+        return error.TooManyProcesses;
     return @enumFromInt(process_id_int);
 }
 
 pub fn spawnProcess(
     file: vfs.OpenFile,
-    parent_pid: ?Process.Id,
-    parent_mount_table: *vfs.MountTable,
-    parent_root_page_table: arch.PageTable,
+    parent: ?*Process,
+    mount_table: *vfs.MountTable,
+    root_page_table: arch.PageTable,
+    procfs: *ProcessFilesystem,
 ) !*Process {
-    const new_proc_id = nextProcessId() catch return error.TooManyProcesses;
-    var new_proc = process_cache.alloc() catch return error.OutOfMemory;
+    var new_proc = try newProcess();
 
-    new_proc.id = new_proc_id;
-    new_proc.parent_id = parent_pid;
-    new_proc.mount_table = parent_mount_table;
-    new_proc.root_page_table = try mm.clonePageTable(parent_root_page_table, true);
+    new_proc.parent = parent;
+    new_proc.mount_table = mount_table;
+    new_proc.root_page_table = try mm.clonePageTable(root_page_table, true);
+    new_proc.procfs = procfs;
 
     // TODO: do something about the assumption that file is a Regular
     // TODO: USE PAGE CACHE
@@ -114,6 +113,8 @@ pub fn spawnProcess(
 
     process_count += 1;
 
+    procfs.addProcess(new_proc) catch unreachable;
+
     return new_proc;
 }
 
@@ -180,7 +181,14 @@ pub fn killCurrentProcess(exit_code: isize) void {
 
     process_cache.free(current_process);
 
+    if (current_process.parent) |parent| {
+        parent.last_child_exit_code = exit_code;
+        parent.last_child_exit_code_semaphore.add();
+    }
+
     process_count += 1;
+
+    // TODO: schedule next thread??
 }
 
 fn sentinel_thread() void {
@@ -192,21 +200,43 @@ fn sentinel_thread() void {
 var empty_mount_table: vfs.MountTable = .{
     .mount_count = 0,
     .mounts = null,
-    .spinlock = .{},
+    .spinlock = .unlocked,
 };
 
-pub fn init(root_page_table: mm.PageTable) *Thread {
+fn newProcess() !*Process {
+    const process_id = try nextProcessId();
+    const process = try process_cache.alloc();
+    process.* = .{
+        .id = process_id,
+        .last_child_exit_code = null,
+        .last_child_exit_code_semaphore = .default,
+        .next = null,
+        .associated_threads = null,
+        .mapped_region_count = 0,
+        .mapped_regions = null,
+        .parent = null,
+
+        .procfs = undefined,
+        .root_page_table = undefined,
+        // TODO: temporary
+        .file_descriptor_table = @splat(null),
+        .mount_table = undefined,
+    };
+
+    // the rest of the fields are set by the caller
+
+    return process;
+}
+
+pub fn init(root_page_table: mm.PageTable, procfs: *ProcessFilesystem) *Thread {
     process_cache = slab_allocator.createObjectCache(Process);
     Process.MappedRegion.cache = slab_allocator.createObjectCache(Process.MappedRegion);
 
-    // TODO: maybe dont catch unreachable these errors???
-
-    const sentinel_process_id = nextProcessId() catch unreachable;
-    std.debug.assert(@intFromEnum(sentinel_process_id) == 0);
-
-    const sentinel_process = process_cache.alloc() catch unreachable;
-    sentinel_process.id = sentinel_process_id;
+    const sentinel_process = newProcess() catch unreachable;
+    std.debug.assert(@intFromEnum(sentinel_process.id) == 0);
     sentinel_process.mount_table = &empty_mount_table;
+    sentinel_process.procfs = procfs;
+
     // TODO: we copy it because in switchAddressSpace we try to convert its virt address
     // to physical with HHDM but the original root page table is in .bss which cant be converted
     sentinel_process.root_page_table = mm.clonePageTable(root_page_table, true) catch unreachable;

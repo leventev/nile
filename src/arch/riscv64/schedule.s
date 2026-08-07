@@ -78,11 +78,45 @@ trapHandlerSupervisor:
 
 .type forceSchedule, @function
 .global forceSchedule
+.global riscv64ScheduleNextThread
 .align 4
 forceSchedule:
-    # the next thread's *ThreadState is already written to sscratch
+    # move *ThreadState from sscratch into t6 and t6 into sscratch
+    csrrw t6, sscratch, t6
 
-    # write *ThreadState to t6
+    # save GPRs
+    .set i, 1
+    .rept 30
+        writeGPR t6, %i
+        .set i, i+1
+    .endr
+
+    # since a0 is already saved we can move *ThreadState into it
+    mv a0, t6
+
+    # move the original t6 value back into t6
+    csrr t6, sscratch
+    writeGPR a0, 31
+
+    # move *ThreadState back into sscratch
+    csrw sscratch, a0
+
+    # save return address (where forceSchedule was called from) into *ThreadState
+    sd ra, (32 * REGISTER_BYTES)(a0)
+
+    # save sstatus
+    csrr t0, sstatus
+    # set SPP=supervsior (1 << 8) to imitate a trap from kernelspace
+    ori t0, t0, 0b100000000
+    sd t0, (33 * REGISTER_BYTES)(a0)
+
+    # set trap stack
+    ld sp, current_trap_stack_bottom
+
+    # *ThreadState is already in a0
+    call riscv64ScheduleNextThread
+
+    # load *ThreadState into t6
     csrr t6, sscratch
 
     ld t0, (32 * REGISTER_BYTES)(t6)
@@ -101,3 +135,4 @@ forceSchedule:
     .endr
 
     sret
+

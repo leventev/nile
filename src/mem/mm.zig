@@ -5,6 +5,9 @@ const devicetree = root.devicetree;
 const arch = @import("../arch/arch.zig");
 const Process = @import("../Process.zig");
 const buddy_allocator = @import("buddy_allocator.zig");
+const scheduler = @import("../scheduler.zig");
+const processes = @import("../processes.zig");
+const vfs = @import("../vfs.zig");
 
 const log = std.log.scoped(.mm);
 
@@ -452,12 +455,12 @@ pub fn getFrameRegions(
 
 const hhdm_start = if (builtin.is_test) 0 else 0xffffffc000000000;
 
-pub fn physicalToVirtualAddress(phys: PhysicalAddress) VirtualAddress {
+pub fn physicalToVirtual(phys: PhysicalAddress) VirtualAddress {
     // TODO: check whether the provided physical address is mapped in the HHDM region
     return VirtualAddress.fromInt(hhdm_start + phys.int);
 }
 
-pub fn virtualToPhysicalAddress(virt: VirtualAddress) PhysicalAddress {
+pub fn virtualToPhysical(virt: VirtualAddress) PhysicalAddress {
     // TODO: check whether the provided virtual address is in the HHDM region
     return PhysicalAddress.fromInt(virt.int - hhdm_start);
 }
@@ -468,7 +471,7 @@ pub fn clonePageTable(page_table: arch.PageTable, only_higher_half: bool) error{
         error.InvalidOrder => unreachable,
         error.OutOfMemory => return error.OutOfMemory,
     };
-    const new_page_table_virt = physicalToVirtualAddress(new_page_table_phys);
+    const new_page_table_virt = physicalToVirtual(new_page_table_phys);
     const new_page_table = PageTable.fromVirtualAddress(new_page_table_virt);
 
     arch.copyPageTable(page_table, new_page_table, only_higher_half);
@@ -483,4 +486,96 @@ pub fn mapRegion(root_page_table: arch.PageTable, addr: VirtualAddress, size: us
 
     // TODO: make this more efficient, map larger pages
     arch.mapRegion(root_page_table, addr, size, flags);
+}
+
+pub const PagefaultType = enum {
+    read,
+    write,
+    instruction,
+};
+
+pub fn handlePageFault(address: VirtualAddress, page_fault_type: PagefaultType) bool {
+    const current_thread = scheduler.getCurrentThread();
+    demand_paging: {
+        if (current_thread.purpose != .general) break :demand_paging;
+        const general_thread = &current_thread.purpose.general;
+
+        const user_address = UserAddress.fromVirtual(address) orelse {
+            // TODO: signal
+            processes.killCurrentProcess(-123);
+            return false;
+        };
+
+        const process = general_thread.owner_process;
+        var next_ptr = &process.mapped_regions;
+        while (next_ptr.*) |region| : (next_ptr = &region.next) {
+            if (!region.contains(user_address))
+                continue;
+
+            const invalid_privilige = switch (page_fault_type) {
+                .instruction => !region.flags.execute,
+                .read => !region.flags.read,
+                .write => !region.flags.write,
+            };
+
+            if (invalid_privilige) {
+                processes.killCurrentProcess(-123);
+                return false;
+            }
+
+            // TODO: i should actually test whether this works how it's intended, like bss being
+            // all zeros
+            var zeroed_size: usize = 0;
+            const frame = if (region.backing) |backing| blk: {
+                const region_offset = user_address.int - region.address.int;
+
+                const region_page_idx = region_offset / arch.page_size;
+                const backing_page_idx = backing.size / arch.page_size;
+
+                // if the region is writable we make a copy to not change the contents of the
+                // original, otherwise it is fine to use the same page
+                const should_alloc = region_page_idx >= backing_page_idx or region.flags.write;
+
+                const file_offset = backing.offset + region_offset;
+                const page_idx = file_offset / arch.page_size;
+                const regular = backing.file.dir_ent.regular();
+                const backing_virt = regular.page_cache.getPage(page_idx, true) catch
+                    @panic("TODO: read from block device");
+
+                if (should_alloc) {
+                    const backing_page: []const u8 = backing_virt.asPtr([*]u8)[0..arch.page_size];
+
+                    const new_phys = buddy_allocator.allocBlock(0) catch @panic("TODO");
+                    const new_virt = physicalToVirtual(new_phys);
+                    const new_page: []u8 = new_virt.asPtr([*]u8)[0..arch.page_size];
+
+                    @memcpy(new_page, backing_page);
+
+                    const remaining_file_size = region.size - backing.size;
+                    zeroed_size = arch.page_size - @min(remaining_file_size, arch.page_size);
+                    break :blk new_phys;
+                } else break :blk virtualToPhysical(backing_virt);
+            } else blk: {
+                zeroed_size = arch.page_size;
+                break :blk buddy_allocator.allocBlock(0) catch @panic("TODO");
+            };
+
+            var frames = [1]PhysicalAddress{frame};
+
+            arch.mapRegion(
+                process.root_page_table,
+                user_address.int / arch.page_size,
+                1,
+                region.flags,
+                &frames,
+            ) catch @panic("TODO");
+
+            const buff = physicalToVirtual(frame).asPtr([*]u8)[0..zeroed_size];
+            @memset(buff, 0);
+
+            return false;
+        }
+    }
+
+    return true;
 }

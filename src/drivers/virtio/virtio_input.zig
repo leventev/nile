@@ -181,7 +181,7 @@ fn init(dev: *device.Device, devfs: *DeviceFilesystem) void {
     virtio_input_device.negotiated_features = features orelse @panic("Failed to initialize VirtIO device");
 
     const buffer_phys = buddy_allocator.allocBlock(0) catch unreachable;
-    const virt_addr = mm.physicalToVirtualAddress(buffer_phys);
+    const virt_addr = mm.physicalToVirtual(buffer_phys);
     const arr = virt_addr.asPtr([*]VirtioInputEvent);
 
     const event_buff_count = arch.page_size / @sizeOf(VirtioInputEvent);

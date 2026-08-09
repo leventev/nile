@@ -51,6 +51,7 @@ pub const MappedRegion = struct {
     pub const Backing = struct {
         file: vfs.OpenFile,
         offset: usize,
+        size: usize,
     };
 
     pub const Flags = packed struct {

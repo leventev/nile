@@ -33,7 +33,7 @@ pub const BuddyAllocator = struct {
         /// Add a block to the free list. The list of block addresses is always ordered
         /// in ascending order.
         pub fn orderedAdd(self: *Order, block_addr: PhysicalAddress) void {
-            const virt_addr = mm.physicalToVirtualAddress(block_addr);
+            const virt_addr = mm.physicalToVirtual(block_addr);
             const new_node = virt_addr.asPtr(*Node);
 
             self.free_block_count += 1;
@@ -127,7 +127,7 @@ pub const BuddyAllocator = struct {
     /// Tries to remove a free block from a certain order.
     /// Returns whether the block was in the free list of the specified order.
     pub fn removeBlock(self: *BuddyAllocator, order: usize, block_address: PhysicalAddress) bool {
-        const virt_addr = mm.physicalToVirtualAddress(block_address);
+        const virt_addr = mm.physicalToVirtual(block_address);
         const removed_node = virt_addr.asPtr(*Order.Node);
 
         var next_ptr = &self.orders[order].first;
@@ -166,7 +166,7 @@ pub const BuddyAllocator = struct {
             // when we split an N order block into two N-1 order blocks we always select the
             // left N-1 block so the address always stays the same
             const virt_addr: mm.VirtualAddress = .fromInt(@intFromPtr(block));
-            const phys_addr = mm.virtualToPhysicalAddress(virt_addr);
+            const phys_addr = mm.virtualToPhysical(virt_addr);
             self.orders[order].free_block_count -= 1;
 
             // keep splitting the blocks until we reach the desired order

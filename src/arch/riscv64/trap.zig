@@ -248,65 +248,23 @@ fn handleException(code: ExceptionCode, tval: u64, state: *ThreadState) void {
     }
 }
 
-const PagefaultType = enum {
-    read,
-    write,
-    instruction,
-};
 fn handlePagefault(code: ExceptionCode, address: mm.VirtualAddress, state: *ThreadState) void {
-    const pagefault_type: PagefaultType = switch (code) {
+    const pagefault_type: mm.PagefaultType = switch (code) {
         .instruction_page_fault => .instruction,
         .load_page_fault => .read,
         .store_or_amo_page_fault => .write,
         else => unreachable,
     };
 
-    const current_thread = scheduler.getCurrentThread();
-    demand_paging: {
-        if (current_thread.purpose != .general) break :demand_paging;
-        const general_thread = &current_thread.purpose.general;
+    const crash = mm.handlePageFault(address, pagefault_type);
 
-        const user_address = mm.UserAddress.fromVirtual(address) orelse {
-            // TODO: signal
-            processes.killCurrentProcess(-123);
-            return;
-        };
-
-        const process = general_thread.owner_process;
-        var next_ptr = &process.mapped_regions;
-        while (next_ptr.*) |mapped_region| : (next_ptr = &mapped_region.next) {
-            if (!mapped_region.contains(user_address))
-                continue;
-
-            const frame = if (mapped_region.backing) |backing| blk: {
-                const region_offset = user_address.int - mapped_region.address.int;
-                const file_offset = backing.offset + region_offset;
-                const page_idx = file_offset / arch.page_size;
-                const regular = backing.file.dir_ent.regular();
-                const page_addr = regular.page_cache.getPage(page_idx, true) catch @panic("TODO");
-                break :blk mm.virtualToPhysicalAddress(page_addr);
-            } else buddy_allocator.allocBlock(0) catch @panic("TODO");
-
-            var frames = [1]mm.PhysicalAddress{frame};
-
-            arch.mapRegion(
-                process.root_page_table,
-                user_address.int / arch.page_size,
-                1,
-                mapped_region.flags,
-                &frames,
-            ) catch @panic("TODO");
-
-            return;
-        }
-    }
-
-    pagefaultCrash(address, pagefault_type, state);
+    if (crash)
+        pagefaultCrash(address, pagefault_type, state);
 }
 
 fn pagefaultCrash(
     address: mm.VirtualAddress,
-    pagefault_type: PagefaultType,
+    pagefault_type: mm.PagefaultType,
     state: *ThreadState,
 ) noreturn {
     const thread = scheduler.getCurrentThread();

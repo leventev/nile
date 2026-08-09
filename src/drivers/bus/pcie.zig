@@ -715,7 +715,7 @@ fn init(
     const first_reg = reg_it.next() orelse return error.InvalidDeviceTree;
 
     const ecam_base_phys = mm.PhysicalAddress.fromInt(@intCast(first_reg.address));
-    ecam_base_address = mm.physicalToVirtualAddress(ecam_base_phys);
+    ecam_base_address = mm.physicalToVirtual(ecam_base_phys);
 
     device.addBus(&pcie_bus);
 

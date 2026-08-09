@@ -157,7 +157,7 @@ pub fn init(
     // TODO: parse all provided addresses?
     const base_addr: u64 = @intCast((regs_it.next() orelse return error.InvalidDeviceTree).address);
     const phys_addr = mm.PhysicalAddress.fromInt(base_addr);
-    const virt_addr = mm.physicalToVirtualAddress(phys_addr);
+    const virt_addr = mm.physicalToVirtual(phys_addr);
     base_ptr = @ptrFromInt(virt_addr.int);
     // const KERNEL_PHYS_ADDRESS = 0x80200000;
     // const KERNEL_VIRT_ADDRESS = 0xffffffffc0200000;

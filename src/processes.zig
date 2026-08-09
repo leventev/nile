@@ -47,9 +47,10 @@ pub fn spawnProcess(
     const file_data_phys = buddy_allocator.allocBlock(order) catch unreachable;
     defer buddy_allocator.deallocBlock(file_data_phys, order);
 
-    const file_data = mm.physicalToVirtualAddress(file_data_phys).asPtr([*]u8)[0..file_size];
+    const file_data = mm.physicalToVirtual(file_data_phys).asPtr([*]u8)[0..file_size];
     var dummy_offset: usize = 0;
-    _ = file.read(file_data, &dummy_offset) catch @panic("TODO: READ FAILED");
+    const bytes_read = file.read(file_data, &dummy_offset) catch @panic("TODO: READ FAILED");
+    std.debug.assert(bytes_read == file_size);
 
     var reader = std.Io.Reader.fixed(file_data);
     const elf_header = std.elf.Header.read(&reader) catch @panic("TODO: elf header error");
@@ -67,13 +68,14 @@ pub fn spawnProcess(
             prog_header.p_vaddr % prog_header.p_align == prog_header.p_offset % prog_header.p_align,
         );
 
-        // TODO: handle case when filesz > memsz
+        // TODO: handle case when filesz < memsz
         new_proc.mapRegion(
             mm.UserAddress.fromInt(prog_header.p_vaddr) orelse return error.InvalidELF,
             prog_header.p_memsz,
             .{
                 .file = file,
                 .offset = prog_header.p_offset,
+                .size = prog_header.p_filesz,
             },
             .{
                 .execute = prog_header.p_flags & std.elf.PF_X != 0,
@@ -130,7 +132,7 @@ pub fn dumpProcesses() void {
     while (proc_ptr) |process| : (proc_ptr = process.next) {
         std.log.debug("  PID {} page table phys: 0x{x}", .{
             @intFromEnum(process.id),
-            mm.virtualToPhysicalAddress(
+            mm.virtualToPhysical(
                 .fromInt(@intFromPtr(process.root_page_table.entries)),
             ).int,
         });
@@ -175,7 +177,7 @@ pub fn killCurrentProcess(exit_code: isize) void {
     }
 
     scheduler.scheduleCurrent();
-    arch.unmapAddressSpace(current_process.root_page_table);
+    // arch.unmapAddressSpace(current_process.root_page_table);
 
     std.log.debug("PID {} killed with exit code: {}", .{ @intFromEnum(current_process.id), exit_code });
 

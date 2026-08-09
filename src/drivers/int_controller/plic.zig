@@ -211,7 +211,7 @@ fn init(
 
     const phys_addr_int: u64 = @intCast(first_reg.address);
     const phys_addr = mm.PhysicalAddress.fromInt(phys_addr_int);
-    const virt_addr = mm.physicalToVirtualAddress(phys_addr);
+    const virt_addr = mm.physicalToVirtual(phys_addr);
 
     const interrupts_extended = node.getProperty(.interrupts_extended) orelse
         return error.InvalidDeviceTree;

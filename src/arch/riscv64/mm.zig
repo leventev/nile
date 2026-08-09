@@ -229,7 +229,7 @@ fn getOrMapPageTable(parent_page_tbl: PageTable, index: usize) !PageTable {
                 },
             ) catch unreachable;
 
-            const virt = mm.physicalToVirtualAddress(frame);
+            const virt = mm.physicalToVirtual(frame);
             const ptr = @as([*]u64, @ptrFromInt(virt.int));
             const page: []u64 = ptr[0..entries_per_table];
             @memset(page, 0);
@@ -238,7 +238,7 @@ fn getOrMapPageTable(parent_page_tbl: PageTable, index: usize) !PageTable {
         } else blk: {
             const frame = pg_tbl_entry.address();
 
-            const virt = mm.physicalToVirtualAddress(frame);
+            const virt = mm.physicalToVirtual(frame);
             const ptr = @as([*]u64, @ptrFromInt(virt.int));
             break :blk ptr;
         };
@@ -248,7 +248,7 @@ fn getOrMapPageTable(parent_page_tbl: PageTable, index: usize) !PageTable {
 
 pub fn switchAddressSpace(root_page_table: PageTable) void {
     const pg_tbl_virt = mm.VirtualAddress.fromInt(@intFromPtr(root_page_table.entries));
-    const pg_tbl_ppn: u44 = @intCast(mm.virtualToPhysicalAddress(pg_tbl_virt).int / page_size);
+    const pg_tbl_ppn: u44 = @intCast(mm.virtualToPhysical(pg_tbl_virt).int / page_size);
     writeSATP(.{
         .address_space_id = 0,
         .mode = .sv39,
@@ -363,7 +363,7 @@ pub fn unmapPageTable(
         if (entry.isBranch()) {
             std.debug.assert(level > 0);
 
-            const virt = mm.physicalToVirtualAddress(frame);
+            const virt = mm.physicalToVirtual(frame);
             const lower_level_pg_tbl = PageTable.fromVirtualAddress(virt);
             unmapPageTable(lower_level_pg_tbl, level - 1, address);
         } else {
@@ -383,7 +383,7 @@ pub fn unmapPageTable(
 pub fn unmapAddressSpace(root_page_table: PageTable) void {
     unmapPageTable(root_page_table, 2, .fromInt(0));
     const page_tbl_virt_ptr = mm.VirtualAddress.fromInt(@intFromPtr(root_page_table.entries));
-    const root_page_table_addr = mm.virtualToPhysicalAddress(page_tbl_virt_ptr);
+    const root_page_table_addr = mm.virtualToPhysical(page_tbl_virt_ptr);
     buddy_allocator.deallocBlock(root_page_table_addr, 0);
 }
 

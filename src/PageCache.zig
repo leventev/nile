@@ -35,7 +35,7 @@ pub fn getPage(self: *PageCache, page_index: usize, allocate: bool) !mm.VirtualA
             const page_ptr = table.children[index] orelse blk: {
                 if (!allocate) @panic("Page cache entry is not allocated");
                 const new_page_phys = try buddy_allocator.allocBlock(0);
-                const new_page = mm.physicalToVirtualAddress(new_page_phys).asPtr(*anyopaque);
+                const new_page = mm.physicalToVirtual(new_page_phys).asPtr(*anyopaque);
                 table.children[index] = new_page;
                 break :blk new_page;
             };
@@ -62,7 +62,7 @@ pub fn totalPageCount(self: *PageCache) usize {
 const max_level = 4;
 
 /// Adds a level to the page cache.
-pub fn expand(self: *PageCache) error{OutOfMemory}!void {
+pub fn expandLocked(self: *PageCache) error{OutOfMemory}!void {
     std.debug.assert(self.level_count < max_level);
     const new_root = try Table.cache.alloc();
 

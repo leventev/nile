@@ -560,7 +560,7 @@ pub fn genericWriteRegular(
     const end_page_idx = last_byte_idx / arch.page_size;
 
     while (end_page_idx >= regular.page_cache.totalPageCount()) {
-        try regular.page_cache.expand();
+        try regular.page_cache.expandLocked();
     }
 
     var buff_off: usize = 0;
@@ -662,6 +662,8 @@ pub const OpenFile = struct {
 
     pub fn write(self: OpenFile, buff: []const u8, offset: usize) !usize {
         if (buff.len == 0) return 0;
+
+        // TODO: make it impossible to write to an executable file
 
         const fs = global_file_system_table.getById(self.mounted_fs_id).* orelse
             @panic("Invalid open file");

@@ -69,6 +69,7 @@ pub fn panic(
 
     var frame_pointer: usize = @frameAddress();
     while (frame_pointer != 0) {
+        if (!mm.VirtualAddress.fromInt(frame_pointer).isHigherHalf()) continue;
         const base: [*]usize = @ptrFromInt(frame_pointer - 2 * @sizeOf(usize));
 
         frame_pointer = base[0];

@@ -288,7 +288,7 @@ pub fn initializeVirtioDevice(
 
         const virtio_cap: *VirtioPCICapability = @ptrCast(@alignCast(capability));
         const data_phys = virtio_cap.getPhysicalAddress(header);
-        const data_virt = mm.physicalToVirtualAddress(data_phys);
+        const data_virt = mm.physicalToVirtual(data_phys);
 
         switch (virtio_cap.configuration_type) {
             .common => {
@@ -505,7 +505,7 @@ pub const VirtQueue = struct {
     ) void {
         std.debug.assert(descriptor_id < self.queue_count);
 
-        const phys = mm.virtualToPhysicalAddress(.fromInt(@intFromPtr(ptr)));
+        const phys = mm.virtualToPhysical(.fromInt(@intFromPtr(ptr)));
 
         self.descriptor_table[descriptor_id].address = phys.int;
         self.descriptor_table[descriptor_id].size = size;
@@ -559,7 +559,7 @@ pub const VirtQueue = struct {
 
         const order = buddy_allocator.blockOrderFromSize(required_size);
         const mem_phys = try buddy_allocator.allocBlock(order);
-        var mem_virt = mm.physicalToVirtualAddress(mem_phys);
+        var mem_virt = mm.physicalToVirtual(mem_phys);
 
         const desc_tbl = mem_virt.asPtr([*]Descriptor);
         mem_virt = mem_virt.add(desc_tbl_size);
@@ -580,13 +580,13 @@ pub const VirtQueue = struct {
         avail_ring_header.flags = avail_ring_flags;
         used_ring_header.index = 0;
 
-        common_cap.descriptor_queue = mm.virtualToPhysicalAddress(
+        common_cap.descriptor_queue = mm.virtualToPhysical(
             .fromInt(@intFromPtr(desc_tbl)),
         ).int;
-        common_cap.driver_queue = mm.virtualToPhysicalAddress(
+        common_cap.driver_queue = mm.virtualToPhysical(
             .fromInt(@intFromPtr(avail_ring_header)),
         ).int;
-        common_cap.device_queue = mm.virtualToPhysicalAddress(
+        common_cap.device_queue = mm.virtualToPhysical(
             .fromInt(@intFromPtr(used_ring_header)),
         ).int;
 

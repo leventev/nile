@@ -11,6 +11,7 @@ const scheduler = @import("../../scheduler.zig");
 const Thread = @import("../../Thread.zig");
 const CSR = @import("csr.zig").CSR;
 const config = @import("../../config.zig");
+const arch = @import("../arch.zig");
 
 pub const enableInterrupts = trap.enableInterrupts;
 pub const disableInterrupts = trap.disableInterrupts;
@@ -20,7 +21,7 @@ pub const unmapAddressSpace = riscv64_mm.unmapAddressSpace;
 pub const copyPageTable = riscv64_mm.copyPageTable;
 pub const mapRegion = riscv64_mm.mapRegion;
 pub const PageTable = riscv64_mm.PageTable;
-pub const higherHalfAddress = riscv64_mm.higherHalfAddress;
+pub const setupPageDescriptors = riscv64_mm.setupPageDescriptors;
 
 pub const page_size = riscv64_mm.page_size;
 pub const entries_per_table = riscv64_mm.entries_per_table;
@@ -28,8 +29,17 @@ pub const entries_per_table = riscv64_mm.entries_per_table;
 extern const __global_pointer: ?void;
 
 const kernel_physical_address = 0x80200000;
-const kernel_virtual_address = 0xffffffffc0200000;
-pub const kernel_virtual_offset = kernel_virtual_address - kernel_physical_address;
+const kernel_virtual_address = 0xffffffffc0000000;
+const kernel_entry_virtual_address = 0xffffffffc0200000;
+pub const kernel_virtual_offset = kernel_entry_virtual_address - kernel_physical_address;
+
+pub const kernel_addresses = arch.KernelMemoryAddresses{
+    .higher_half = riscv64_mm.higher_half_address.int,
+    .page_descriptors = riscv64_mm.page_descriptors_address,
+    .kernel = kernel_virtual_address,
+    .kernel_entry = kernel_entry_virtual_address,
+    .kernel_virtual_offset = kernel_virtual_offset,
+};
 
 fn setupThreadState(
     thread_state: *ThreadState,

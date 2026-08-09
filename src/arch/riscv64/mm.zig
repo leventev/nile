@@ -4,13 +4,14 @@ const kio = @import("../../kio.zig");
 const Process = @import("../../Process.zig");
 const buddy_allocator = @import("../../mem/buddy_allocator.zig");
 const vfs = @import("../../vfs.zig");
+const page_descriptors = @import("../../mem/page_descriptors.zig");
 
 pub const page_size = 4096;
 pub const entries_per_table = 512;
 
 const sv39_higher_half_start = mm.calculateHigherHalfAddress(39);
 
-pub const higherHalfAddress = sv39_higher_half_start;
+pub const higher_half_address = sv39_higher_half_start;
 
 pub const SATP = packed struct(u64) {
     physical_page_number: u44,
@@ -211,11 +212,14 @@ fn flushPage(virt_addr: ?usize, asid: ?usize) void {
     }
 }
 
-fn getOrMapPageTable(parent_page_tbl: PageTable, index: usize) !PageTable {
+fn getOrMapPageTable(parent_page_tbl: PageTable, index: usize) error{OutOfMemory}!PageTable {
     const pg_tbl_entry = parent_page_tbl.entries[index];
     const pg_tbl_ptr =
         if (pg_tbl_entry.isZero()) blk: {
-            const frame = try buddy_allocator.allocBlock(0);
+            const frame = buddy_allocator.allocBlock(0) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.InvalidOrder => unreachable,
+            };
             parent_page_tbl.writeEntry(
                 index,
                 frame,
@@ -267,8 +271,11 @@ pub fn mapRegion(
     page_number: usize,
     page_count: usize,
     flags: Process.MappedRegion.Flags,
-    frames: []const mm.PhysicalAddress,
-) !void {
+    frames_to_map: ?[]const mm.PhysicalAddress,
+) error{OutOfMemory}!void {
+    if (frames_to_map) |frames|
+        std.debug.assert(frames.len == page_count);
+
     const start_addr = mm.VirtualAddress.fromInt(page_number * page_size);
     const end_addr = start_addr.add(page_count * page_size);
 
@@ -308,7 +315,13 @@ pub fn mapRegion(
             });
         }
 
-        const frame = frames[page_idx];
+        const frame = if (frames_to_map) |frames|
+            frames[page_idx]
+        else
+            buddy_allocator.allocBlock(0) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                error.InvalidOrder => unreachable,
+            };
 
         pg_tbl_0.writeEntry(current_pn.page_number_0, frame, .leaf_4kib, .{
             .executable = flags.execute,
@@ -330,7 +343,7 @@ pub fn copyPageTable(
     new_page_table: PageTable,
     only_higher_half: bool,
 ) void {
-    const higher_half = PageNumbers.fromVirtual(higherHalfAddress);
+    const higher_half = PageNumbers.fromVirtual(higher_half_address);
 
     const subtable_start_idx = if (only_higher_half) blk: {
         @memset(new_page_table.entries[0..higher_half.page_number_2], @bitCast(@as(u64, 0)));
@@ -376,7 +389,10 @@ pub fn unmapPageTable(
             2 => @panic("TODO: support 1GiB pages"),
             else => unreachable,
         };
-        buddy_allocator.deallocBlock(frame, block_order);
+        const page_descriptor = page_descriptors.getDescriptor(frame);
+        const ref_count = page_descriptor.reference_count.fetchSub(1, .monotonic);
+        if (ref_count == 1)
+            buddy_allocator.deallocBlock(frame, block_order);
     }
 }
 
@@ -385,6 +401,52 @@ pub fn unmapAddressSpace(root_page_table: PageTable) void {
     const page_tbl_virt_ptr = mm.VirtualAddress.fromInt(@intFromPtr(root_page_table.entries));
     const root_page_table_addr = mm.virtualToPhysical(page_tbl_virt_ptr);
     buddy_allocator.deallocBlock(root_page_table_addr, 0);
+}
+
+pub const page_descriptors_address = 0xffffffff80000000;
+
+pub fn setupPageDescriptors(
+    root_page_table: mm.PageTable,
+    free_regions: []const mm.MemoryRegion,
+) error{OutOfMemory}!void {
+    // TODO: BIG TODO
+
+    const PageDesciptor = page_descriptors.PageDescriptor;
+
+    const actual_region_count = @min(free_regions.len, page_descriptors.max_region_count);
+    for (0..actual_region_count) |i| {
+        const free_region = free_regions[i];
+        std.debug.assert(free_region.start.int % page_size == 0);
+        std.debug.assert(free_region.size % page_size == 0);
+
+        const start_pfn = free_region.start.int / page_size;
+        // end_pfn is exclusive
+        const end_pfn = (free_region.start.int + free_region.size) / page_size;
+        const frame_count = end_pfn - start_pfn;
+
+        const desc_arr_pfn = start_pfn * @sizeOf(PageDesciptor) / page_size;
+        const desc_arr_end_pfn = end_pfn * @sizeOf(PageDesciptor) / page_size;
+        const desc_arr_frame_count = desc_arr_end_pfn - desc_arr_pfn + 1;
+
+        try mapRegion(
+            root_page_table,
+            desc_arr_pfn,
+            desc_arr_frame_count,
+            .{ .execute = false, .read = true, .write = true },
+            null,
+        );
+
+        const descriptors_ptr: [*]PageDesciptor = @ptrFromInt(page_descriptors_address);
+
+        page_descriptors.page_descriptors.regions[i] = .{
+            .frame_count = frame_count,
+            .frame_number = start_pfn,
+            .descriptors = descriptors_ptr[start_pfn..end_pfn],
+        };
+        page_descriptors.page_descriptors.region_count += 1;
+    }
+
+    // after all
 }
 
 pub fn setupPaging(root_page_table: PageTable) void {

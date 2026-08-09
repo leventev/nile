@@ -9,8 +9,16 @@ const Arch = enum {
 
 const target = Arch.riscv64;
 
-pub const kernel_virtual_offset = switch (target) {
-    Arch.riscv64 => riscv64.kernel_virtual_offset,
+pub const KernelMemoryAddresses = struct {
+    higher_half: usize,
+    page_descriptors: usize,
+    kernel: usize,
+    kernel_entry: usize,
+    kernel_virtual_offset: usize,
+};
+
+pub const kernel_addresses = switch (target) {
+    Arch.riscv64 => riscv64.kernel_addresses,
 };
 
 pub const enableInterrupts = switch (target) {
@@ -61,16 +69,16 @@ pub const copyPageTable = switch (target) {
     Arch.riscv64 => riscv64.copyPageTable,
 };
 
-pub const higherHalfAddress = switch (target) {
-    Arch.riscv64 => riscv64.higherHalfAddress,
-};
-
 pub const unmapAddressSpace = switch (target) {
     Arch.riscv64 => riscv64.unmapAddressSpace,
 };
 
 pub const switchAddressSpace = switch (target) {
     Arch.riscv64 => riscv64.switchAddressSpace,
+};
+
+pub const setupPageDescriptors = switch (target) {
+    Arch.riscv64 => riscv64.setupPageDescriptors,
 };
 
 // TODO: better way to abstract clocks

@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const page_descriptors = @import("page_descriptors.zig");
 const arch = @import("../arch/arch.zig");
 const mm = @import("mm.zig");
 
@@ -253,9 +254,7 @@ const global_not_allowed =
 ;
 
 /// Allocates a block of a given order.
-pub fn allocBlock(
-    desired_order: usize,
-) BuddyAllocator.Error!PhysicalAddress {
+pub fn allocBlock(desired_order: usize) BuddyAllocator.Error!PhysicalAddress {
     if (builtin.is_test) {
         if (testing_buddy_allocator) |alloc| {
             return alloc.allocBlock(desired_order);
@@ -264,23 +263,30 @@ pub fn allocBlock(
         }
     }
 
-    return global_buddy_allocator.allocBlock(desired_order);
+    // TODO: return PageDescriptor*
+    const block_phys = try global_buddy_allocator.allocBlock(desired_order);
+
+    // only increase the first page's refcount in the block
+    const page_descriptor = page_descriptors.getDescriptor(block_phys);
+    _ = page_descriptor.reference_count.fetchAdd(1, .monotonic);
+
+    return block_phys;
 }
 
 /// Deallocates a block of a given order.
 pub fn deallocBlock(
-    block_address: PhysicalAddress,
+    block_phys: PhysicalAddress,
     block_order: usize,
 ) void {
     if (builtin.is_test) {
         if (testing_buddy_allocator) |alloc| {
-            return alloc.deallocBlock(block_address, block_order);
+            return alloc.deallocBlock(block_phys, block_order);
         } else {
             @panic(global_not_allowed);
         }
     }
 
-    global_buddy_allocator.deallocBlock(block_address, block_order);
+    global_buddy_allocator.deallocBlock(block_phys, block_order);
 }
 
 // TODO: maybe make it comptime T?

@@ -8,6 +8,7 @@ const buddy_allocator = @import("buddy_allocator.zig");
 const scheduler = @import("../scheduler.zig");
 const processes = @import("../processes.zig");
 const vfs = @import("../vfs.zig");
+const page_descriptors = @import("page_descriptors.zig");
 
 const log = std.log.scoped(.mm);
 
@@ -51,7 +52,7 @@ pub const VirtualAddress = packed struct(usize) {
     }
 
     pub fn isHigherHalf(self: VirtualAddress) bool {
-        return self.int >= arch.higherHalfAddress.int;
+        return self.int >= arch.kernel_addresses.higher_half;
     }
 };
 
@@ -348,7 +349,7 @@ fn addKernelReservedMemory(
         .reusable = false,
         .system = true,
         .range = MemoryRegion{
-            .start = .fromInt(kernel_start - arch.kernel_virtual_offset),
+            .start = .fromInt(kernel_start - arch.kernel_addresses.kernel_virtual_offset),
             .size = kernel_size,
         },
     });
@@ -369,7 +370,7 @@ fn addDeviceTreeReservedMemory(
         .reusable = false,
         .system = false,
         .range = MemoryRegion{
-            .start = .fromInt(dt_start - arch.kernel_virtual_offset),
+            .start = .fromInt(dt_start - arch.kernel_addresses.kernel_virtual_offset),
             .size = dt_end - dt_start,
         },
     };
@@ -524,7 +525,7 @@ pub fn handlePageFault(address: VirtualAddress, page_fault_type: PagefaultType) 
             }
 
             // TODO: i should actually test whether this works how it's intended, like bss being
-            // all zeros
+            // all zeros.
             var zeroed_size: usize = 0;
             const frame = if (region.backing) |backing| blk: {
                 const region_offset = user_address.int - region.address.int;
@@ -554,7 +555,13 @@ pub fn handlePageFault(address: VirtualAddress, page_fault_type: PagefaultType) 
                     const remaining_file_size = region.size - backing.size;
                     zeroed_size = arch.page_size - @min(remaining_file_size, arch.page_size);
                     break :blk new_phys;
-                } else break :blk virtualToPhysical(backing_virt);
+                } else {
+                    const phys = virtualToPhysical(backing_virt);
+                    const page_descriptor = page_descriptors.getDescriptor(phys);
+                    _ = page_descriptor.reference_count.fetchAdd(1, .monotonic);
+
+                    break :blk phys;
+                }
             } else blk: {
                 zeroed_size = arch.page_size;
                 break :blk buddy_allocator.allocBlock(0) catch @panic("TODO");

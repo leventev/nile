@@ -177,7 +177,8 @@ pub fn killCurrentProcess(exit_code: isize) void {
     }
 
     scheduler.scheduleCurrent();
-    // arch.unmapAddressSpace(current_process.root_page_table);
+    arch.unmapAddressSpace(current_process.root_page_table);
+    // TODO: TEST WHETHER THE ADDRESS SPACE IS CORRECTLY UNMAPPED
 
     std.log.debug("PID {} killed with exit code: {}", .{ @intFromEnum(current_process.id), exit_code });
 

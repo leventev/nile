@@ -24,6 +24,7 @@ pub const console = @import("console.zig");
 pub const DeviceFilesystem = @import("DeviceFilesystem.zig");
 pub const ProcessFilesystem = @import("ProcessFilesystem.zig");
 pub const ramfs = @import("ramfs.zig");
+pub const page_descriptors = @import("mem/page_descriptors.zig");
 
 comptime {
     _ = arch;
@@ -92,7 +93,10 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
         @panic("Failed to get physical memory regions");
 
     // devicetree.printDeviceTree(&dt, 0, 0);
+
     buddy_allocator.init(frame_regions);
+    page_descriptors.init(root_page_table, frame_regions) catch |err|
+        std.debug.panic("Failed to initialize page descriptors: {s}", .{@errorName(err)});
     slab_allocator.init();
 
     static_mem_allocator.free(frame_regions);

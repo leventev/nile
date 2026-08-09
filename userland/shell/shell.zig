@@ -21,15 +21,9 @@ fn changeDirectory(args: []const u8) void {
     _ = args;
 }
 
-fn dosuno(args: []const u8) void {
-    _ = args;
-    _ = sys.write(sys.stdout_fd, "endre buzi") catch {};
-}
-
 const commands = [_]Command{
     .{ .name = "echo", .callback = echo },
     .{ .name = "cd", .callback = changeDirectory },
-    .{ .name = "dosuno", .callback = dosuno },
 };
 
 fn findExternalProgram(search_path: []const []const u8, program_name: []const u8) ?u32 {
@@ -71,7 +65,19 @@ fn processLine(line: []const u8) void {
 
     const search_path = &.{ "/sbin", "/bin" };
     if (findExternalProgram(search_path, called_command_name)) |external_fd| {
-        _ = sys.spawn(external_fd, 0) catch {};
+        const child_pid = sys.spawn(external_fd, 0) catch exit(-1);
+        _ = child_pid;
+
+        var exit_code_filename_buff: [256]u8 = undefined;
+        const exit_code_filename = std.fmt.bufPrint(
+            &exit_code_filename_buff,
+            "/proc/{}/child_exitcode",
+            .{1},
+        ) catch exit(-1);
+
+        const exit_code_fd = sys.openat(null, exit_code_filename, 0, 0) catch exit(-2);
+        var exit_code: isize = undefined;
+        _ = sys.read(exit_code_fd, @as([*]u8, @ptrCast(&exit_code))[0..@sizeOf(isize)]) catch exit(-3);
         return;
     }
 
@@ -87,6 +93,13 @@ fn processLine(line: []const u8) void {
 
 pub fn main() void {
     const quit = false;
+
+    const process_count_fd = sys.openat(null, "/proc/processcount", 0, 0) catch exit(-1);
+    var process_count: usize = undefined;
+    _ = sys.read(process_count_fd, @as([*]u8, @ptrCast(&process_count))[0..@sizeOf(usize)]) catch exit(-1);
+    var proc_count_buff: [256]u8 = undefined;
+    const str = std.fmt.bufPrint(&proc_count_buff, "process count: {}\n", .{process_count}) catch exit(-1);
+    _ = sys.write(sys.stdout_fd, str) catch exit(-1);
 
     var line_buff: [512]u8 = undefined;
     var line_buff_written: usize = 0;

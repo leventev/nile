@@ -558,7 +558,8 @@ pub const VirtQueue = struct {
         required_size += used_ring_total_size;
 
         const order = buddy_allocator.blockOrderFromSize(required_size);
-        const mem_phys = try buddy_allocator.allocBlock(order);
+        const mem_frame_desc = try buddy_allocator.allocBlock(order);
+        const mem_phys = mem_frame_desc.physical();
         var mem_virt = mm.physicalToVirtual(mem_phys);
 
         const desc_tbl = mem_virt.asPtr([*]Descriptor);

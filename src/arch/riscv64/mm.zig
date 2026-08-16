@@ -212,14 +212,16 @@ fn flushPage(virt_addr: ?usize, asid: ?usize) void {
     }
 }
 
-fn getOrMapPageTable(parent_page_tbl: PageTable, index: usize) error{OutOfMemory}!PageTable {
+fn getOrMapPageTable(
+    parent_page_tbl: PageTable,
+    index: usize,
+    flags: mm.MapFlags,
+    comptime alloc: *const fn () error{OutOfMemory}!mm.PhysicalAddress,
+) error{OutOfMemory}!PageTable {
     const pg_tbl_entry = parent_page_tbl.entries[index];
     const pg_tbl_ptr =
         if (pg_tbl_entry.isZero()) blk: {
-            const frame = buddy_allocator.allocBlock(0) catch |err| switch (err) {
-                error.OutOfMemory => return error.OutOfMemory,
-                error.InvalidOrder => unreachable,
-            };
+            const frame = try alloc();
             parent_page_tbl.writeEntry(
                 index,
                 frame,
@@ -228,8 +230,8 @@ fn getOrMapPageTable(parent_page_tbl: PageTable, index: usize) error{OutOfMemory
                     .executable = false,
                     .readable = false,
                     .writable = false,
-                    .global = false,
-                    .user = false,
+                    .global = flags.global,
+                    .user = flags.user,
                 },
             ) catch unreachable;
 
@@ -270,8 +272,9 @@ pub fn mapRegion(
     root_page_tbl: PageTable,
     page_number: usize,
     page_count: usize,
-    flags: Process.MappedRegion.Flags,
+    flags: mm.MapFlags,
     frames_to_map: ?[]const mm.PhysicalAddress,
+    comptime alloc: *const fn () error{OutOfMemory}!mm.PhysicalAddress,
 ) error{OutOfMemory}!void {
     if (frames_to_map) |frames|
         std.debug.assert(frames.len == page_count);
@@ -288,26 +291,40 @@ pub fn mapRegion(
     // level 2 is the highest(root page table)
     const pg_tbl_2 = root_page_tbl;
 
+    const branch_flags = mm.MapFlags{
+        .global = flags.global,
+        .user = false,
+        .access = flags.access,
+        .ignore_if_overwrite = flags.ignore_if_overwrite,
+    };
+
     const pn = PageNumbers.fromVirtual(current_addr);
-    var pg_tbl_1 = try getOrMapPageTable(pg_tbl_2, pn.page_number_2);
-    var pg_tbl_0 = try getOrMapPageTable(pg_tbl_1, pn.page_number_1);
+    var pg_tbl_1 = try getOrMapPageTable(pg_tbl_2, pn.page_number_2, branch_flags, alloc);
+    var pg_tbl_0 = try getOrMapPageTable(pg_tbl_1, pn.page_number_1, branch_flags, alloc);
 
     var page_idx: usize = 0;
 
-    while (end_addr.int != current_addr.int) : (page_idx += 1) {
+    while (end_addr.int != current_addr.int) : ({
+        page_idx += 1;
+        prev_addr = current_addr;
+        current_addr = current_addr.add(page_size);
+    }) {
         const prev_pn = PageNumbers.fromVirtual(prev_addr);
         const current_pn = PageNumbers.fromVirtual(current_addr);
 
         if (prev_pn.page_number_2 != current_pn.page_number_2) {
-            pg_tbl_1 = try getOrMapPageTable(pg_tbl_2, current_pn.page_number_2);
+            pg_tbl_1 = try getOrMapPageTable(pg_tbl_2, current_pn.page_number_2, branch_flags, alloc);
         }
 
         if (prev_pn.page_number_1 != current_pn.page_number_1) {
-            pg_tbl_0 = try getOrMapPageTable(pg_tbl_1, current_pn.page_number_1);
+            pg_tbl_0 = try getOrMapPageTable(pg_tbl_1, current_pn.page_number_1, branch_flags, alloc);
         }
 
         const prev_entry = pg_tbl_0.entries[current_pn.page_number_0];
         if (!prev_entry.isZero()) {
+            if (flags.ignore_if_overwrite)
+                continue;
+
             std.log.warn("overwriting page table mapping(VPN={},{},{})", .{
                 current_pn.page_number_2,
                 current_pn.page_number_1,
@@ -315,26 +332,22 @@ pub fn mapRegion(
             });
         }
 
-        const frame = if (frames_to_map) |frames|
-            frames[page_idx]
-        else
-            buddy_allocator.allocBlock(0) catch |err| switch (err) {
-                error.OutOfMemory => return error.OutOfMemory,
-                error.InvalidOrder => unreachable,
-            };
+        const frame = if (frames_to_map) |frames| blk: {
+            const frame_phys = frames[page_idx];
+            const frame_desc = mm.getFrameDescriptor(frame_phys);
+            frame_desc.increaseReference();
+            break :blk frame_phys;
+        } else try alloc();
 
         pg_tbl_0.writeEntry(current_pn.page_number_0, frame, .leaf_4kib, .{
-            .executable = flags.execute,
-            .readable = flags.read,
-            .writable = flags.write,
-            .global = false,
-            .user = true,
+            .executable = flags.access.execute,
+            .readable = flags.access.read,
+            .writable = flags.access.write,
+            .global = flags.global,
+            .user = flags.user,
         }) catch unreachable;
 
         flushPage(current_addr.int, 0);
-
-        prev_addr = current_addr;
-        current_addr = current_addr.add(page_size);
     }
 }
 
@@ -343,6 +356,7 @@ pub fn copyPageTable(
     new_page_table: PageTable,
     only_higher_half: bool,
 ) void {
+    // TODO: INCREASE FRAME DESC REFERENCE
     const higher_half = PageNumbers.fromVirtual(higher_half_address);
 
     const subtable_start_idx = if (only_higher_half) blk: {
@@ -383,71 +397,20 @@ pub fn unmapPageTable(
             flushPage(address.int, 0);
         }
 
-        const block_order: usize = if (entry.isBranch()) 0 else switch (level) {
-            0 => 0,
-            1 => 9,
-            2 => @panic("TODO: support 1GiB pages"),
-            else => unreachable,
-        };
-        const page_descriptor = page_descriptors.getDescriptor(frame);
-        const ref_count = page_descriptor.reference_count.fetchSub(1, .monotonic);
-        if (ref_count == 1)
-            buddy_allocator.deallocBlock(frame, block_order);
+        const frame_descriptor = mm.getFrameDescriptor(frame);
+        frame_descriptor.decreaseReference();
     }
 }
 
 pub fn unmapAddressSpace(root_page_table: PageTable) void {
     unmapPageTable(root_page_table, 2, .fromInt(0));
-    const page_tbl_virt_ptr = mm.VirtualAddress.fromInt(@intFromPtr(root_page_table.entries));
-    const root_page_table_addr = mm.virtualToPhysical(page_tbl_virt_ptr);
-    buddy_allocator.deallocBlock(root_page_table_addr, 0);
+    const root_page_tbl_virt = mm.VirtualAddress.fromInt(@intFromPtr(root_page_table.entries));
+    const root_page_table_phys = mm.virtualToPhysical(root_page_tbl_virt);
+    const root_page_table_frame_desc = mm.getFrameDescriptor(root_page_table_phys);
+    buddy_allocator.deallocBlock(root_page_table_frame_desc);
 }
 
-pub const page_descriptors_address = 0xffffffff80000000;
-
-pub fn setupPageDescriptors(
-    root_page_table: mm.PageTable,
-    free_regions: []const mm.MemoryRegion,
-) error{OutOfMemory}!void {
-    // TODO: BIG TODO
-
-    const PageDesciptor = page_descriptors.PageDescriptor;
-
-    const actual_region_count = @min(free_regions.len, page_descriptors.max_region_count);
-    for (0..actual_region_count) |i| {
-        const free_region = free_regions[i];
-        std.debug.assert(free_region.start.int % page_size == 0);
-        std.debug.assert(free_region.size % page_size == 0);
-
-        const start_pfn = free_region.start.int / page_size;
-        // end_pfn is exclusive
-        const end_pfn = (free_region.start.int + free_region.size) / page_size;
-        const frame_count = end_pfn - start_pfn;
-
-        const desc_arr_pfn = start_pfn * @sizeOf(PageDesciptor) / page_size;
-        const desc_arr_end_pfn = end_pfn * @sizeOf(PageDesciptor) / page_size;
-        const desc_arr_frame_count = desc_arr_end_pfn - desc_arr_pfn + 1;
-
-        try mapRegion(
-            root_page_table,
-            desc_arr_pfn,
-            desc_arr_frame_count,
-            .{ .execute = false, .read = true, .write = true },
-            null,
-        );
-
-        const descriptors_ptr: [*]PageDesciptor = @ptrFromInt(page_descriptors_address);
-
-        page_descriptors.page_descriptors.regions[i] = .{
-            .frame_count = frame_count,
-            .frame_number = start_pfn,
-            .descriptors = descriptors_ptr[start_pfn..end_pfn],
-        };
-        page_descriptors.page_descriptors.region_count += 1;
-    }
-
-    // after all
-}
+pub const frame_descriptors_address = 0xffffffff80000000;
 
 pub fn setupPaging(root_page_table: PageTable) void {
     // map 128GiB directly

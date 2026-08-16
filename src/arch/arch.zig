@@ -11,7 +11,7 @@ const target = Arch.riscv64;
 
 pub const KernelMemoryAddresses = struct {
     higher_half: usize,
-    page_descriptors: usize,
+    frame_descriptors: usize,
     kernel: usize,
     kernel_entry: usize,
     kernel_virtual_offset: usize,
@@ -75,10 +75,6 @@ pub const unmapAddressSpace = switch (target) {
 
 pub const switchAddressSpace = switch (target) {
     Arch.riscv64 => riscv64.switchAddressSpace,
-};
-
-pub const setupPageDescriptors = switch (target) {
-    Arch.riscv64 => riscv64.setupPageDescriptors,
 };
 
 // TODO: better way to abstract clocks

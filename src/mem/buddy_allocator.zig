@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const page_descriptors = @import("page_descriptors.zig");
 const arch = @import("../arch/arch.zig");
 const mm = @import("mm.zig");
 
@@ -147,7 +146,7 @@ pub const BuddyAllocator = struct {
     pub fn allocBlock(
         self: *BuddyAllocator,
         desired_order: usize,
-    ) Error!PhysicalAddress {
+    ) Error!*mm.FrameDescriptor {
         if (desired_order > max_order) return error.InvalidOrder;
 
         // find the lowest order that has a free block
@@ -179,19 +178,23 @@ pub const BuddyAllocator = struct {
                 self.orders[order].orderedAdd(right_block_addr);
             }
 
-            return phys_addr;
+            const frame_descriptor = mm.getFrameDescriptor(phys_addr);
+            frame_descriptor.block_order = desired_order;
+            // only increase the first page's refcount in the block
+            _ = frame_descriptor.reference_count.fetchAdd(1, .monotonic);
+
+            return frame_descriptor;
         } else return error.OutOfMemory;
     }
 
     /// Deallocates a block of a given order.
     pub fn deallocBlock(
         self: *BuddyAllocator,
-        block_address: PhysicalAddress,
-        block_order: usize,
+        frame_descriptor: *mm.FrameDescriptor,
     ) void {
-        std.debug.assert(block_order <= max_order);
-        var order = block_order;
-        var address = block_address;
+        std.debug.assert(frame_descriptor.block_order <= max_order);
+        var order = frame_descriptor.block_order;
+        var address = frame_descriptor.physical();
 
         // we try to coalesce the specified block and its buddy
         while (order <= max_order) : (order += 1) {
@@ -216,17 +219,18 @@ var global_buddy_allocator: BuddyAllocator = .{};
 
 /// Initializes the buddy allocator from the list of physical memory regions provided by
 /// the device tree.
-pub fn init(regions: []const mm.MemoryRegion) void {
+pub fn init(regions: []const mm.UsableMemoryRegion) void {
     var total_frames: usize = 0;
 
     for (regions) |region| {
-        const frame_count: usize = region.size / mm.frame_size;
-        total_frames += frame_count;
+        const usable_frame_count = region.range.frame_count - region.reserved_frame_count;
+        if (usable_frame_count == 0) continue;
 
-        // TODO: convert the fields of mm.MemoryRegion to be page indices instead of absolute addresses
-        const start_page_index: usize = region.start.int / arch.page_size;
-        const page_count: usize = region.size / arch.page_size;
-        global_buddy_allocator.addBlocksFromRegion(start_page_index, page_count);
+        total_frames += usable_frame_count;
+
+        const first_frame = region.range.frame_number + region.reserved_frame_count;
+
+        global_buddy_allocator.addBlocksFromRegion(first_frame, usable_frame_count);
     }
 
     // for (0.., global_buddy_allocator.orders) |i, order| {
@@ -254,39 +258,13 @@ const global_not_allowed =
 ;
 
 /// Allocates a block of a given order.
-pub fn allocBlock(desired_order: usize) BuddyAllocator.Error!PhysicalAddress {
-    if (builtin.is_test) {
-        if (testing_buddy_allocator) |alloc| {
-            return alloc.allocBlock(desired_order);
-        } else {
-            @panic(global_not_allowed);
-        }
-    }
-
-    // TODO: return PageDescriptor*
-    const block_phys = try global_buddy_allocator.allocBlock(desired_order);
-
-    // only increase the first page's refcount in the block
-    const page_descriptor = page_descriptors.getDescriptor(block_phys);
-    _ = page_descriptor.reference_count.fetchAdd(1, .monotonic);
-
-    return block_phys;
+pub fn allocBlock(desired_order: usize) BuddyAllocator.Error!*mm.FrameDescriptor {
+    return global_buddy_allocator.allocBlock(desired_order);
 }
 
 /// Deallocates a block of a given order.
-pub fn deallocBlock(
-    block_phys: PhysicalAddress,
-    block_order: usize,
-) void {
-    if (builtin.is_test) {
-        if (testing_buddy_allocator) |alloc| {
-            return alloc.deallocBlock(block_phys, block_order);
-        } else {
-            @panic(global_not_allowed);
-        }
-    }
-
-    global_buddy_allocator.deallocBlock(block_phys, block_order);
+pub fn deallocBlock(frame_descriptor: *mm.FrameDescriptor) void {
+    global_buddy_allocator.deallocBlock(frame_descriptor);
 }
 
 // TODO: maybe make it comptime T?

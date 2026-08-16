@@ -83,7 +83,7 @@ pub fn newSoftInterruptHandler(
 
     // TODO: smaller stack size or on demand by the caller
     const stack_top = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
-    thread.kernel_stack_top = mm.physicalToVirtual(stack_top);
+    thread.kernel_stack_top = mm.physicalToVirtual(stack_top.physical());
     thread.kernel_stack_size = std.math.shl(usize, 1, 12 + stack_size_order);
     thread.kernel_state = thread_state_cache.alloc() catch return error.out_of_memory;
 
@@ -124,7 +124,7 @@ pub fn newKernelThread(entry_point_fn: *const fn () void, owner_process: *Proces
 
     const kernel_stack_top = buddy_allocator.allocBlock(stack_size_order) catch
         return error.out_of_memory;
-    thread.kernel_stack_top = mm.physicalToVirtual(kernel_stack_top);
+    thread.kernel_stack_top = mm.physicalToVirtual(kernel_stack_top.physical());
     thread.kernel_stack_size = std.math.shl(usize, 1, 12 + stack_size_order);
     thread.kernel_state = thread_state_cache.alloc() catch return error.out_of_memory;
 
@@ -155,7 +155,7 @@ pub fn newUserThread(
     thread.id = thread_id;
 
     const stack_top = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
-    thread.kernel_stack_top = mm.physicalToVirtual(stack_top);
+    thread.kernel_stack_top = mm.physicalToVirtual(stack_top.physical());
     thread.kernel_state = thread_state_cache.alloc() catch return error.out_of_memory;
 
     thread.purpose = .{

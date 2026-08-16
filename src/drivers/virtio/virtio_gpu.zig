@@ -152,7 +152,8 @@ fn setupFramebuffer(
     const framebuffer_size = pixel_count * @sizeOf(u32);
 
     const fb_block_order = buddy_allocator.blockOrderFromSize(framebuffer_size);
-    const framebuffer_phys = buddy_allocator.allocBlock(fb_block_order) catch @panic("TODO");
+    const framebuffer_frame_desc = buddy_allocator.allocBlock(fb_block_order) catch @panic("TODO");
+    const framebuffer_phys = framebuffer_frame_desc.physical();
     const framebuffer_virt = mm.physicalToVirtual(framebuffer_phys);
 
     const attach_ok = virtio_gpu.attachResourceBacking(
@@ -229,8 +230,8 @@ fn init(dev: *device.Device, devfs: *DeviceFilesystem) void {
 
     gpu.virtio_device.common.device_status.driver_ok = true;
 
-    const buffer_phys = buddy_allocator.allocBlock(0) catch unreachable;
-    gpu.builder.address = mm.physicalToVirtual(buffer_phys);
+    const buffer_frame_desc = buddy_allocator.allocBlock(0) catch unreachable;
+    gpu.builder.address = mm.physicalToVirtual(buffer_frame_desc.physical());
     gpu.builder.size = arch.page_size;
 
     _ = framebuffer.addFramebuffer(

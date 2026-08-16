@@ -213,7 +213,8 @@ pub const SlabAllocator = struct {
         fn grow(self: *Cache) BuddyAllocator.Error!void {
             // TODO: on 32bit we cant map the entire physical address space so we will have to
             // find a different way to do this
-            const phys_addr = try buddy_allocator.allocBlock(self.slab_block_order);
+            const frame_desc = try buddy_allocator.allocBlock(self.slab_block_order);
+            const phys_addr = frame_desc.physical();
             const virt_addr = mm.physicalToVirtual(phys_addr);
 
             var slab_descriptor: *Descriptor = @ptrFromInt(virt_addr.int);

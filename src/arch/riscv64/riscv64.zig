@@ -35,7 +35,7 @@ pub const kernel_virtual_offset = kernel_entry_virtual_address - kernel_physical
 
 pub const kernel_addresses = arch.KernelMemoryAddresses{
     .higher_half = riscv64_mm.higher_half_address.int,
-    .page_descriptors = riscv64_mm.page_descriptors_address,
+    .frame_descriptors = riscv64_mm.frame_descriptors_address,
     .kernel = kernel_virtual_address,
     .kernel_entry = kernel_entry_virtual_address,
     .kernel_virtual_offset = kernel_virtual_offset,

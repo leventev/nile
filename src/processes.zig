@@ -44,8 +44,9 @@ pub fn spawnProcess(
     const regular = file.dir_ent.regular();
     const file_size = regular.size;
     const order = buddy_allocator.blockOrderFromSize(file_size);
-    const file_data_phys = buddy_allocator.allocBlock(order) catch unreachable;
-    defer buddy_allocator.deallocBlock(file_data_phys, order);
+    const file_data_frame_desc = buddy_allocator.allocBlock(order) catch unreachable;
+    const file_data_phys = file_data_frame_desc.physical();
+    defer buddy_allocator.deallocBlock(file_data_frame_desc);
 
     const file_data = mm.physicalToVirtual(file_data_phys).asPtr([*]u8)[0..file_size];
     var dummy_offset: usize = 0;

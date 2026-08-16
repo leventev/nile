@@ -640,8 +640,6 @@ pub fn setupFrameDescriptors(
     root_page_table: PageTable,
     free_regions: []UsableMemoryRegion,
 ) error{OutOfMemory}!void {
-    // TODO: BIG TODO
-
     std.debug.assert(max_frame_descriptor_region_count > free_regions.len);
 
     for (0..free_regions.len) |i| {
@@ -677,6 +675,16 @@ pub fn setupFrameDescriptors(
             .descriptors = descriptors_ptr[start_pfn..end_pfn],
         };
         frame_descriptors.region_count += 1;
+    }
+
+    for (0..early_page_allocator.region_index + 1) |region_idx| {
+        const region = early_page_allocator.regions[region_idx];
+        for (0..region.reserved_frame_count) |frame_idx| {
+            const page_frame_number = region.range.frame_number + frame_idx;
+            const phys = PhysicalAddress.fromInt(page_frame_number * arch.page_size);
+            const descriptor = getFrameDescriptor(phys);
+            descriptor.increaseReference();
+        }
     }
 }
 

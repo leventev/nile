@@ -356,7 +356,6 @@ pub fn copyPageTable(
     new_page_table: PageTable,
     only_higher_half: bool,
 ) void {
-    // TODO: INCREASE FRAME DESC REFERENCE
     const higher_half = PageNumbers.fromVirtual(higher_half_address);
 
     const subtable_start_idx = if (only_higher_half) blk: {
@@ -364,10 +363,18 @@ pub fn copyPageTable(
         break :blk higher_half.page_number_2;
     } else 0;
 
-    const new_subtable = new_page_table.entries[subtable_start_idx..entries_per_table];
-    const orig_subtable = original_page_table.entries[subtable_start_idx..entries_per_table];
+    // const new_subtable = new_page_table.entries[subtable_start_idx..entries_per_table];
+    // const orig_subtable = original_page_table.entries[subtable_start_idx..entries_per_table];
 
-    @memcpy(new_subtable, orig_subtable);
+    for (subtable_start_idx..entries_per_table) |idx| {
+        const old_entry = original_page_table.entries[idx];
+        new_page_table.entries[idx] = old_entry;
+
+        if (!old_entry.isZero() and idx < 256) {
+            const descriptor = mm.getFrameDescriptor(old_entry.address());
+            descriptor.increaseReference();
+        }
+    }
 }
 
 pub fn unmapPageTable(

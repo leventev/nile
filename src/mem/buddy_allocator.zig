@@ -179,7 +179,7 @@ pub const BuddyAllocator = struct {
             }
 
             const frame_descriptor = mm.getFrameDescriptor(phys_addr);
-            frame_descriptor.block_order = desired_order;
+            frame_descriptor.block_order = @intCast(desired_order);
             // only increase the first page's refcount in the block
             _ = frame_descriptor.reference_count.fetchAdd(1, .monotonic);
 
@@ -219,18 +219,12 @@ var global_buddy_allocator: BuddyAllocator = .{};
 
 /// Initializes the buddy allocator from the list of physical memory regions provided by
 /// the device tree.
-pub fn init(regions: []const mm.UsableMemoryRegion) void {
+pub fn init(regions: []const mm.PhysicalMemoryRegion) void {
     var total_frames: usize = 0;
 
     for (regions) |region| {
-        const usable_frame_count = region.range.frame_count - region.reserved_frame_count;
-        if (usable_frame_count == 0) continue;
-
-        total_frames += usable_frame_count;
-
-        const first_frame = region.range.frame_number + region.reserved_frame_count;
-
-        global_buddy_allocator.addBlocksFromRegion(first_frame, usable_frame_count);
+        total_frames += region.frame_count;
+        global_buddy_allocator.addBlocksFromRegion(region.frame_number, region.frame_count);
     }
 
     // for (0.., global_buddy_allocator.orders) |i, order| {

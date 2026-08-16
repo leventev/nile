@@ -89,14 +89,9 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
     const machine = dt.root().getProperty(.model) orelse @panic("Invalid device tree");
     std.log.info("Machine model: {s}", .{machine});
 
-    const frame_regions = mm.getUsableFrameRegions(static_mem_allocator, &dt) catch
-        @panic("Failed to get physical memory regions");
-
     // devicetree.printDeviceTree(&dt, 0, 0);
 
-    mm.init(root_page_table, frame_regions);
-
-    static_mem_allocator.free(frame_regions);
+    mm.init(static_mem_allocator, &dt, root_page_table);
 
     var allocator: kernel_gpa.KernelGPA = undefined;
     allocator.init();

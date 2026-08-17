@@ -3,6 +3,8 @@ const vfs = @import("vfs.zig");
 const Path = @import("Path.zig");
 const Process = @import("Process.zig");
 const processes = @import("processes.zig");
+const core = @import("core");
+const MessageType = core.message.MessageType;
 
 const ProcessFilesystem = @This();
 
@@ -26,9 +28,11 @@ fn processCount(
 ) vfs.FileSystemError!usize {
     if (buff.len < @sizeOf(usize) or @intFromPtr(buff.ptr) % @sizeOf(usize) != 0) return 0;
 
-    const ptr: *usize = @ptrCast(@alignCast(buff.ptr));
-    ptr.* = processes.process_count;
-    return @sizeOf(usize);
+    const written_buff = MessageType.uint32.writeWithMagic(
+        @intCast(processes.process_count),
+        buff,
+    );
+    return if (written_buff) |b| b.len else 0;
 }
 
 fn init(gpa: std.mem.Allocator, fs: *vfs.FileSystem) !?*anyopaque {

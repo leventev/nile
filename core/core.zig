@@ -6,6 +6,7 @@ const AlmostUsize = @Int(.unsigned, bit_size - 1);
 
 pub const fs = @import("fs.zig");
 pub const process = @import("process.zig");
+pub const message = @import("message.zig");
 
 pub const SyscallError = enum(AlmostUsize) {
     /// The memory address points to kernel space memory.

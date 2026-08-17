@@ -1,5 +1,7 @@
 const std = @import("std");
 pub const core = @import("core");
+const MessageType = core.message.MessageType;
+
 const riscv64 = @import("riscv64.zig");
 
 pub var stdout_fd: u32 = undefined;
@@ -120,4 +122,10 @@ pub const DirectoryEntryIterator = struct {
 pub fn readDirectory(fd: u32, buff: []u8) ReadError!DirectoryEntryIterator {
     const bytes_read = try read(fd, buff);
     return DirectoryEntryIterator{ .buff = buff[0..bytes_read] };
+}
+
+pub fn readMessage(comptime expected: MessageType, fd: u32) ?expected.Type() {
+    var buff: [256]u8 align(2) = undefined;
+    const bytes_read = read(fd, &buff) catch return null;
+    return expected.readExpectedWithMagic(buff[0..bytes_read]);
 }

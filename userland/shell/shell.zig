@@ -97,10 +97,7 @@ pub fn main() void {
     const quit = false;
 
     const process_count_fd = sys.openat(null, "/proc/processcount", 0, 0) catch exit(-1);
-    var process_count_buff: [10]u8 align(2) = undefined;
-    const r = sys.read(process_count_fd, &process_count_buff) catch exit(-1);
-    const process_count = MessageType.uint32.readExpectedWithMagic(process_count_buff[0..r]) orelse
-        exit(-1);
+    const process_count = sys.readMessage(.uint32, process_count_fd) orelse exit(-1);
 
     var proc_count_buff: [256]u8 = undefined;
     const str = std.fmt.bufPrint(

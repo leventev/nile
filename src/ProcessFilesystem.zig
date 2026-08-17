@@ -118,7 +118,8 @@ fn addToProcessSubdir(
 pub fn addProcess(self: *ProcessFilesystem, process: *Process) !void {
     var buff: [128]u8 = undefined;
     const dir_name = try std.fmt.bufPrint(&buff, "{}", .{@intFromEnum(process.id)});
-    try self.createDirectory(dir_name);
+    // TODO: remove process subdir if it gets killed, decide what to do with open files
+    self.createDirectory(dir_name) catch return;
     try self.addToProcessSubdir(process, "child_exitcode", &.{ .read = exitCodeRead });
 }
 

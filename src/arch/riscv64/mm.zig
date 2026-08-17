@@ -313,11 +313,21 @@ pub fn mapRegion(
         const current_pn = PageNumbers.fromVirtual(current_addr);
 
         if (prev_pn.page_number_2 != current_pn.page_number_2) {
-            pg_tbl_1 = try getOrMapPageTable(pg_tbl_2, current_pn.page_number_2, branch_flags, alloc);
+            pg_tbl_1 = try getOrMapPageTable(
+                pg_tbl_2,
+                current_pn.page_number_2,
+                branch_flags,
+                alloc,
+            );
         }
 
         if (prev_pn.page_number_1 != current_pn.page_number_1) {
-            pg_tbl_0 = try getOrMapPageTable(pg_tbl_1, current_pn.page_number_1, branch_flags, alloc);
+            pg_tbl_0 = try getOrMapPageTable(
+                pg_tbl_1,
+                current_pn.page_number_1,
+                branch_flags,
+                alloc,
+            );
         }
 
         const prev_entry = pg_tbl_0.entries[current_pn.page_number_0];

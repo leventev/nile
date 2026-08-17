@@ -93,7 +93,7 @@ pub fn newSoftInterruptHandler(
         std.log.debug("new soft interrupt thread(TID={}), callback: 0x{x}, kernel stack top: 0x{x}, dev: {s}", .{
             thread_id,
             callback_addr,
-            stack_top.int,
+            stack_top.physical().int,
             dev.name,
         });
     }
@@ -136,7 +136,7 @@ pub fn newKernelThread(entry_point_fn: *const fn () void, owner_process: *Proces
         std.log.debug("new kernel thread(TID={}), entry point: 0x{x}, kernel stack top: 0x{x}", .{
             thread_id,
             entry_point.int,
-            kernel_stack_top.int,
+            kernel_stack_top.physical().int,
         });
     }
 
@@ -195,6 +195,9 @@ pub fn newUserThread(
 pub fn removeThread(thread: *Thread) void {
     // TODO: remove from waitlist if in one
     var next_ptr = &running_threads;
+
+    threads_available.set(@intFromEnum(thread.id));
+
     // TODO: maybe use a doubly linked list to avoid iterating
     while (next_ptr.*) |added_thread| : (next_ptr = &added_thread.scheduler_list_next) {
         if (added_thread != thread) continue;

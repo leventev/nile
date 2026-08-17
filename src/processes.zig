@@ -190,7 +190,8 @@ pub fn killCurrentProcess(exit_code: isize) void {
         parent.last_child_exit_code_semaphore.add();
     }
 
-    process_count += 1;
+    process_count -= 1;
+    processes_available.set(@intFromEnum(current_process.id));
 
     // TODO: schedule next thread??
 }

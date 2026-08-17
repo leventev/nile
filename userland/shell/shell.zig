@@ -4,6 +4,7 @@ const core = sys.core;
 const MessageType = core.message.MessageType;
 
 fn exit(exit_code: isize) noreturn {
+    _ = sys.write(sys.stdout_fd, "EXIT") catch unreachable;
     sys.exit(exit_code);
     while (true) {}
 }
@@ -77,9 +78,17 @@ fn processLine(line: []const u8) void {
             .{1},
         ) catch exit(-1);
 
-        const exit_code_fd = sys.openat(null, exit_code_filename, 0, 0) catch exit(-2);
-        var exit_code: isize = undefined;
-        _ = sys.read(exit_code_fd, @as([*]u8, @ptrCast(&exit_code))[0..@sizeOf(isize)]) catch exit(-3);
+        const exit_code_fd = sys.openat(null, exit_code_filename, 0, 0) catch exit(-1);
+        const exit_code = sys.readMessage(.int32, exit_code_fd) orelse exit(-1);
+
+        var exit_code_buff: [256]u8 = undefined;
+        const str = std.fmt.bufPrint(
+            &exit_code_buff,
+            "exit code: {}\n",
+            .{exit_code},
+        ) catch exit(-1);
+        _ = sys.write(sys.stdout_fd, str) catch exit(-1);
+
         return;
     }
 

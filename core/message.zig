@@ -23,6 +23,18 @@ pub const MessageType = enum(u8) {
     /// A single u64 follows the message type.
     uint64 = 4,
 
+    /// A single u8 follows the message type.
+    int8 = 5,
+
+    /// A single u16 follows the message type.
+    int16 = 6,
+
+    /// A single u32 follows the message type.
+    int32 = 7,
+
+    /// A single u64 follows the message type.
+    int64 = 8,
+
     /// The zig type corresponding to the message type.
     pub fn Type(self: MessageType) type {
         return switch (self) {
@@ -31,6 +43,10 @@ pub const MessageType = enum(u8) {
             .uint16 => u16,
             .uint32 => u32,
             .uint64 => u64,
+            .int8 => i8,
+            .int16 => i16,
+            .int32 => i32,
+            .int64 => i64,
         };
     }
 

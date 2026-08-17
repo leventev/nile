@@ -138,8 +138,9 @@ fn exitCodeRead(
 
     process.last_child_exit_code_semaphore.sub();
 
-    const ptr: *isize = @ptrCast(@alignCast(buff.ptr));
-    ptr.* = process.last_child_exit_code orelse unreachable;
-
-    return @sizeOf(isize);
+    const written_buff = MessageType.uint32.writeWithMagic(
+        @intCast(process.last_child_exit_code orelse unreachable),
+        buff,
+    );
+    return if (written_buff) |b| b.len else 0;
 }

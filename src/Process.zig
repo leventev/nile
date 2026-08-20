@@ -37,21 +37,33 @@ pub const Id = enum(u32) {
 };
 
 pub const MappedRegion = struct {
-    address: mm.UserAddress,
-    size: usize,
+    page_index: usize,
+    page_count: usize,
     backing: ?Backing,
     flags: Flags,
     next: ?*MappedRegion,
 
-    pub fn contains(self: MappedRegion, address: mm.UserAddress) bool {
-        const end = self.address.add(self.size) orelse unreachable;
-        return address.int >= self.address.int and address.int < end.int;
+    pub fn contains(self: MappedRegion, page_index: usize) bool {
+        return page_index >= self.page_index and page_index < self.page_index + self.page_count;
     }
 
     pub const Backing = struct {
-        file: vfs.OpenFile,
-        offset: usize,
-        size: usize,
+        source: union(enum) {
+            file: struct {
+                open_file: vfs.OpenFile,
+
+                /// Offset in pages from the beginning of the file.
+                page_offset: usize,
+            },
+
+            /// Will be deallocted on unmap.
+            memory: [*]const u8,
+        },
+        /// The number of pages which the backing contains.
+        page_count: usize,
+
+        /// Offset in pages from the beginning of the mapping where the backing starts.
+        page_offset: usize,
     };
 
     pub const Flags = packed struct {
@@ -72,21 +84,26 @@ pub const MapRegionError = error{
 
 pub fn mapRegion(
     self: *Process,
-    address: mm.UserAddress,
-    size: usize,
+    page_index: usize,
+    page_count: usize,
     backing: ?MappedRegion.Backing,
     flags: MappedRegion.Flags,
-) !void {
-    if (size == 0)
+) MapRegionError!void {
+    if (page_count == 0)
         return MapRegionError.InvalidSize;
+
+    const hh_page_idx = arch.kernel_addresses.higher_half / arch.page_size;
+
+    const last_page_index = page_index +% page_count - 1;
+    if (page_index >= hh_page_idx or last_page_index >= hh_page_idx or last_page_index < page_index)
+        return MapRegionError.InsideKernelSpace;
 
     var next_ptr = &self.mapped_regions;
     while (next_ptr.*) |mapped_region| : (next_ptr = &mapped_region.next) {
-        const new_end = address.add(size) orelse return MapRegionError.InsideKernelSpace;
-        const mapped_end = mapped_region.address.add(mapped_region.size) orelse unreachable;
+        const mapped_last_page_index = mapped_region.page_index + mapped_region.page_count - 1;
 
-        const later_start = @max(address.int, mapped_region.address.int);
-        const earlier_end = @min(new_end.int, mapped_end.int);
+        const later_start = @max(page_index, mapped_region.page_index);
+        const earlier_end = @min(last_page_index, mapped_last_page_index);
 
         if (later_start < earlier_end)
             return MapRegionError.Overlap;
@@ -94,8 +111,8 @@ pub fn mapRegion(
 
     const new_mapped_region = try MappedRegion.cache.alloc();
     new_mapped_region.* = .{
-        .address = address,
-        .size = size,
+        .page_index = page_index,
+        .page_count = page_count,
         .backing = backing,
         .flags = flags,
         .next = null,

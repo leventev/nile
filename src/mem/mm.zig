@@ -13,6 +13,8 @@ const sync = @import("../sync.zig");
 
 const log = std.log.scoped(.mm);
 
+const page_size = arch.page_size;
+
 const bigToNative = std.mem.bigToNative;
 
 // these addresses of these symbols can be used to
@@ -29,7 +31,7 @@ extern const __rodata_end: u8;
 extern const __bss_start: u8;
 extern const __bss_end: u8;
 
-pub const frame_size = arch.page_size;
+pub const frame_size = page_size;
 
 pub const PageTable = arch.PageTable;
 pub const VirtualAddress = packed struct(usize) {
@@ -49,7 +51,7 @@ pub const VirtualAddress = packed struct(usize) {
     }
 
     pub fn isPageAligned(self: VirtualAddress) bool {
-        return self.int % arch.page_size == 0;
+        return self.int % page_size == 0;
     }
 
     pub fn isHigherHalf(self: VirtualAddress) bool {
@@ -69,7 +71,7 @@ pub const PhysicalAddress = packed struct(usize) {
     }
 
     pub fn isPageAligned(self: PhysicalAddress) bool {
-        return self.int % arch.page_size == 0;
+        return self.int % page_size == 0;
     }
 };
 
@@ -179,11 +181,11 @@ fn parseMemoryRegions(
         var it = reg.iterator(address_cells, size_cells) catch return error.InvalidDeviceTree;
 
         while (it.next()) |entry| {
-            std.debug.assert(entry.address % arch.page_size == 0);
-            std.debug.assert(entry.size % arch.page_size == 0);
+            std.debug.assert(entry.address % page_size == 0);
+            std.debug.assert(entry.size % page_size == 0);
             try regions.append(gpa, PhysicalMemoryRegion{
-                .frame_number = @intCast(entry.address / arch.page_size),
-                .frame_count = @intCast(entry.size / arch.page_size),
+                .frame_number = @intCast(entry.address / page_size),
+                .frame_count = @intCast(entry.size / page_size),
             });
         }
     }
@@ -218,12 +220,12 @@ fn parseReservedMemoryRegions(
         var it = reg.iterator(address_cells, size_cells) catch return error.InvalidDeviceTree;
 
         while (it.next()) |entry| {
-            std.debug.assert(entry.address % arch.page_size == 0);
-            std.debug.assert(entry.size % arch.page_size == 0);
+            std.debug.assert(entry.address % page_size == 0);
+            std.debug.assert(entry.size % page_size == 0);
             try regions.append(gpa, ReservedMemoryRegion{
                 .range = .{
-                    .frame_number = @intCast(entry.address / arch.page_size),
-                    .frame_count = @intCast(entry.size / arch.page_size),
+                    .frame_number = @intCast(entry.address / page_size),
+                    .frame_count = @intCast(entry.size / page_size),
                 },
                 .name = region.name,
                 .no_map = no_map,
@@ -335,8 +337,8 @@ fn addKernelReservedMemory(
         .reusable = false,
         .system = true,
         .range = PhysicalMemoryRegion{
-            .frame_number = start_addr / arch.page_size,
-            .frame_count = kernel_size / arch.page_size,
+            .frame_number = start_addr / page_size,
+            .frame_count = kernel_size / page_size,
         },
     });
 }
@@ -347,11 +349,11 @@ fn addDeviceTreeReservedMemory(
     dt: *const devicetree.DeviceTree,
 ) !void {
     // we need to reserve memory for the DT itself
-    const dt_start = std.mem.alignBackward(u64, @intFromPtr(dt.blob.ptr), arch.page_size);
+    const dt_start = std.mem.alignBackward(u64, @intFromPtr(dt.blob.ptr), page_size);
     const dt_end = std.mem.alignForward(
         u64,
         @intFromPtr(dt.blob.ptr + dt.blob.len),
-        arch.page_size,
+        page_size,
     );
 
     const start_address = dt_start - arch.kernel_addresses.kernel_virtual_offset;
@@ -363,8 +365,8 @@ fn addDeviceTreeReservedMemory(
         .reusable = false,
         .system = false,
         .range = PhysicalMemoryRegion{
-            .frame_number = start_address / arch.page_size,
-            .frame_count = size / arch.page_size,
+            .frame_number = start_address / page_size,
+            .frame_count = size / page_size,
         },
     };
     try reserved_regions.append(allocator, dt_region);
@@ -372,9 +374,9 @@ fn addDeviceTreeReservedMemory(
 
 fn printRegions(regions: []const PhysicalMemoryRegion) void {
     for (regions) |range| {
-        const size_in_kib = range.frame_count * arch.page_size / 1024;
-        const start = range.frame_number * arch.page_size;
-        const end = range.end() * arch.page_size - 1;
+        const size_in_kib = range.frame_count * page_size / 1024;
+        const start = range.frame_number * page_size;
+        const end = range.end() * page_size - 1;
         log.info("    [0x{x:0>16}-0x{x:0>16}] ({} KiB)", .{ start, end, size_in_kib });
     }
 }
@@ -382,9 +384,9 @@ fn printRegions(regions: []const PhysicalMemoryRegion) void {
 fn printReservedRegions(reserved_regions: []const ReservedMemoryRegion) void {
     log.info("Reserved memory regions:", .{});
     for (reserved_regions) |reg| {
-        const size_in_kib = reg.range.frame_count * arch.page_size / 1024;
-        const start = reg.range.frame_number * arch.page_size;
-        const end = reg.range.end() * arch.page_size - 1;
+        const size_in_kib = reg.range.frame_count * page_size / 1024;
+        const start = reg.range.frame_number * page_size;
+        const end = reg.range.end() * page_size - 1;
 
         if (reg.system) {
             log.info("    [0x{x:0>16}-0x{x:0>16}] <{s}> ({} KiB) system", .{
@@ -439,103 +441,113 @@ pub fn clonePageTable(
 }
 
 pub const PagefaultType = enum { read, write, instruction };
+/// Returns whether it's an unrecoverable page fault.
 pub fn handlePageFault(address: VirtualAddress, page_fault_type: PagefaultType) bool {
     const current_thread = scheduler.getCurrentThread();
-    demand_paging: {
-        if (current_thread.purpose != .general) break :demand_paging;
-        const general_thread = &current_thread.purpose.general;
+    if (current_thread.purpose != .general) return true;
 
-        const user_address = UserAddress.fromVirtual(address) orelse {
-            // TODO: signal
-            processes.killCurrentProcess(-123);
-            return false;
-        };
+    const general_thread = &current_thread.purpose.general;
 
-        const process = general_thread.owner_process;
-        var next_ptr = &process.mapped_regions;
-        while (next_ptr.*) |region| : (next_ptr = &region.next) {
-            if (!region.contains(user_address))
-                continue;
+    const user_address = UserAddress.fromVirtual(address) orelse {
+        // TODO: signal
+        processes.killCurrentProcess(-123);
+        return false;
+    };
 
-            const invalid_privilige = switch (page_fault_type) {
-                .instruction => !region.flags.execute,
-                .read => !region.flags.read,
-                .write => !region.flags.write,
-            };
+    const page_idx = user_address.int / page_size;
 
-            if (invalid_privilige) {
-                processes.killCurrentProcess(-123);
-                return false;
-            }
+    const process = general_thread.owner_process;
+    var next_ptr = &process.mapped_regions;
+    while (next_ptr.*) |region| : (next_ptr = &region.next)
+        if (region.contains(page_idx))
+            break;
 
-            // TODO: i should actually test whether this works how it's intended, like bss being
-            // all zeros.
-            var zeroed_size: usize = 0;
-            const frame = if (region.backing) |backing| blk: {
-                const region_offset = user_address.int - region.address.int;
+    const region = next_ptr.* orelse return true;
 
-                const region_page_idx = region_offset / arch.page_size;
-                const backing_page_idx = backing.size / arch.page_size;
+    const invalid_privilige = switch (page_fault_type) {
+        .instruction => !region.flags.execute,
+        .read => !region.flags.read,
+        .write => !region.flags.write,
+    };
 
-                // if the region is writable we make a copy to not change the contents of the
-                // original, otherwise it is fine to use the same page
-                const should_alloc = region_page_idx >= backing_page_idx or region.flags.write;
-
-                const file_offset = backing.offset + region_offset;
-                const page_idx = file_offset / arch.page_size;
-                const regular = backing.file.dir_ent.regular();
-                const backing_virt = regular.page_cache.getPage(page_idx, true) catch
-                    @panic("TODO: read from block device");
-
-                if (should_alloc) {
-                    const backing_page: []const u8 = backing_virt.asPtr([*]u8)[0..arch.page_size];
-
-                    const new_frame_desc = buddy_allocator.allocBlock(0) catch @panic("TODO");
-                    const new_phys = new_frame_desc.physical();
-                    const new_virt = physicalToVirtual(new_phys);
-                    const new_page: []u8 = new_virt.asPtr([*]u8)[0..arch.page_size];
-
-                    @memcpy(new_page, backing_page);
-
-                    const remaining_file_size = region.size - backing.size;
-                    zeroed_size = arch.page_size - @min(remaining_file_size, arch.page_size);
-                    break :blk new_phys;
-                } else {
-                    const phys = virtualToPhysical(backing_virt);
-                    const frame_descriptor = getFrameDescriptor(phys);
-                    frame_descriptor.increaseReference();
-
-                    break :blk phys;
-                }
-            } else blk: {
-                zeroed_size = arch.page_size;
-                const frame_descriptor = buddy_allocator.allocBlock(0) catch @panic("TODO");
-                break :blk frame_descriptor.physical();
-            };
-
-            var frames = [1]PhysicalAddress{frame};
-
-            mapRegion(
-                process.root_page_table,
-                user_address.int / arch.page_size,
-                1,
-                .{
-                    .access = region.flags,
-                    .global = false,
-                    .user = true,
-                    .ignore_if_overwrite = false,
-                },
-                &frames,
-            ) catch @panic("TODO");
-
-            const buff = physicalToVirtual(frame).asPtr([*]u8)[0..zeroed_size];
-            @memset(buff, 0);
-
-            return false;
-        }
+    if (invalid_privilige) {
+        processes.killCurrentProcess(-123);
+        return false;
     }
 
-    return true;
+    const backing_frame: ?PhysicalAddress = if (region.backing) |backing| frame_blk: {
+        const reg_page_idx = page_idx - region.page_index;
+
+        const before_backing = backing.page_offset > reg_page_idx;
+        const after_backing = backing.page_offset + backing.page_count <= reg_page_idx;
+        const inside_backing = !(before_backing or after_backing);
+
+        if (!inside_backing) break :frame_blk null;
+
+        const backing_relative_page_idx = reg_page_idx - backing.page_offset;
+
+        const backing_buff = switch (backing.source) {
+            .file => |file| blk: {
+                const file_page_idx = file.page_offset + backing_relative_page_idx;
+                const regular = file.open_file.dir_ent.regular();
+                const page = regular.page_cache.getPage(file_page_idx, true) catch
+                    @panic("TODO: read from block device");
+                break :blk page.asPtr([*]u8)[0..page_size];
+            },
+            .memory => |mem| blk: {
+                const base = backing_relative_page_idx * page_size;
+                const buff = mem[base .. base + page_size];
+                break :blk buff;
+            },
+        };
+
+        // TODO: COW
+        // if the region is writable we make a copy to not change the contents of the
+        // original, otherwise it is fine to use the same page
+        if (region.flags.write) {
+            const new_frame_desc = buddy_allocator.allocBlock(0) catch @panic("TODO");
+            const new_phys = new_frame_desc.physical();
+            const new_virt = physicalToVirtual(new_phys);
+            const new_page: []u8 = new_virt.asPtr([*]u8)[0..page_size];
+
+            @memcpy(new_page[0..page_size], backing_buff);
+
+            break :frame_blk new_phys;
+        } else {
+            // if there is no reason to make a copy just increase the reference count
+            const phys = virtualToPhysical(.fromInt(@intFromPtr(backing_buff.ptr)));
+            const frame_descriptor = getFrameDescriptor(phys);
+            frame_descriptor.increaseReference();
+            break :frame_blk phys;
+        }
+    } else null;
+
+    const frame = backing_frame orelse blk: {
+        const frame_descriptor = buddy_allocator.allocBlock(0) catch @panic("TODO");
+        const phys = frame_descriptor.physical();
+
+        const virt = physicalToVirtual(phys);
+        const buff = virt.asPtr([*]u8)[0..page_size];
+        @memset(buff, 0);
+
+        break :blk phys;
+    };
+
+    var frames = [1]PhysicalAddress{frame};
+    mapRegion(
+        process.root_page_table,
+        page_idx,
+        1,
+        .{
+            .access = region.flags,
+            .global = false,
+            .user = true,
+            .ignore_if_overwrite = false,
+        },
+        &frames,
+    ) catch @panic("TODO");
+
+    return false;
 }
 
 pub const FrameDescriptor = struct {
@@ -555,7 +567,7 @@ pub const FrameDescriptor = struct {
     pub fn physical(self: *const FrameDescriptor) PhysicalAddress {
         const relative_addr = @intFromPtr(self) - arch.kernel_addresses.frame_descriptors;
         const page_frame_number = relative_addr / @sizeOf(FrameDescriptor);
-        return .fromInt(page_frame_number * arch.page_size);
+        return .fromInt(page_frame_number * page_size);
     }
 };
 
@@ -574,8 +586,8 @@ pub var frame_descriptors = struct {
 pub const max_frame_descriptor_region_count = 32;
 
 pub fn getFrameDescriptor(address: PhysicalAddress) *FrameDescriptor {
-    std.debug.assert(address.int % arch.page_size == 0);
-    const pfn = address.int / arch.page_size;
+    std.debug.assert(address.int % page_size == 0);
+    const pfn = address.int / page_size;
 
     // TODO: lock interrupt?
     frame_descriptors.spinlock.lock();
@@ -606,13 +618,13 @@ pub fn setupFrameDescriptors(
         // end_pfn is exclusive
         const end_pfn = free_region.end();
 
-        const desc_arr_pfn = start_pfn * @sizeOf(FrameDescriptor) / arch.page_size;
-        const desc_arr_end_pfn = end_pfn * @sizeOf(FrameDescriptor) / arch.page_size;
+        const desc_arr_pfn = start_pfn * @sizeOf(FrameDescriptor) / page_size;
+        const desc_arr_end_pfn = end_pfn * @sizeOf(FrameDescriptor) / page_size;
         const desc_arr_frame_count = desc_arr_end_pfn - desc_arr_pfn + 1;
 
         try arch.mapRegion(
             root_page_table,
-            arch.kernel_addresses.frame_descriptors / arch.page_size + desc_arr_pfn,
+            arch.kernel_addresses.frame_descriptors / page_size + desc_arr_pfn,
             desc_arr_frame_count,
             .{
                 .access = .{ .execute = false, .read = true, .write = true },
@@ -638,7 +650,7 @@ pub fn setupFrameDescriptors(
         const region = early_page_allocator.regions[region_idx];
         for (0..region.reserved_frame_count) |frame_idx| {
             const page_frame_number = region.range.frame_number + frame_idx;
-            const phys = PhysicalAddress.fromInt(page_frame_number * arch.page_size);
+            const phys = PhysicalAddress.fromInt(page_frame_number * page_size);
             const descriptor = getFrameDescriptor(phys);
             descriptor.reference_count.store(1, .monotonic);
         }
@@ -694,7 +706,7 @@ fn earlyAllocFrame() error{OutOfMemory}!PhysicalAddress {
         const frame_number = region.range.frame_number + region.reserved_frame_count;
         region.reserved_frame_count += 1;
 
-        return .fromInt(frame_number * arch.page_size);
+        return .fromInt(frame_number * page_size);
     }
     return error.OutOfMemory;
 }

@@ -2,7 +2,8 @@ const std = @import("std");
 const sys = @import("sys");
 const core = sys.core;
 
-pub fn main() void {
+pub fn main(arg_buff: []const u8) void {
+    _ = arg_buff;
     const root_dir_fd = sys.openat(null, "/test_dir", 0, 0) catch sys.exit(-1);
 
     var buffer: [512]u8 align(@alignOf(core.fs.DirectoryEntryHeader)) = undefined;

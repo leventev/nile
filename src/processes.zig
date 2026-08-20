@@ -1,5 +1,6 @@
 const std = @import("std");
 const core = @import("core");
+const MessageType = core.message.MessageType;
 const SyscallError = core.SyscallError;
 const slab_allocator = @import("mem/slab_allocator.zig");
 const scheduler = @import("scheduler.zig");
@@ -71,12 +72,18 @@ pub fn spawnProcess(
 
         // TODO: handle case when filesz < memsz
         new_proc.mapRegion(
-            mm.UserAddress.fromInt(prog_header.p_vaddr) orelse return error.InvalidELF,
-            prog_header.p_memsz,
+            prog_header.p_vaddr / arch.page_size,
+            prog_header.p_memsz / arch.page_size,
             .{
-                .file = file,
-                .offset = prog_header.p_offset,
-                .size = prog_header.p_filesz,
+                .source = .{
+                    .file = .{
+                        .open_file = file,
+                        .page_offset = prog_header.p_offset / arch.page_size,
+                    },
+                },
+                .page_offset = 0,
+                // TODO: +1 is prolly wrong
+                .page_count = prog_header.p_filesz / arch.page_size + 1,
             },
             .{
                 .execute = prog_header.p_flags & std.elf.PF_X != 0,
@@ -94,10 +101,25 @@ pub fn spawnProcess(
     const stack_size = 64 * arch.page_size;
     const stack_bottom = stack_top + stack_size;
 
+    // argument
+    const arg_str = "hello world!";
+    const arg_arr_size = MessageType.uint8.arrayRequiredSizeBackwards(arg_str.len, stack_top);
+    const buf_phys = buddy_allocator.allocBlock(0) catch unreachable;
+    const buf = mm.physicalToVirtual(buf_phys.physical()).asPtr([*]u8)[0..arch.page_size];
+
+    const subbuf = buf[arch.page_size - arg_arr_size .. arch.page_size];
+
+    const arg_message = MessageType.uint8.writeArray(arg_str, subbuf) orelse unreachable;
+
     new_proc.mapRegion(
-        mm.UserAddress.fromInt(stack_top) orelse unreachable,
-        stack_size,
-        null,
+        stack_top / arch.page_size,
+        stack_size / arch.page_size,
+        .{
+            .source = .{ .memory = buf.ptr },
+            .page_offset = (stack_size - arch.page_size) / arch.page_size,
+            // TODO:
+            .page_count = 1,
+        },
         .{
             .execute = false,
             .read = true,
@@ -109,8 +131,17 @@ pub fn spawnProcess(
     while (next_ptr.*) |added_process| : (next_ptr = &added_process.next) {}
     next_ptr.* = new_proc;
 
-    _ = scheduler.newUserThread(elf_header.entry, stack_bottom, new_proc) catch
+    const main_thread = scheduler.newUserThread(elf_header.entry, stack_bottom, new_proc) catch
         return error.OutOfMemory;
+
+    main_thread.purpose.general.user.?.state.gprs[10] = stack_bottom - arg_message.len;
+    main_thread.purpose.general.user.?.state.gprs[11] = arg_message.len;
+    // TODO: BIG TODO
+    main_thread.purpose.general.user.?.state.gprs[2] = std.mem.alignBackward(
+        usize,
+        main_thread.purpose.general.user.?.state.gprs[2] - arg_message.len,
+        16,
+    );
 
     dumpProcesses();
 

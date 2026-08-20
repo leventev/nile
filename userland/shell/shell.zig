@@ -102,7 +102,10 @@ fn processLine(line: []const u8) void {
     _ = sys.write(sys.stdout_fd, error_message) catch exit(-1);
 }
 
-pub fn main() void {
+pub fn main(arg_buff: []const u8) void {
+    const msg = MessageType.uint8.readArray(arg_buff) orelse exit(-2);
+    _ = sys.write(sys.stdout_fd, msg) catch exit(-3);
+
     const quit = false;
 
     const process_count_fd = sys.openat(null, "/proc/processcount", 0, 0) catch exit(-1);

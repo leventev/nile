@@ -303,6 +303,9 @@ test "array message" {
     const u8_buff = MessageType.uint8.writeArray("hello world!", &buff) orelse unreachable;
     try expect(eql(u8, MessageType.uint8.readArray(u8_buff).?, "hello world!"));
 
+    const u8_buff_2 = MessageType.uint8.writeArray("hello world!!", &buff) orelse unreachable;
+    try expect(eql(u8, MessageType.uint8.readArray(u8_buff_2).?, "hello world!!"));
+
     const u16_buff = MessageType.uint16.writeArray(&.{ 9, 385, 1499, 0, 1 }, &buff) orelse unreachable;
     try expect(eql(u16, MessageType.uint16.readArray(u16_buff).?, &.{ 9, 385, 1499, 0, 1 }));
 

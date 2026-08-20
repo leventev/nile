@@ -102,14 +102,14 @@ pub fn spawnProcess(
     const stack_bottom = stack_top + stack_size;
 
     // argument
-    const arg_str = "hello world!";
+    const arg_str = "hello world!!";
     const arg_arr_size = MessageType.uint8.arrayRequiredSizeBackwards(arg_str.len, stack_top);
     const buf_phys = buddy_allocator.allocBlock(0) catch unreachable;
     const buf = mm.physicalToVirtual(buf_phys.physical()).asPtr([*]u8)[0..arch.page_size];
 
     const subbuf = buf[arch.page_size - arg_arr_size .. arch.page_size];
 
-    const arg_message = MessageType.uint8.writeArray(arg_str, subbuf) orelse unreachable;
+    _ = MessageType.uint8.writeArray(arg_str, subbuf) orelse unreachable;
 
     new_proc.mapRegion(
         stack_top / arch.page_size,
@@ -134,7 +134,9 @@ pub fn spawnProcess(
     const main_thread = scheduler.newUserThread(elf_header.entry, stack_bottom, new_proc) catch
         return error.OutOfMemory;
 
-    arch.setupInitialStack(main_thread, .fromInt(stack_bottom), arg_message.len);
+    // pass arg_arr_size instead of the writeArray return value because the length is likely
+    // less than the worst case size, if we substract that then the pointer won't be valid
+    arch.setupInitialStack(main_thread, .fromInt(stack_bottom), arg_arr_size);
 
     dumpProcesses();
 

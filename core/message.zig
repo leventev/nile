@@ -68,7 +68,7 @@ pub const MessageType = enum(u8) {
     /// Try to read the expected message type from the provided buffer.
     /// Buffer must be aligned to a 2 byte address.
     /// Prepends the message with the magic value too.
-    pub fn readExpectedWithMagic(
+    pub fn readWithMagic(
         comptime expected: MessageType,
         buffer: []const u8,
     ) ?expected.Type() {
@@ -82,12 +82,12 @@ pub const MessageType = enum(u8) {
         if (magic_ptr.* != message_magic)
             return null;
 
-        return readExpected(expected, buffer[magic_size..]);
+        return read(expected, buffer[magic_size..]);
     }
 
     /// Try to read the expected message type from the provided buffer.
     /// Buffer must be aligned to a 2 byte address.
-    pub fn readExpected(comptime expected: MessageType, buffer: []const u8) ?expected.Type() {
+    pub fn read(comptime expected: MessageType, buffer: []const u8) ?expected.Type() {
         if (!Alignment.of(u16).check(@intFromPtr(buffer.ptr)))
             return null;
 
@@ -262,3 +262,53 @@ pub const MessageType = enum(u8) {
         return address - magic_start;
     }
 };
+
+const expect = std.testing.expect;
+const expectEqual = std.testing.expectEqual;
+const eql = std.mem.eql;
+
+// TODO: tests for size calculating functions once all are written
+
+test "basic message" {
+    var buff: [256]u8 = undefined;
+    const void_buff = MessageType.none.writeWithMagic({}, &buff).?;
+    try expectEqual({}, MessageType.none.readWithMagic(void_buff));
+    try expectEqual(MessageType.minimum_message_size, void_buff.len);
+
+    const u8_buff = MessageType.uint8.writeWithMagic(12, &buff).?;
+    try expectEqual(12, MessageType.uint8.readWithMagic(u8_buff));
+
+    const u8_buff_2 = MessageType.uint8.write(193, &buff).?;
+    try expectEqual(193, MessageType.uint8.read(u8_buff_2));
+
+    const i16_buff = MessageType.int16.writeWithMagic(-6237, &buff).?;
+    try expectEqual(-6237, MessageType.int16.readWithMagic(i16_buff));
+
+    const i16_buff_2 = MessageType.int16.write(-25830, &buff).?;
+    try expectEqual(-25830, MessageType.int16.read(i16_buff_2));
+
+    const i32_buff = MessageType.int32.write(-30_450_393, &buff).?;
+    try expectEqual(-30_450_393, MessageType.int32.read(i32_buff));
+
+    const u64_buff = MessageType.uint64.writeWithMagic(0xab_cd_ef_12_34, &buff).?;
+    try expectEqual(0xab_cd_ef_12_34, MessageType.uint64.readWithMagic(u64_buff));
+}
+
+test "array message" {
+    var buff: [256]u8 = undefined;
+    const void_buff = MessageType.none.writeArray(&.{}, &buff).?;
+    try expect(eql(void, MessageType.none.readArray(void_buff).?, &.{}));
+    try expectEqual(@sizeOf(u16) + @sizeOf(MessageType) + 1 + @sizeOf(u16), void_buff.len);
+
+    const u8_buff = MessageType.uint8.writeArray("hello world!", &buff) orelse unreachable;
+    try expect(eql(u8, MessageType.uint8.readArray(u8_buff).?, "hello world!"));
+
+    const u16_buff = MessageType.uint16.writeArray(&.{ 9, 385, 1499, 0, 1 }, &buff) orelse unreachable;
+    try expect(eql(u16, MessageType.uint16.readArray(u16_buff).?, &.{ 9, 385, 1499, 0, 1 }));
+
+    const i32_buff = MessageType.int32.writeArray(&.{ 1_000_000, 123 }, &buff) orelse unreachable;
+    try expect(eql(i32, MessageType.int32.readArray(i32_buff).?, &.{ 1_000_000, 123 }));
+
+    const u64_buff = MessageType.uint64.writeArray(&.{0xff_ff_ff_ff_34}, &buff) orelse unreachable;
+    try expect(eql(u64, MessageType.uint64.readArray(u64_buff).?, &.{0xff_ff_ff_ff_34}));
+}

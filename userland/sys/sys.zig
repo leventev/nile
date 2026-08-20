@@ -127,5 +127,5 @@ pub fn readDirectory(fd: u32, buff: []u8) ReadError!DirectoryEntryIterator {
 pub fn readMessage(comptime expected: MessageType, fd: u32) ?expected.Type() {
     var buff: [256]u8 align(2) = undefined;
     const bytes_read = read(fd, &buff) catch return null;
-    return expected.readExpectedWithMagic(buff[0..bytes_read]);
+    return expected.readWithMagic(buff[0..bytes_read]);
 }

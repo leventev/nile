@@ -49,7 +49,7 @@ fn setupThreadState(
 ) void {
     if (config.debug_scheduler) {
         thread_state.gprs = [_]u64{0xAA_BB_CC_DD_AA_BB_CC_DD} ** ThreadState.gpr_count;
-        thread_state.gprs[0] = 0;
+        thread_state.gprs[ThreadState.zero] = 0;
     } else {
         thread_state.gprs = [_]u64{0x00} ** ThreadState.gpr_count;
     }
@@ -97,6 +97,21 @@ pub fn setupNewGeneralThread(
     }
 }
 
+pub fn setupInitialStack(
+    thread: *Thread,
+    stack_bottom: mm.VirtualAddress,
+    stack_argument_size: usize,
+) void {
+    const user_thread = &(thread.purpose.general.user orelse unreachable);
+    user_thread.state.gprs[ThreadState.argument_0] = stack_bottom.int - stack_argument_size;
+    user_thread.state.gprs[ThreadState.argument_1] = stack_argument_size;
+    user_thread.state.gprs[ThreadState.stack_ptr] = std.mem.alignBackward(
+        usize,
+        user_thread.state.gprs[ThreadState.stack_ptr] - stack_argument_size,
+        16,
+    );
+}
+
 pub fn setupSoftInterruptThread(thread: *Thread) void {
     const kernel_stack_bottom = thread.kernel_stack_top.add(thread.kernel_stack_size);
     const entry_point = mm.VirtualAddress.fromInt(
@@ -105,7 +120,7 @@ pub fn setupSoftInterruptThread(thread: *Thread) void {
     setupThreadState(thread.kernel_state, kernel_stack_bottom, entry_point, false);
 
     // TODO:
-    thread.kernel_state.gprs[1] = @intFromPtr(&forceSchedule);
+    thread.kernel_state.gprs[ThreadState.return_addr] = @intFromPtr(&forceSchedule);
 }
 
 pub fn scheduleNextThread(thread: *Thread) void {

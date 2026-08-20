@@ -134,14 +134,7 @@ pub fn spawnProcess(
     const main_thread = scheduler.newUserThread(elf_header.entry, stack_bottom, new_proc) catch
         return error.OutOfMemory;
 
-    main_thread.purpose.general.user.?.state.gprs[10] = stack_bottom - arg_message.len;
-    main_thread.purpose.general.user.?.state.gprs[11] = arg_message.len;
-    // TODO: BIG TODO
-    main_thread.purpose.general.user.?.state.gprs[2] = std.mem.alignBackward(
-        usize,
-        main_thread.purpose.general.user.?.state.gprs[2] - arg_message.len,
-        16,
-    );
+    arch.setupInitialStack(main_thread, .fromInt(stack_bottom), arg_message.len);
 
     dumpProcesses();
 

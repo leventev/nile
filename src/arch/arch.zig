@@ -49,6 +49,10 @@ pub const setupNewGeneralThread = switch (target) {
     Arch.riscv64 => riscv64.setupNewGeneralThread,
 };
 
+pub const setupInitialStack = switch (target) {
+    Arch.riscv64 => riscv64.setupInitialStack,
+};
+
 pub const mapRegion = switch (target) {
     Arch.riscv64 => riscv64.mapRegion,
 };

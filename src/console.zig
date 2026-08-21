@@ -37,7 +37,7 @@ pub fn init(
 
     const current_dev = tty_devices[current_tty_device];
     const virt_console: *VirtualConsole = @ptrCast(@alignCast(current_dev.driver.internal_data));
-    virt_console.redraw();
+    virt_console.clear();
 }
 
 fn keyToChar(ev: input.KeyEvent) ?u8 {
@@ -116,12 +116,7 @@ pub fn keyEvent() void {
                 const shift = key_states[@intFromEnum(input.EvdevKeyEventCode.key_leftshift)];
                 if (ctrl and shift and f_num < tty_device_count) {
                     current_tty_device = f_num;
-                    const new_current_dev = tty_devices[current_tty_device];
-                    const virt_console: *VirtualConsole = @ptrCast(
-                        @alignCast(new_current_dev.driver.internal_data),
-                    );
-
-                    virt_console.redraw();
+                    // TODO: swap to buffer of other tty
                 }
             },
             else => {

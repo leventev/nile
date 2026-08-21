@@ -9,7 +9,6 @@ id: usize,
 framebuffer_backing: *framebuffer.Framebuffer,
 columns: usize,
 rows: usize,
-output_buffer: []u8,
 output_buffer_index: usize,
 
 const font_scale = 2;
@@ -34,17 +33,20 @@ fn writeString(tty_device: *tty.TTYDevice, string: []const u8) void {
                     self.columns,
                 );
             },
-            0x8 => {
+            0x8 => { // backspace
                 self.eraseCursor(self.output_buffer_index);
+                if (self.output_buffer_index == 0) return;
 
                 self.output_buffer_index -= 1;
-                self.output_buffer[self.output_buffer_index] = ' ';
-                self.redrawAtPosition(self.output_buffer_index);
+                // self.output_buffer[self.output_buffer_index] = ' ';
+                self.redrawAtPosition(self.output_buffer_index, ' ');
             },
             else => {
+                if (self.output_buffer_index >= self.columns * self.rows)
+                    self.scroll();
+
                 // TODO:only add valid characters
-                self.output_buffer[self.output_buffer_index] = ch;
-                self.redrawAtPosition(self.output_buffer_index);
+                self.redrawAtPosition(self.output_buffer_index, ch);
                 self.output_buffer_index +%= 1;
             },
         }
@@ -54,44 +56,49 @@ fn writeString(tty_device: *tty.TTYDevice, string: []const u8) void {
     self.framebuffer_backing.flush();
 }
 
+fn drawCharacter(self: *VirtualConsole, character: u8) void {
+    self.redrawAtPosition(self.output_buffer_index, character);
+}
+
 pub fn init(self: *VirtualConsole, gpa: std.mem.Allocator, fb: *framebuffer.Framebuffer) !void {
     self.framebuffer_backing = fb;
-    self.columns = self.framebuffer_backing.active_display.width / pc_font.loaded_font.width;
-    self.rows = self.framebuffer_backing.active_display.height / pc_font.loaded_font.height;
+    self.columns = self.framebuffer_backing.active_display.width / (pc_font.loaded_font.width * font_scale);
+    self.rows = self.framebuffer_backing.active_display.height / (pc_font.loaded_font.height * font_scale);
 
-    self.output_buffer = try gpa.alloc(u8, self.columns * self.rows);
-    @memset(self.output_buffer, 0);
+    _ = gpa;
     self.output_buffer_index = 0;
 }
 
-fn redrawAtPosition(self: *VirtualConsole, index: usize) void {
-    const ch = self.output_buffer[index];
+fn redrawAtPosition(self: *VirtualConsole, index: usize, ch: u8) void {
     const row = index / self.columns;
     const column = index % self.columns;
 
     pc_font.displayChararcter(self.framebuffer_backing, column, row, ch, font_scale);
 }
 
-pub fn redraw(self: *VirtualConsole) void {
-    self.framebuffer_backing.fillRect(
-        0,
-        0,
-        self.framebuffer_backing.active_display.width,
-        self.framebuffer_backing.active_display.height,
-        .{ .alpha = 255, .red = 0, .green = 0, .blue = 0 },
+pub fn scroll(self: *VirtualConsole) void {
+    self.output_buffer_index = (self.rows - 1) * self.columns;
+
+    const row_pixel_height = pc_font.loaded_font.height * font_scale;
+    const disp = &self.framebuffer_backing.active_display;
+    const fb_mem: [*]framebuffer.PixelRGBA = @ptrCast(@alignCast(disp.memory));
+    @memmove(
+        fb_mem[0 .. (disp.height - row_pixel_height) * disp.width],
+        fb_mem[row_pixel_height * disp.width .. disp.height * disp.width],
     );
-    for (0..self.rows) |row| {
-        for (0..self.columns) |column| {
-            const idx = row * self.columns + column;
-            const ch = self.output_buffer[idx];
-            if (ch == 0) continue;
-            pc_font.displayChararcter(self.framebuffer_backing, column, row, ch, font_scale);
-        }
-    }
+    @memset(
+        fb_mem[(disp.height - row_pixel_height) * disp.width .. disp.height * disp.width],
+        framebuffer.PixelRGBA{ .red = 0, .green = 0, .blue = 0, .alpha = 0 },
+    );
+}
 
-    self.drawCursor();
-
-    self.framebuffer_backing.flush();
+pub fn clear(self: *VirtualConsole) void {
+    const disp = &self.framebuffer_backing.active_display;
+    const fb_mem: [*]framebuffer.PixelRGBA = @ptrCast(@alignCast(disp.memory));
+    @memset(
+        fb_mem[0 .. disp.height * disp.width],
+        framebuffer.PixelRGBA{ .red = 0, .green = 0, .blue = 0, .alpha = 0 },
+    );
 }
 
 fn colorFillPosition(self: *VirtualConsole, pos: usize, color: framebuffer.PixelRGBA) void {

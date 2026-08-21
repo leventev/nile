@@ -85,7 +85,7 @@ pub fn syscall(
 }
 
 pub fn sysExit(exit_code: i64) noreturn {
-    _ = syscall(.exit, .{@as(u64, @intCast(exit_code))});
+    _ = syscall(.exit, .{@as(u64, @bitCast(exit_code))});
     unreachable;
 }
 

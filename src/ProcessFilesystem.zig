@@ -138,7 +138,7 @@ fn exitCodeRead(
 
     process.last_child_exit_code_semaphore.sub();
 
-    const written_buff = MessageType.uint32.writeWithMagic(
+    const written_buff = MessageType.int32.writeWithMagic(
         @intCast(process.last_child_exit_code orelse unreachable),
         buff,
     );

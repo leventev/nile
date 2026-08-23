@@ -7,6 +7,7 @@ const arch = @import("arch/arch.zig");
 const mm = @import("mem/mm.zig");
 const Process = @import("Process.zig");
 const device = @import("device.zig");
+const sync = @import("sync.zig");
 
 const log = std.log.scoped(.scheduler);
 
@@ -15,6 +16,7 @@ const Device = device.Device;
 const stack_size_order = 4;
 const stack_size = @shlExact(1, stack_size_order) * 4096;
 
+pub var scheduler_lock: sync.Spinlock = .unlocked;
 pub var running_threads: ?*Thread = null;
 pub var threads_available = std.bit_set.ArrayBitSet(usize, Thread.Id.max).initFull();
 
@@ -27,6 +29,9 @@ pub const Error = error{
 };
 
 pub fn queueSoftInterruptHandler(thread: *Thread) void {
+    const interrupts_enabled = scheduler_lock.lockInterrupt();
+    defer scheduler_lock.unlockInterrupt(interrupts_enabled);
+
     std.debug.assert(thread.purpose == .soft_interrupt);
 
     if (thread.purpose.soft_interrupt.queued) return;
@@ -34,11 +39,11 @@ pub fn queueSoftInterruptHandler(thread: *Thread) void {
     arch.setupSoftInterruptThread(thread);
 
     thread.purpose.soft_interrupt.queued = true;
-    appendRunningThread(thread);
+    appendRunningThreadLocked(thread);
 }
 
 /// Append a thread at the end of the running threads linked list.
-fn appendRunningThread(thread: *Thread) void {
+fn appendRunningThreadLocked(thread: *Thread) void {
     var next_ptr = &running_threads;
     while (next_ptr.*) |added_thread| : (next_ptr = &added_thread.scheduler_list_next) {
         // check whether a thread is already added
@@ -58,7 +63,7 @@ fn appendRunningThread(thread: *Thread) void {
 }
 
 /// Get the lowest available thread ID
-fn nextThreadId() Error!Thread.Id {
+fn nextThreadIdLocked() Error!Thread.Id {
     const thread_id_int = threads_available.toggleFirstSet() orelse
         return error.no_available_threads;
     return @enumFromInt(thread_id_int);
@@ -68,7 +73,11 @@ pub fn newSoftInterruptHandler(
     callback: *const fn (dev: *Device) void,
     dev: *Device,
 ) Error!*Thread {
-    const thread_id = try nextThreadId();
+    const thread_id = blk: {
+        const interrupts_enabled = scheduler_lock.lockInterrupt();
+        defer scheduler_lock.unlockInterrupt(interrupts_enabled);
+        break :blk try nextThreadIdLocked();
+    };
 
     var thread: *Thread = thread_cache.alloc() catch return error.out_of_memory;
     thread.id = thread_id;
@@ -103,7 +112,11 @@ pub fn newSoftInterruptHandler(
 
 /// Create a new kernel thread
 pub fn newKernelThread(entry_point_fn: *const fn () void, owner_process: *Process) Error!*Thread {
-    const thread_id = try nextThreadId();
+    const thread_id = blk: {
+        const interrupts_enabled = scheduler_lock.lockInterrupt();
+        defer scheduler_lock.unlockInterrupt(interrupts_enabled);
+        break :blk try nextThreadIdLocked();
+    };
 
     var thread: *Thread = thread_cache.alloc() catch return error.out_of_memory;
     thread.id = thread_id;
@@ -116,6 +129,7 @@ pub fn newKernelThread(entry_point_fn: *const fn () void, owner_process: *Proces
         },
     };
 
+    // TODO: process lock
     var next_ptr = &owner_process.associated_threads;
     while (next_ptr.*) |added_thread| {
         next_ptr = &added_thread.purpose.general.process_list_next;
@@ -130,7 +144,11 @@ pub fn newKernelThread(entry_point_fn: *const fn () void, owner_process: *Proces
 
     const entry_point: mm.VirtualAddress = .fromInt(@intFromPtr(entry_point_fn));
     arch.setupNewGeneralThread(thread, null, entry_point);
-    appendRunningThread(thread);
+    {
+        const interrupts_enabled = scheduler_lock.lockInterrupt();
+        defer scheduler_lock.unlockInterrupt(interrupts_enabled);
+        appendRunningThreadLocked(thread);
+    }
 
     if (config.debug_scheduler) {
         std.log.debug("new kernel thread(TID={}), entry point: 0x{x}, kernel stack top: 0x{x}", .{
@@ -149,7 +167,11 @@ pub fn newUserThread(
     user_stack_bottom_addr: usize,
     owner_process: *Process,
 ) Error!*Thread {
-    const thread_id = try nextThreadId();
+    const thread_id = blk: {
+        const interrupts_enabled = scheduler_lock.lockInterrupt();
+        defer scheduler_lock.unlockInterrupt(interrupts_enabled);
+        break :blk try nextThreadIdLocked();
+    };
 
     var thread: *Thread = thread_cache.alloc() catch return error.out_of_memory;
     thread.id = thread_id;
@@ -169,6 +191,7 @@ pub fn newUserThread(
         },
     };
 
+    // TODO: process lock
     var next_ptr = &owner_process.associated_threads;
     while (next_ptr.*) |added_thread| {
         next_ptr = &added_thread.purpose.general.process_list_next;
@@ -176,7 +199,11 @@ pub fn newUserThread(
     next_ptr.* = thread;
 
     arch.setupNewGeneralThread(thread, .fromInt(user_stack_bottom_addr), .fromInt(entry_point_addr));
-    appendRunningThread(thread);
+    {
+        const interrupts_enabled = scheduler_lock.lockInterrupt();
+        defer scheduler_lock.unlockInterrupt(interrupts_enabled);
+        appendRunningThreadLocked(thread);
+    }
 
     if (config.debug_scheduler) {
         std.log.debug("new user thread(TID={}), entry point: 0x{x}, kernel stack top: 0x{x}", .{
@@ -192,7 +219,7 @@ pub fn newUserThread(
 /// Removes a running thread from the running queue.
 /// The thread is freed thus the pointer becomes invalid.
 /// The function does not schedule the new first thread.
-pub fn removeThread(thread: *Thread) void {
+fn removeThreadLocked(thread: *Thread) void {
     // TODO: remove from waitlist if in one
     var next_ptr = &running_threads;
 
@@ -211,7 +238,8 @@ pub fn removeThread(thread: *Thread) void {
 }
 
 pub fn dumpRunningThreads() void {
-    // TODO: locking here too
+    const interrupts_enabled = scheduler_lock.lockInterrupt();
+    defer scheduler_lock.unlockInterrupt(interrupts_enabled);
 
     std.log.debug("running threads:", .{});
     var next_ptr = &running_threads;
@@ -221,17 +249,32 @@ pub fn dumpRunningThreads() void {
 }
 
 pub fn scheduleNextThread() void {
-    const prev_thread = popCurrentThread();
+    const interrupts_enabled = scheduler_lock.lockInterrupt();
+    defer scheduler_lock.unlockInterrupt(interrupts_enabled);
+
+    const prev_thread = popCurrentThreadLocked();
     if (prev_thread.purpose == .soft_interrupt) {
         prev_thread.purpose.soft_interrupt.queued = false;
     } else {
-        appendRunningThread(prev_thread);
+        appendRunningThreadLocked(prev_thread);
     }
 
-    scheduleCurrent();
+    scheduleCurrentLocked();
 }
 
-pub fn scheduleCurrent() void {
+pub fn destroyProcessThreads(process: *Process) void {
+    const interrupts_enabled = scheduler_lock.lockInterrupt();
+    defer scheduler_lock.unlockInterrupt(interrupts_enabled);
+
+    var next_ptr = &process.associated_threads;
+    while (next_ptr.*) |thread| : (next_ptr = &thread.purpose.general.process_list_next) {
+        removeThreadLocked(thread);
+    }
+
+    scheduleCurrentLocked();
+}
+
+fn scheduleCurrentLocked() void {
     const next_thread = getCurrentThread();
     arch.scheduleNextThread(next_thread);
 }
@@ -240,7 +283,7 @@ pub fn getCurrentThread() *Thread {
     return running_threads orelse @panic("Running threads list is empty, sentinel is not running?");
 }
 
-pub fn popCurrentThread() *Thread {
+fn popCurrentThreadLocked() *Thread {
     const thread = running_threads orelse @panic("Running threads list is empty, sentinel is not running?");
     running_threads = thread.scheduler_list_next;
     return thread;

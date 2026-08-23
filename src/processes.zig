@@ -11,9 +11,11 @@ const mm = @import("mem/mm.zig");
 const vfs = @import("vfs.zig");
 const buddy_allocator = @import("mem/buddy_allocator.zig");
 const ProcessFilesystem = @import("ProcessFilesystem.zig");
+const sync = @import("sync.zig");
 
 const log = std.log.scoped(.processes);
 
+var processes_lock: sync.Spinlock = .unlocked;
 var running_processes: ?*Process = null;
 var processes_available: std.bit_set.ArrayBitSet(usize, Process.Id.max) = .initFull();
 pub var process_count: usize = 0;
@@ -127,9 +129,13 @@ pub fn spawnProcess(
         },
     ) catch return error.OutOfMemory;
 
-    var next_ptr = &running_processes;
-    while (next_ptr.*) |added_process| : (next_ptr = &added_process.next) {}
-    next_ptr.* = new_proc;
+    {
+        const interrupts_enabled = processes_lock.lockInterrupt();
+        defer processes_lock.unlockInterrupt(interrupts_enabled);
+        var next_ptr = &running_processes;
+        while (next_ptr.*) |added_process| : (next_ptr = &added_process.next) {}
+        next_ptr.* = new_proc;
+    }
 
     const main_thread = scheduler.newUserThread(elf_header.entry, stack_bottom, new_proc) catch
         return error.OutOfMemory;
@@ -172,8 +178,6 @@ pub fn dumpProcesses() void {
 
 /// Terminates current process.
 pub fn killCurrentProcess(exit_code: isize) void {
-    // TODO:LOCKING
-
     // process killing checklist:
     // - remove process from running_processes
     // - remove all threads created by the process
@@ -189,21 +193,20 @@ pub fn killCurrentProcess(exit_code: isize) void {
     }
 
     {
+        const interrupts_enabled = processes_lock.lockInterrupt();
+        defer processes_lock.unlockInterrupt(interrupts_enabled);
+
         var next_ptr = &running_processes;
         while (next_ptr.*) |added_process| : (next_ptr = &added_process.next) {
-            if (added_process != current_process) continue;
-            next_ptr.* = current_process.next;
-            break;
-        }
-    }
-    {
-        var next_ptr = &current_process.associated_threads;
-        while (next_ptr.*) |thread| : (next_ptr = &thread.purpose.general.process_list_next) {
-            scheduler.removeThread(thread);
+            if (added_process == current_process) {
+                next_ptr.* = current_process.next;
+                break;
+            }
         }
     }
 
-    scheduler.scheduleCurrent();
+    scheduler.destroyProcessThreads(current_process);
+
     arch.unmapAddressSpace(current_process.root_page_table);
     // TODO: TEST WHETHER THE ADDRESS SPACE IS CORRECTLY UNMAPPED
 
@@ -218,8 +221,6 @@ pub fn killCurrentProcess(exit_code: isize) void {
 
     process_count -= 1;
     processes_available.set(@intFromEnum(current_process.id));
-
-    // TODO: schedule next thread??
 }
 
 fn sentinel_thread() void {
@@ -235,6 +236,7 @@ var empty_mount_table: vfs.MountTable = .{
 };
 
 fn newProcess() !*Process {
+    // TODO: id lock
     const process_id = try nextProcessId();
     const process = try process_cache.alloc();
     process.* = .{

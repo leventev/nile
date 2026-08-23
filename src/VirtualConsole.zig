@@ -34,11 +34,10 @@ fn writeString(tty_device: *tty.TTYDevice, string: []const u8) void {
                 );
             },
             0x8 => { // backspace
-                self.eraseCursor(self.output_buffer_index);
                 if (self.output_buffer_index == 0) return;
 
+                self.eraseCursor(self.output_buffer_index);
                 self.output_buffer_index -= 1;
-                // self.output_buffer[self.output_buffer_index] = ' ';
                 self.redrawAtPosition(self.output_buffer_index, ' ');
             },
             else => {

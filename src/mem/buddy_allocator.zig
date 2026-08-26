@@ -196,20 +196,22 @@ pub const BuddyAllocator = struct {
         var order = frame_descriptor.block_order;
         var address = frame_descriptor.physical();
 
-        // we try to coalesce the specified block and its buddy
-        while (order <= max_order) : (order += 1) {
+        // we try to coalesce the block with its buddies until we can
+        while (order < max_order) : (order += 1) {
             // buddy's address can be calculated by XOR-ing with the size
             const block_size = std.math.shl(usize, 1, order) * arch.page_size;
             const buddy_address = PhysicalAddress.fromInt(address.int ^ block_size);
 
             // if the buddy is free then we remove it and move on to the next order
             const buddy_is_free = self.removeBlock(order, buddy_address);
-            if (!buddy_is_free) {
+            if (!buddy_is_free)
                 break;
-            }
 
             address = .fromInt(@min(address.int, buddy_address.int));
         }
+
+        // maximum order blocks can't be coalesced
+        if (order == max_order) return;
 
         self.orders[order].orderedAdd(address);
     }

@@ -91,7 +91,7 @@ pub fn setupNewGeneralThread(
     // TODO: maybe separate kernel vs user thread
     if (thread.purpose.general.user) |*user| {
         setupThreadState(thread.kernel_state, kernel_stack_bottom, .fromInt(0), false);
-        setupThreadState(user.state, user_stack_bottom_addr.?, entry_point_addr, true);
+        setupThreadState(user.thread_state, user_stack_bottom_addr.?, entry_point_addr, true);
     } else {
         setupThreadState(thread.kernel_state, kernel_stack_bottom, entry_point_addr, false);
     }
@@ -103,11 +103,11 @@ pub fn setupInitialStack(
     stack_argument_size: usize,
 ) void {
     const user_thread = &(thread.purpose.general.user orelse unreachable);
-    user_thread.state.gprs[ThreadState.argument_0] = stack_bottom.int - stack_argument_size;
-    user_thread.state.gprs[ThreadState.argument_1] = stack_argument_size;
-    user_thread.state.gprs[ThreadState.stack_ptr] = std.mem.alignBackward(
+    user_thread.thread_state.gprs[ThreadState.argument_0] = stack_bottom.int - stack_argument_size;
+    user_thread.thread_state.gprs[ThreadState.argument_1] = stack_argument_size;
+    user_thread.thread_state.gprs[ThreadState.stack_ptr] = std.mem.alignBackward(
         usize,
-        user_thread.state.gprs[ThreadState.stack_ptr] - stack_argument_size,
+        user_thread.thread_state.gprs[ThreadState.stack_ptr] - stack_argument_size,
         16,
     );
 }
@@ -150,6 +150,7 @@ pub extern fn forceSchedule() void;
 
 pub export fn riscv64ScheduleNextThread(state: *ThreadState) void {
     _ = state;
+    // scheduler.dumpRunningThreads();
     scheduler.scheduleNextThread();
 }
 

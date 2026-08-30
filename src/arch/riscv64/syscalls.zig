@@ -37,8 +37,6 @@ pub fn dispatchSyscall(user_state: *ThreadState) void {
     // TODO: the current implementation is messy. clean it up
 
     const current_thread = scheduler.getCurrentThread();
-    const current_thread_user = &current_thread.purpose.general.user.?;
-    current_thread_user.in_userspace = false;
 
     const core_trap_stack_bottom = @intFromPtr(&trap.trap_stack) + trap.trap_stack_size;
 
@@ -78,8 +76,6 @@ pub fn dispatchSyscall(user_state: *ThreadState) void {
     // ECALL writes its own address into sepc, not the next instruction's
     // so we have to advance the PC ourselves
     user_state.pc += 4;
-
-    current_thread_user.in_userspace = true;
 
     _ = trap.disableInterrupts();
 

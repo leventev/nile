@@ -14,6 +14,7 @@ const arch = @import("../../arch/arch.zig");
 const vfs = @import("../../vfs.zig");
 const buddy_allocator = @import("../../mem/buddy_allocator.zig");
 const riscv64_mm = @import("mm.zig");
+const Thread = @import("../../Thread.zig");
 
 const ThreadState = registers.ThreadState;
 
@@ -56,6 +57,7 @@ const TrapCause = packed struct(u64) {
 
     fn interrupt(self: Self) InterruptCode {
         std.debug.assert(self.asynchronous);
+        // std.log.debug("hello {}", .{self.code});
         return @enumFromInt(self.code);
     }
 };
@@ -289,10 +291,9 @@ fn pagefaultCrash(
     std.debug.panic("Page fault ({s}) ({})", .{ thread_name, pagefault_type });
 }
 
-var syscall_in_progress = false;
-
 fn handleInterrupt(code: InterruptCode, tval: u64, state: *ThreadState) void {
     _ = tval;
+
     switch (code) {
         .supervisor_software => {
             state.printGPRs(.err);
@@ -313,10 +314,7 @@ fn handleInterrupt(code: InterruptCode, tval: u64, state: *ThreadState) void {
             @panic("Machine timer interrupt");
         },
         .supervisor_external => {
-            if (syscall_in_progress) @panic("syscall received while in a syscall handler");
-            syscall_in_progress = true;
             plic.handleInterrupt();
-            syscall_in_progress = false;
         },
         .machine_external => {
             state.printGPRs(.err);
@@ -332,6 +330,35 @@ fn handleInterrupt(code: InterruptCode, tval: u64, state: *ThreadState) void {
 }
 
 export fn handleTrap(state: *ThreadState, cause: TrapCause, tval: u64) void {
+    // TODO: handle before the scheduler has been initialized
+    const current_thread = scheduler.getCurrentThread();
+    const user_thread_ptr: ?*Thread.General.UserThread = blk: {
+        if (current_thread.purpose == .general)
+            if (current_thread.purpose.general.user) |*user_thread|
+                break :blk user_thread;
+
+        break :blk null;
+    };
+    if (user_thread_ptr) |user_thread| {
+        std.debug.assert(user_thread.current_state != .interrupt);
+        user_thread.previous_state = user_thread.current_state;
+        const is_syscall = !cause.asynchronous and cause.exception() == .ecall_u_mode;
+        user_thread.current_state = if (is_syscall) .syscall else .interrupt;
+    }
+    defer if (user_thread_ptr) |user_thread| {
+        switch (user_thread.current_state) {
+            .interrupt => {
+                user_thread.current_state = user_thread.previous_state orelse unreachable;
+                user_thread.previous_state = .userspace;
+            },
+            .syscall => {
+                user_thread.current_state = .userspace;
+                user_thread.previous_state = null;
+            },
+            .userspace => unreachable,
+        }
+    };
+
     if (cause.asynchronous) {
         handleInterrupt(cause.interrupt(), tval, state);
     } else {

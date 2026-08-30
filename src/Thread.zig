@@ -37,15 +37,25 @@ pub const Purpose = union(enum) {
 
 pub const General = struct {
     /// Whether the thread is a user or kernel thread.
-    user: ?struct {
-        in_userspace: bool,
-        state: *arch.ThreadState,
-    },
+    user: ?UserThread,
 
     process_list_next: ?*Thread,
 
     /// Which process the thread belongs to.
     owner_process: *Process,
+
+    pub const UserThread = struct {
+        previous_state: ?State,
+        current_state: State,
+
+        thread_state: *arch.ThreadState,
+
+        pub const State = enum(u3) {
+            userspace = 0,
+            syscall = 1,
+            interrupt = 2,
+        };
+    };
 };
 
 pub const SoftInterruptHandler = struct {
@@ -61,13 +71,18 @@ pub const SoftInterruptHandler = struct {
 pub fn effectiveThreadState(self: *Thread) *arch.ThreadState {
     return switch (self.purpose) {
         .soft_interrupt => self.kernel_state,
-        .general => |general| if (general.user) |user|
-            if (user.in_userspace)
-                user.state
-            else
-                self.kernel_state
-        else
-            self.kernel_state,
+        .general => |general| blk: {
+            const user_thread = general.user orelse return self.kernel_state;
+            // if there is a previous state then we are going to switch to that.
+            // but if there is no previous state then we are going to continue running
+            // in the current state
+            const state = user_thread.previous_state orelse user_thread.current_state;
+            break :blk switch (state) {
+                .userspace => user_thread.thread_state,
+                .syscall => self.kernel_state,
+                .interrupt => unreachable,
+            };
+        },
     };
 }
 
@@ -80,12 +95,18 @@ pub fn effectiveThreadStackBottom(self: *Thread) mm.VirtualAddress {
 
     return switch (self.purpose) {
         .soft_interrupt => per_cpu_stack_bottom,
-        .general => |general| if (general.user) |user|
-            if (user.in_userspace)
-                kernel_stack_bottom
-            else
-                per_cpu_stack_bottom
-        else
-            per_cpu_stack_bottom,
+        .general => |general| blk: {
+            const user_thread = general.user orelse return per_cpu_stack_bottom;
+            // if there is a previous state then we are going to switch to that.
+            // but if there is no previous state then we are going to continue running
+            // in the current state
+            const state = user_thread.previous_state orelse user_thread.current_state;
+            break :blk switch (state) {
+                .userspace => kernel_stack_bottom,
+                .syscall => per_cpu_stack_bottom,
+                .interrupt => unreachable,
+                // TODO: ^^^ set stack for exceptions during interrupts
+            };
+        },
     };
 }

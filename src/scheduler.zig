@@ -184,8 +184,9 @@ pub fn newUserThread(
         .general = .{
             .owner_process = owner_process,
             .user = .{
-                .in_userspace = true,
-                .state = thread_state_cache.alloc() catch return error.out_of_memory,
+                .previous_state = null,
+                .current_state = .userspace,
+                .thread_state = thread_state_cache.alloc() catch return error.out_of_memory,
             },
             .process_list_next = null,
         },

@@ -41,7 +41,7 @@ const static_mem_allocator = fba.allocator();
 
 pub const std_options: std.Options = .{
     .log_level = .debug,
-    .logFn = kio.kernel_log,
+    .logFn = kio.kernelLog,
     .page_size_min = 4096,
 };
 

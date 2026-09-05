@@ -28,6 +28,8 @@ pub const entries_per_table = riscv64_mm.entries_per_table;
 
 extern const __global_pointer: ?void;
 
+const log = std.log.scoped(.riscv64);
+
 const kernel_physical_address = 0x80200000;
 const kernel_virtual_address = 0xffffffffc0000000;
 const kernel_entry_virtual_address = 0xffffffffc0200000;
@@ -40,6 +42,35 @@ pub const kernel_addresses = arch.KernelMemoryAddresses{
     .kernel_entry = kernel_entry_virtual_address,
     .kernel_virtual_offset = kernel_virtual_offset,
 };
+
+pub fn printThreadState(
+    comptime log_level: std.log.Level,
+    state: *ThreadState,
+    options: arch.PrintThreadStateOptions,
+) void {
+    const logFn = switch (log_level) {
+        .debug => log.debug,
+        .info => log.info,
+        .err => log.err,
+        .warn => log.warn,
+    };
+
+    if (options.general_purpose)
+        state.printGPRs(log_level);
+
+    if (options.status)
+        // TODO: pretty print status
+        state.status.print(log_level);
+
+    if (options.program_counter)
+        logFn("PC=0x{x}", .{state.pc});
+
+    if (options.root_page_table) {
+        const satp = riscv64_mm.readSATP();
+        const satp_phys = satp.physical_page_number * arch.page_size;
+        logFn("SATP=0x{x}", .{satp_phys});
+    }
+}
 
 fn setupThreadState(
     thread_state: *ThreadState,

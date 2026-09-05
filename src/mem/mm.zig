@@ -441,8 +441,41 @@ pub fn clonePageTable(
 }
 
 pub const PagefaultType = enum { read, write, instruction };
+
+pub fn handlePagefault(
+    pagefault_type: PagefaultType,
+    address: VirtualAddress,
+    state: *arch.ThreadState,
+) void {
+    const crash = tryMapPage(address, pagefault_type);
+
+    if (crash)
+        pagefaultCrash(address, pagefault_type, state);
+}
+
+fn pagefaultCrash(
+    address: VirtualAddress,
+    pagefault_type: PagefaultType,
+    state: *arch.ThreadState,
+) noreturn {
+    arch.printThreadState(.err, state, .{});
+
+    std.log.err("Faulting address: 0x{x}", .{address.int});
+
+    const thread = scheduler.getCurrentThread();
+    var buff: [256]u8 = undefined;
+    const thread_name = if (thread.purpose == .general)
+        std.fmt.bufPrint(&buff, "TID: {} PID: {}", .{
+            thread.id,
+            thread.purpose.general.owner_process.id,
+        }) catch unreachable
+    else
+        std.fmt.bufPrint(&buff, "TID: {}", .{thread.id}) catch unreachable;
+    std.debug.panic("Page fault ({s}) ({})", .{ thread_name, pagefault_type });
+}
+
 /// Returns whether it's an unrecoverable page fault.
-pub fn handlePageFault(address: VirtualAddress, page_fault_type: PagefaultType) bool {
+pub fn tryMapPage(address: VirtualAddress, page_fault_type: PagefaultType) bool {
     const current_thread = scheduler.getCurrentThread();
     if (current_thread.purpose != .general) return true;
 
@@ -450,6 +483,7 @@ pub fn handlePageFault(address: VirtualAddress, page_fault_type: PagefaultType) 
 
     const user_address = UserAddress.fromVirtual(address) orelse {
         // TODO: signal
+        std.log.debug("addr > higher half", .{});
         processes.killCurrentProcess(-123);
         return false;
     };
@@ -471,6 +505,7 @@ pub fn handlePageFault(address: VirtualAddress, page_fault_type: PagefaultType) 
     };
 
     if (invalid_privilige) {
+        std.log.debug("invalid priv", .{});
         processes.killCurrentProcess(-123);
         return false;
     }

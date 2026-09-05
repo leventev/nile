@@ -181,6 +181,7 @@ pub const BuddyAllocator = struct {
             const frame_descriptor = mm.getFrameDescriptor(phys_addr);
             frame_descriptor.block_order = @intCast(desired_order);
             // only increase the first page's refcount in the block
+            frame_descriptor.increaseReference();
             _ = frame_descriptor.reference_count.fetchAdd(1, .monotonic);
 
             return frame_descriptor;

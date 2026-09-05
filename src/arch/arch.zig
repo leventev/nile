@@ -81,6 +81,17 @@ pub const switchAddressSpace = switch (target) {
     Arch.riscv64 => riscv64.switchAddressSpace,
 };
 
+pub const PrintThreadStateOptions = struct {
+    general_purpose: bool = true,
+    status: bool = true,
+    program_counter: bool = true,
+    root_page_table: bool = true,
+};
+
+pub const printThreadState = switch (target) {
+    Arch.riscv64 => riscv64.printThreadState,
+};
+
 // TODO: better way to abstract clocks
 pub const clock_source = switch (target) {
     Arch.riscv64 => riscv64.clock_source,

@@ -17,6 +17,7 @@ const riscv64_mm = @import("mm.zig");
 const Thread = @import("../../Thread.zig");
 
 const ThreadState = registers.ThreadState;
+const SStatus = registers.SStatus;
 
 extern fn trapHandlerSupervisor() void;
 
@@ -91,107 +92,6 @@ pub const InterruptCode = enum(u63) {
     counter_overflow = 13,
 };
 
-const MPP = enum(u2) {
-    user = 0b00,
-    supervisor = 0b01,
-    __reserved = 0b10,
-    machine = 0b11,
-};
-
-const SPP = enum(u1) {
-    user = 0,
-    supervisor = 1,
-};
-
-const VectorStatus = enum(u2) {
-    off = 0,
-    initial = 1,
-    clean = 2,
-    dirty = 3,
-};
-
-const FloatStatus = enum(u2) {
-    off = 0,
-    initial = 1,
-    clean = 2,
-    dirty = 3,
-};
-
-const ExtraExtensionStatus = enum(u2) {
-    all_off = 0,
-    none_dirt_or_clean = 1,
-    none_dirt_some_clean = 2,
-    some_dirty = 3,
-};
-
-const MPRV = enum(u1) {
-    normal = 0,
-    behave_like_mpp = 1,
-};
-
-const SUM = enum(u1) {
-    prohibited = 0,
-    permitted = 1,
-};
-
-const XLength = enum(u2) {
-    x32 = 1,
-    x64 = 2,
-    x128 = 3,
-};
-
-const MStatus = packed struct(u64) {
-    __reserved1: u1,
-    supervisor_interrupt_enable: bool,
-    __reserved2: u1,
-    machine_interrupt_enable: bool,
-    __reserved3: u1,
-    supervisor_previous_interrupt_enable: bool,
-    user_big_endian: bool,
-    machine_previous_interrupt_enable: bool,
-    supervisor_previous_privilege: SPP,
-    vector_status: VectorStatus,
-    machine_previous_privilege: MPP,
-    float_status: FloatStatus,
-    extra_extension_status: ExtraExtensionStatus,
-    memory_privilege: MPRV,
-    supervisor_user_memory_accessable: bool,
-    executable_memory_read: bool,
-    trap_virtual_memory: bool,
-    timeout_wait: bool,
-    trap_sret: bool,
-    __reserved4: u9,
-    user_xlen: XLength,
-    supervisor_xlen: XLength,
-    supervisor_big_endian: bool,
-    machine_big_endian: bool,
-    __reserved5: u25,
-    state_dirty: bool,
-};
-
-pub const SStatus = packed struct(u64) {
-    __reserved1: u1,
-    supervisor_interrupt_enable: bool,
-    __reserved2: u3,
-    supervisor_previous_interrupt_enable: bool,
-    user_big_endian: bool,
-    __reserved3: u1,
-    supervisor_previous_privilege: SPP,
-    vector_status: VectorStatus,
-    __reserved4: u2,
-    float_status: FloatStatus,
-    extra_extension_status: ExtraExtensionStatus,
-    __reserved5: u1,
-    supervisor_user_memory_accessable: bool,
-    executable_memory_read: bool,
-    __reserved6: u12,
-    user_xlen: XLength,
-    __reserved7: u29,
-    state_dirty: bool,
-
-    const Self = @This();
-};
-
 pub fn enableInterrupts() void {
     CSR.sstatus.setBits(1 << @bitOffsetOf(SStatus, "supervisor_interrupt_enable"));
 }
@@ -258,37 +158,7 @@ fn handlePagefault(code: ExceptionCode, address: mm.VirtualAddress, state: *Thre
         else => unreachable,
     };
 
-    const crash = mm.handlePageFault(address, pagefault_type);
-
-    if (crash)
-        pagefaultCrash(address, pagefault_type, state);
-}
-
-fn pagefaultCrash(
-    address: mm.VirtualAddress,
-    pagefault_type: mm.PagefaultType,
-    state: *ThreadState,
-) noreturn {
-    const thread = scheduler.getCurrentThread();
-    var buff: [256]u8 = undefined;
-    const thread_name = if (thread.purpose == .general)
-        std.fmt.bufPrint(&buff, "TID: {} PID: {}", .{
-            thread.id,
-            thread.purpose.general.owner_process.id,
-        }) catch unreachable
-    else
-        std.fmt.bufPrint(&buff, "TID: {}", .{thread.id}) catch unreachable;
-
-    const satp = riscv64_mm.readSATP();
-
-    state.printGPRs(.err);
-    std.log.err("sstatus={}", .{state.status});
-    std.log.err("pc=0x{x}", .{state.pc});
-    std.log.err("faulting address: 0x{x} (root page table phys: 0x{x})", .{
-        address.int,
-        satp.physical_page_number * arch.page_size,
-    });
-    std.debug.panic("Page fault ({s}) ({})", .{ thread_name, pagefault_type });
+    mm.handlePagefault(pagefault_type, address, state);
 }
 
 fn handleInterrupt(code: InterruptCode, tval: u64, state: *ThreadState) void {

@@ -88,7 +88,7 @@ fn writeBytes(bytes: []const u8) error{}!usize {
 
 var spinlock: sync.Spinlock = .unlocked;
 
-pub fn kernel_log(
+pub fn kernelLog(
     comptime level: std.log.Level,
     comptime scope: @EnumLiteral(),
     comptime format: []const u8,

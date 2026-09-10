@@ -126,6 +126,8 @@ pub fn newKernelThread(entry_point_fn: *const fn () void, owner_process: *Proces
             .user = null,
             .owner_process = owner_process,
             .process_list_next = null,
+            .current_state = .kernelspace,
+            .previous_state = null,
         },
     };
 
@@ -184,11 +186,11 @@ pub fn newUserThread(
         .general = .{
             .owner_process = owner_process,
             .user = .{
-                .previous_state = null,
-                .current_state = .userspace,
                 .thread_state = thread_state_cache.alloc() catch return error.out_of_memory,
             },
             .process_list_next = null,
+            .current_state = .userspace,
+            .previous_state = null,
         },
     };
 

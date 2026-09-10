@@ -44,17 +44,34 @@ pub const General = struct {
     /// Which process the thread belongs to.
     owner_process: *Process,
 
+    previous_state: ?State,
+    current_state: State,
+
     pub const UserThread = struct {
-        previous_state: ?State,
-        current_state: State,
-
         thread_state: *arch.ThreadState,
+    };
 
-        pub const State = enum(u3) {
-            userspace = 0,
-            syscall = 1,
-            interrupt = 2,
-        };
+    ///
+    ///             exception
+    ///           /
+    /// userspace - kernelspace - interrupt - exception
+    ///           |             \
+    ///           |              exception
+    ///           \
+    ///            interrupt - exception
+    ///
+    pub const State = enum(u3) {
+        /// Thread is running in user space. Only valid for user threads.
+        userspace = 0,
+
+        /// Thread is running in kernel space. In case of user threads this means syscall.
+        kernelspace = 1,
+
+        /// The thread got interrupted and is executing inside an interrupt handler.
+        interrupt = 2,
+
+        /// The thread cause an exception and is executing inside an exception handler.
+        exception = 3,
     };
 };
 
@@ -71,17 +88,18 @@ pub const SoftInterruptHandler = struct {
 pub fn effectiveThreadState(self: *Thread) *arch.ThreadState {
     return switch (self.purpose) {
         .soft_interrupt => self.kernel_state,
-        .general => |general| blk: {
-            const user_thread = general.user orelse return self.kernel_state;
-            // if there is a previous state then we are going to switch to that.
-            // but if there is no previous state then we are going to continue running
-            // in the current state
-            const state = user_thread.previous_state orelse user_thread.current_state;
-            break :blk switch (state) {
-                .userspace => user_thread.thread_state,
-                .syscall => self.kernel_state,
-                .interrupt => unreachable,
-            };
+
+        // TODO: maybe not?
+        // if there is a previous state then we are going to switch to that.
+        // but if there is no previous state then we are going to continue running
+        // in the current state
+        .general => |general| switch (general.previous_state orelse general.current_state) {
+            .userspace => blk: {
+                const user_thread = general.user orelse return self.kernel_state;
+                break :blk user_thread.thread_state;
+            },
+            .kernelspace => self.kernel_state,
+            .interrupt, .exception => unreachable,
         },
     };
 }
@@ -95,18 +113,16 @@ pub fn effectiveThreadStackBottom(self: *Thread) mm.VirtualAddress {
 
     return switch (self.purpose) {
         .soft_interrupt => per_cpu_stack_bottom,
-        .general => |general| blk: {
-            const user_thread = general.user orelse return per_cpu_stack_bottom;
-            // if there is a previous state then we are going to switch to that.
-            // but if there is no previous state then we are going to continue running
-            // in the current state
-            const state = user_thread.previous_state orelse user_thread.current_state;
-            break :blk switch (state) {
-                .userspace => kernel_stack_bottom,
-                .syscall => per_cpu_stack_bottom,
-                .interrupt => unreachable,
-                // TODO: ^^^ set stack for exceptions during interrupts
-            };
+
+        // TODO: maybe not?
+        // if there is a previous state then we are going to switch to that.
+        // but if there is no previous state then we are going to continue running
+        // in the current state
+        .general => |general| switch (general.previous_state orelse general.current_state) {
+            .userspace => kernel_stack_bottom,
+            .kernelspace => per_cpu_stack_bottom,
+            .interrupt, .exception => unreachable,
+            // TODO: ^^^ set stack for exceptions during interrupts
         },
     };
 }

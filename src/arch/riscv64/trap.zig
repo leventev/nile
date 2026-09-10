@@ -202,28 +202,36 @@ fn handleInterrupt(code: InterruptCode, tval: u64, state: *ThreadState) void {
 export fn handleTrap(state: *ThreadState, cause: TrapCause, tval: u64) void {
     // TODO: handle before the scheduler has been initialized
     const current_thread = scheduler.getCurrentThread();
-    const user_thread_ptr: ?*Thread.General.UserThread = blk: {
+    const general_thread_ptr: ?*Thread.General =
         if (current_thread.purpose == .general)
-            if (current_thread.purpose.general.user) |*user_thread|
-                break :blk user_thread;
+            &current_thread.purpose.general
+        else
+            null;
 
-        break :blk null;
-    };
-    if (user_thread_ptr) |user_thread| {
-        std.debug.assert(user_thread.current_state != .interrupt);
-        user_thread.previous_state = user_thread.current_state;
-        const is_syscall = !cause.asynchronous and cause.exception() == .ecall_u_mode;
-        user_thread.current_state = if (is_syscall) .syscall else .interrupt;
+    if (general_thread_ptr) |general_thread| {
+        std.debug.assert(general_thread.current_state != .interrupt);
+        // TODO: check for double exception
+
+        general_thread.previous_state = general_thread.current_state;
+        general_thread.current_state = if (cause.asynchronous)
+            .interrupt
+        else if (cause.exception() == .ecall_u_mode)
+            .kernelspace
+        else
+            .exception;
     }
-    defer if (user_thread_ptr) |user_thread| {
-        switch (user_thread.current_state) {
-            .interrupt => {
-                user_thread.current_state = user_thread.previous_state orelse unreachable;
-                user_thread.previous_state = .userspace;
+
+    defer if (general_thread_ptr) |general_thread| {
+        switch (general_thread.current_state) {
+            .interrupt, .exception => {
+                general_thread.current_state = general_thread.previous_state orelse unreachable;
+                general_thread.previous_state = .userspace;
             },
-            .syscall => {
-                user_thread.current_state = .userspace;
-                user_thread.previous_state = null;
+            .kernelspace => {
+                std.debug.assert(general_thread.user != null);
+
+                general_thread.current_state = .userspace;
+                general_thread.previous_state = null;
             },
             .userspace => unreachable,
         }

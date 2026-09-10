@@ -154,7 +154,7 @@ pub fn setupSoftInterruptThread(thread: *Thread) void {
     thread.kernel_state.gprs[ThreadState.return_addr] = @intFromPtr(&forceSchedule);
 }
 
-pub fn scheduleNextThread(thread: *Thread) void {
+fn setNextThreadState(thread: *Thread) void {
     const thread_state = thread.effectiveThreadState();
     const sscratch_value = @intFromPtr(thread_state);
     const trap_stack_bottom = thread.effectiveThreadStackBottom();
@@ -174,7 +174,6 @@ pub fn scheduleNextThread(thread: *Thread) void {
 
     CSR.sscratch.write(sscratch_value);
     trap.current_trap_stack_bottom = trap_stack_bottom.int;
-    timer.resetTimer();
 }
 
 pub extern fn forceSchedule() void;

@@ -33,10 +33,6 @@ pub const ThreadState = switch (target) {
     Arch.riscv64 => riscv64.ThreadState,
 };
 
-pub const scheduleNextThread = switch (target) {
-    Arch.riscv64 => riscv64.scheduleNextThread,
-};
-
 pub const forceScheduleNextThread = switch (target) {
     Arch.riscv64 => riscv64.forceSchedule,
 };

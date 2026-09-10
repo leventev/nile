@@ -44,8 +44,8 @@ pub const General = struct {
     /// Which process the thread belongs to.
     owner_process: *Process,
 
-    previous_state: ?State,
     current_state: State,
+    previous_states: StateBuffer,
 
     pub const UserThread = struct {
         thread_state: *arch.ThreadState,
@@ -72,6 +72,32 @@ pub const General = struct {
 
         /// The thread cause an exception and is executing inside an exception handler.
         exception = 3,
+
+        /// The current longest state return chain is:
+        /// exception -> interrupt -> kernelspace -> userspace
+        const max_depth = 3;
+    };
+
+    /// Contains the previous states of the Thread.
+    pub const StateBuffer = struct {
+        buffer: [State.max_depth]State,
+        depth: usize,
+
+        /// Push a state to the state buffer.
+        pub fn push(self: *StateBuffer, state: State) void {
+            std.log.debug("push {} {}", .{ self.depth, state });
+            std.debug.assert(self.depth < State.max_depth);
+            self.buffer[self.depth] = state;
+            self.depth += 1;
+        }
+
+        /// Pop a state from the state buffer.
+        pub fn pop(self: *StateBuffer) State {
+            std.log.debug("pop {}", .{self.depth});
+            std.debug.assert(self.depth > 0);
+            self.depth -= 1;
+            return self.buffer[self.depth];
+        }
     };
 };
 
@@ -88,12 +114,7 @@ pub const SoftInterruptHandler = struct {
 pub fn effectiveThreadState(self: *Thread) *arch.ThreadState {
     return switch (self.purpose) {
         .soft_interrupt => self.kernel_state,
-
-        // TODO: maybe not?
-        // if there is a previous state then we are going to switch to that.
-        // but if there is no previous state then we are going to continue running
-        // in the current state
-        .general => |general| switch (general.previous_state orelse general.current_state) {
+        .general => |general| switch (general.current_state) {
             .userspace => blk: {
                 const user_thread = general.user orelse return self.kernel_state;
                 break :blk user_thread.thread_state;
@@ -113,16 +134,12 @@ pub fn effectiveThreadStackBottom(self: *Thread) mm.VirtualAddress {
 
     return switch (self.purpose) {
         .soft_interrupt => per_cpu_stack_bottom,
-
-        // TODO: maybe not?
-        // if there is a previous state then we are going to switch to that.
-        // but if there is no previous state then we are going to continue running
-        // in the current state
-        .general => |general| switch (general.previous_state orelse general.current_state) {
+        .general => |general| switch (general.current_state) {
             .userspace => kernel_stack_bottom,
             .kernelspace => per_cpu_stack_bottom,
-            .interrupt, .exception => unreachable,
-            // TODO: ^^^ set stack for exceptions during interrupts
+            .interrupt => per_cpu_stack_bottom,
+            // TODO: ^^^ set UNIQUE stack for exceptions during interrupts
+            .exception => unreachable,
         },
     };
 }

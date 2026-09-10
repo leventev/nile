@@ -127,7 +127,10 @@ pub fn newKernelThread(entry_point_fn: *const fn () void, owner_process: *Proces
             .owner_process = owner_process,
             .process_list_next = null,
             .current_state = .kernelspace,
-            .previous_state = null,
+            .previous_states = .{
+                .depth = 0,
+                .buffer = @splat(undefined),
+            },
         },
     };
 
@@ -190,9 +193,15 @@ pub fn newUserThread(
             },
             .process_list_next = null,
             .current_state = .userspace,
-            .previous_state = null,
+            .previous_states = .{
+                .depth = 0,
+                .buffer = undefined,
+            },
         },
     };
+
+    // entering the thread for the first time
+    thread.purpose.general.previous_states.push(.userspace);
 
     // TODO: process lock
     var next_ptr = &owner_process.associated_threads;
@@ -261,8 +270,6 @@ pub fn scheduleNextThread() void {
     } else {
         appendRunningThreadLocked(prev_thread);
     }
-
-    scheduleCurrentLocked();
 }
 
 pub fn destroyProcessThreads(process: *Process) void {
@@ -273,13 +280,6 @@ pub fn destroyProcessThreads(process: *Process) void {
     while (next_ptr.*) |thread| : (next_ptr = &thread.purpose.general.process_list_next) {
         removeThreadLocked(thread);
     }
-
-    scheduleCurrentLocked();
-}
-
-fn scheduleCurrentLocked() void {
-    const next_thread = getCurrentThread();
-    arch.scheduleNextThread(next_thread);
 }
 
 pub fn getCurrentThread() *Thread {

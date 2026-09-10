@@ -172,9 +172,6 @@ pub fn init(root_page_table: arch.PageTable, dt_ptr_virt: *void) noreturn {
         procfs_internal,
     ) catch |err| std.debug.panicExtra(null, "Failed to spawn init process: {s}", .{@errorName(err)});
 
-    // TODO: this could probably be done in a nicer way
-    arch.scheduleNextThread(idle_process_thread);
-
     // interrupts must be enabled only after we spawned PID 1
     arch.enableInterrupts();
 

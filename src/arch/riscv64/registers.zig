@@ -104,8 +104,8 @@ pub const ThreadState = extern struct {
             .err => log.err,
             .warn => log.warn,
         };
-        logFn(log_level, .riscv, "pc: 0x{x:0>16}", .{self.pc});
-        logFn(log_level, .riscv, "status: {any}", .{self.status});
+        logFn("pc: 0x{x:0>16}", .{self.pc});
+        logFn("status: {any}", .{self.status});
     }
 };
 

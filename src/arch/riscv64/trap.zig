@@ -15,6 +15,8 @@ const vfs = @import("../../vfs.zig");
 const buddy_allocator = @import("../../mem/buddy_allocator.zig");
 const riscv64_mm = @import("mm.zig");
 const Thread = @import("../../Thread.zig");
+const riscv64 = @import("riscv64.zig");
+const config = @import("../../config.zig");
 
 const ThreadState = registers.ThreadState;
 const SStatus = registers.SStatus;
@@ -202,17 +204,15 @@ fn handleInterrupt(code: InterruptCode, tval: u64, state: *ThreadState) void {
 export fn handleTrap(state: *ThreadState, cause: TrapCause, tval: u64) void {
     // TODO: handle before the scheduler has been initialized
     const current_thread = scheduler.getCurrentThread();
-    const general_thread_ptr: ?*Thread.General =
-        if (current_thread.purpose == .general)
-            &current_thread.purpose.general
-        else
-            null;
 
-    if (general_thread_ptr) |general_thread| {
-        std.debug.assert(general_thread.current_state != .interrupt);
-        // TODO: check for double exception
+    if (current_thread.purpose == .general) {
+        const general_thread = &current_thread.purpose.general;
 
-        general_thread.previous_state = general_thread.current_state;
+        if (general_thread.current_state == .exception) {
+            @panic("double exception");
+        }
+
+        general_thread.previous_states.push(general_thread.current_state);
         general_thread.current_state = if (cause.asynchronous)
             .interrupt
         else if (cause.exception() == .ecall_u_mode)
@@ -221,27 +221,56 @@ export fn handleTrap(state: *ThreadState, cause: TrapCause, tval: u64) void {
             .exception;
     }
 
-    defer if (general_thread_ptr) |general_thread| {
-        switch (general_thread.current_state) {
-            .interrupt, .exception => {
-                general_thread.current_state = general_thread.previous_state orelse unreachable;
-                general_thread.previous_state = .userspace;
-            },
-            .kernelspace => {
-                std.debug.assert(general_thread.user != null);
-
-                general_thread.current_state = .userspace;
-                general_thread.previous_state = null;
-            },
-            .userspace => unreachable,
-        }
-    };
-
     if (cause.asynchronous) {
         handleInterrupt(cause.interrupt(), tval, state);
     } else {
         handleException(cause.exception(), tval, state);
     }
+
+    const next_thread = scheduler.getCurrentThread();
+    if (next_thread.purpose == .general) {
+        const general_thread = &next_thread.purpose.general;
+        std.log.debug("previous states: {any}", .{
+            next_thread.purpose.general.previous_states.buffer[0..next_thread.purpose.general.previous_states.depth],
+        });
+        general_thread.current_state = general_thread.previous_states.pop();
+        std.log.debug("current state: {}", .{
+            next_thread.purpose.general.current_state,
+        });
+
+        // TODO: don't switch if its the same address space
+        riscv64.switchAddressSpace(next_thread.purpose.general.owner_process.root_page_table);
+    }
+
+    const effective_thread_state = next_thread.effectiveThreadState();
+    const trap_stack_bottom = next_thread.effectiveThreadStackBottom().int;
+    const sscratch_value = @intFromPtr(effective_thread_state);
+
+    if (config.debug_scheduler) {
+        switch (next_thread.purpose) {
+            .general => |general| {
+                std.log.debug("next thread: ID: {} ({s}, state: {}) sscratch: 0x{x} trap stack bottom: 0x{x} ", .{
+                    @intFromEnum(next_thread.id),
+                    if (general.user != null) "user" else "kernel",
+                    general.current_state,
+                    sscratch_value,
+                    trap_stack_bottom,
+                });
+            },
+            .soft_interrupt => {
+                std.log.debug("next thread: ID: {} (soft_irq) sscratch: 0x{x} trap stack bottom: 0x{x} ", .{
+                    @intFromEnum(next_thread.id),
+                    sscratch_value,
+                    trap_stack_bottom,
+                });
+            },
+        }
+        effective_thread_state.printRegs(.debug);
+    }
+
+    current_trap_stack_bottom = trap_stack_bottom;
+    CSR.sscratch.write(sscratch_value);
+    timer.resetTimer();
 }
 
 // // TODO: REPLACE THIS

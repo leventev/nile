@@ -483,7 +483,10 @@ pub fn tryMapPage(address: VirtualAddress, page_fault_type: PagefaultType) bool 
 
     const user_address = UserAddress.fromVirtual(address) orelse {
         // TODO: signal
-        std.log.debug("addr > higher half", .{});
+        std.log.debug("addr > higher half: {} {}", .{
+            @intFromEnum(current_thread.id),
+            general_thread.current_state,
+        });
         processes.killCurrentProcess(-123);
         return false;
     };

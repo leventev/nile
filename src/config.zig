@@ -1,1 +1,1 @@
-pub const debug_scheduler: bool = false;
+pub const debug_scheduler: bool = true;

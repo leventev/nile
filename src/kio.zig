@@ -86,7 +86,7 @@ fn writeBytes(bytes: []const u8) error{}!usize {
     return best.writeBytes(bytes) orelse unreachable;
 }
 
-var spinlock: sync.Spinlock = .unlocked;
+pub var spinlock: sync.Spinlock = .unlocked;
 
 pub fn kernelLog(
     comptime level: std.log.Level,

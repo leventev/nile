@@ -74,9 +74,10 @@ pub fn printThreadState(
 
 fn setupThreadState(
     thread_state: *ThreadState,
-    stack_top: mm.VirtualAddress,
+    stack_bottom: mm.VirtualAddress,
     entry_point: mm.VirtualAddress,
     is_user: bool,
+    interrupt_enable: bool,
 ) void {
     if (config.debug_scheduler) {
         thread_state.gprs = [_]u64{0xAA_BB_CC_DD_AA_BB_CC_DD} ** ThreadState.gpr_count;
@@ -92,8 +93,8 @@ fn setupThreadState(
         .extra_extension_status = .all_off,
         .float_status = .off,
         .state_dirty = false,
-        .supervisor_interrupt_enable = false,
-        .supervisor_previous_interrupt_enable = is_user,
+        .supervisor_interrupt_enable = interrupt_enable,
+        .supervisor_previous_interrupt_enable = true,
         .supervisor_previous_privilege = if (is_user) .user else .supervisor,
         .supervisor_user_memory_accessable = true,
         .user_big_endian = false,
@@ -108,7 +109,7 @@ fn setupThreadState(
         .__reserved7 = 0,
     };
 
-    thread_state.gprs[ThreadState.stack_ptr] = stack_top.int;
+    thread_state.gprs[ThreadState.stack_ptr] = stack_bottom.int;
     thread_state.gprs[ThreadState.global_data_ptr] = @intFromPtr(&__global_pointer);
 }
 
@@ -119,12 +120,15 @@ pub fn setupNewGeneralThread(
 ) void {
     const kernel_stack_bottom = thread.kernel_stack_top.add(thread.kernel_stack_size);
 
+    std.log.debug("setup general thread: {}", .{@intFromEnum(thread.id)});
+
     // TODO: maybe separate kernel vs user thread
     if (thread.purpose.general.user) |*user| {
-        setupThreadState(thread.kernel_state, kernel_stack_bottom, .fromInt(0), false);
-        setupThreadState(user.thread_state, user_stack_bottom_addr.?, entry_point_addr, true);
+        setupThreadState(thread.kernel_state, kernel_stack_bottom, .fromInt(0), false, true);
+        setupThreadState(user.thread_state, user_stack_bottom_addr.?, entry_point_addr, true, true);
     } else {
-        setupThreadState(thread.kernel_state, kernel_stack_bottom, entry_point_addr, false);
+        setupThreadState(thread.kernel_state, kernel_stack_bottom, entry_point_addr, false, true);
+        thread.kernel_state.status.print(.debug);
     }
 }
 
@@ -148,32 +152,55 @@ pub fn setupSoftInterruptThread(thread: *Thread) void {
     const entry_point = mm.VirtualAddress.fromInt(
         @intFromPtr(thread.purpose.soft_interrupt.callback),
     );
-    setupThreadState(thread.kernel_state, kernel_stack_bottom, entry_point, false);
+    setupThreadState(thread.kernel_state, kernel_stack_bottom, entry_point, false, true);
 
     // TODO:
     thread.kernel_state.gprs[ThreadState.return_addr] = @intFromPtr(&forceSchedule);
 }
 
-fn setNextThreadState(thread: *Thread) void {
+pub fn setTrapValues(thread: *Thread, trap_return: bool) void {
     const thread_state = thread.effectiveThreadState();
     const sscratch_value = @intFromPtr(thread_state);
-    const trap_stack_bottom = thread.effectiveThreadStackBottom();
-
-    if (config.debug_scheduler) {
-        std.log.debug("schedule next thread: ID: {} sscratch: 0x{x} trap stack bottom: 0x{x} ", .{
-            @intFromEnum(thread.id),
-            sscratch_value,
-            trap_stack_bottom.int,
-        });
-        thread_state.printRegs(.debug);
-    }
+    const trap_stack_bottom = thread.effectiveThreadStackBottom().int;
 
     if (thread.purpose == .general) {
+        // TODO:
         switchAddressSpace(thread.purpose.general.owner_process.root_page_table);
     }
 
     CSR.sscratch.write(sscratch_value);
-    trap.current_trap_stack_bottom = trap_stack_bottom.int;
+    trap.current_trap_stack_bottom = trap_stack_bottom;
+
+    if (config.debug_scheduler) {
+        // std.log.debug("set trap values: ID: {} sscratch: 0x{x} trap stack bottom: 0x{x} ", .{
+        //     @intFromEnum(thread.id),
+        //     sscratch_value,
+        //     trap_stack_bottom.int,
+        // });
+
+        switch (thread.purpose) {
+            .general => |general| {
+                std.log.debug("set trap values: TID: {} ({s}, state: {}) sscratch: 0x{x} trap stack bottom: 0x{x} ", .{
+                    @intFromEnum(thread.id),
+                    if (general.user != null) "user" else "kernel",
+                    general.current_state,
+                    sscratch_value,
+                    trap_stack_bottom,
+                });
+            },
+            .soft_interrupt => {
+                std.log.debug("set trap values: TID: {} (soft_irq) sscratch: 0x{x} trap stack bottom: 0x{x} ", .{
+                    @intFromEnum(thread.id),
+                    sscratch_value,
+                    trap_stack_bottom,
+                });
+            },
+        }
+
+        if (trap_return) {
+            thread_state.printRegs(.debug);
+        }
+    }
 }
 
 pub extern fn forceSchedule() void;
@@ -181,7 +208,7 @@ pub extern fn forceSchedule() void;
 pub export fn riscv64ScheduleNextThread(state: *ThreadState) void {
     _ = state;
     // scheduler.dumpRunningThreads();
-    scheduler.scheduleNextThread();
+    scheduler.forceScheduleNextThread();
 }
 
 pub const clock_source = timer.riscv_clock_source;
@@ -231,7 +258,7 @@ pub export fn initRiscv64(
     CSR.sscratch.write(@intFromPtr(&init_scratch_registers));
 
     riscv64_mm.setupPaging(root_page_table);
-
     trap.init();
+
     root.init(root_page_table, dt_ptr_virt);
 }

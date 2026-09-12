@@ -105,32 +105,55 @@ pub const SoftInterruptHandler = struct {
     dev: *device.Device,
     callback: *const fn (dev: *device.Device) void,
 
+    // TODO: run again?
+
     /// Whether the thread is already queued. Since a driver or drivers could try to queue
     /// the soft interrupt handler multiple times we would need to traverse the running threads
     /// to avoid adding it to the list again.
-    queued: bool,
+    state: enum(u2) {
+        unqueued,
+        queued,
+        done,
+    },
 };
 
+var per_cpu_thread_state: arch.ThreadState = undefined;
+var per_cpu_double_exception_thread_state: arch.ThreadState = undefined;
+
+/// Returns which ThreadState the kernel should save the registers into in case of an interrupt
+/// based on its' current state.
 pub fn effectiveThreadState(self: *Thread) *arch.ThreadState {
     return switch (self.purpose) {
         .soft_interrupt => self.kernel_state,
         .general => |general| switch (general.current_state) {
             .userspace => blk: {
-                const user_thread = general.user orelse return self.kernel_state;
+                const user_thread = general.user orelse unreachable;
                 break :blk user_thread.thread_state;
             },
             .kernelspace => self.kernel_state,
-            .interrupt, .exception => unreachable,
+            .interrupt => &per_cpu_thread_state,
+            .exception => &per_cpu_double_exception_thread_state,
         },
     };
 }
 
 // TODO:
 const trap = @import("arch/riscv64/trap.zig");
+
+/// Returns the stack bottom the kernel should set the stack pointer to in case of an interrupt
+/// based on its' current state.
 pub fn effectiveThreadStackBottom(self: *Thread) mm.VirtualAddress {
     const kernel_stack_bottom = self.kernel_stack_top.add(self.kernel_stack_size);
-    const per_cpu_stack_top = mm.VirtualAddress.fromInt(@intFromPtr(&trap.trap_stack));
-    const per_cpu_stack_bottom = per_cpu_stack_top.add(trap.trap_stack_size);
+
+    const per_cpu_stack_top = mm.VirtualAddress.fromInt(@intFromPtr(&trap.per_cpu_trap_stack));
+    const per_cpu_stack_bottom = per_cpu_stack_top.add(trap.per_cpu_trap_stack_size);
+
+    const double_exception_stack_top = mm.VirtualAddress.fromInt(
+        @intFromPtr(&trap.double_exception_trap_stack),
+    );
+    const double_exception_stack_bottom = double_exception_stack_top.add(
+        trap.double_exception_trap_stack_size,
+    );
 
     return switch (self.purpose) {
         .soft_interrupt => per_cpu_stack_bottom,
@@ -139,7 +162,7 @@ pub fn effectiveThreadStackBottom(self: *Thread) mm.VirtualAddress {
             .kernelspace => per_cpu_stack_bottom,
             .interrupt => per_cpu_stack_bottom,
             // TODO: ^^^ set UNIQUE stack for exceptions during interrupts
-            .exception => unreachable,
+            .exception => double_exception_stack_bottom,
         },
     };
 }

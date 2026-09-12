@@ -38,11 +38,6 @@ pub fn dispatchSyscall(user_state: *ThreadState) void {
 
     const current_thread = scheduler.getCurrentThread();
 
-    const core_trap_stack_bottom = @intFromPtr(&trap.trap_stack) + trap.trap_stack_size;
-
-    CSR.sscratch.write(@intFromPtr(current_thread.kernel_state));
-    trap.current_trap_stack_bottom = core_trap_stack_bottom;
-
     trap.enableInterrupts();
 
     // a0 starts from index 10 but TODO: make enum for this

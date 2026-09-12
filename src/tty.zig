@@ -126,7 +126,9 @@ fn ttyDevfsRead(
     const tty: *TTYDevice = @ptrCast(@alignCast(internal_data orelse unreachable));
 
     // block
+    std.log.debug("block", .{});
     tty.input_buffer_newline_semaphore.sub();
+    std.log.debug("after block", .{});
 
     const max_read_size = @min(buff.len, tty.input_buffer_written);
 

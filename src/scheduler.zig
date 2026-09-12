@@ -34,11 +34,11 @@ pub fn queueSoftInterruptHandler(thread: *Thread) void {
 
     std.debug.assert(thread.purpose == .soft_interrupt);
 
-    if (thread.purpose.soft_interrupt.queued) return;
+    if (thread.purpose.soft_interrupt.state == .queued) return;
 
     arch.setupSoftInterruptThread(thread);
 
-    thread.purpose.soft_interrupt.queued = true;
+    thread.purpose.soft_interrupt.state = .queued;
     appendRunningThreadLocked(thread);
 }
 
@@ -86,7 +86,7 @@ pub fn newSoftInterruptHandler(
         .soft_interrupt = .{
             .callback = callback,
             .dev = dev,
-            .queued = false,
+            .state = .unqueued,
         },
     };
 
@@ -265,11 +265,39 @@ pub fn scheduleNextThread() void {
     defer scheduler_lock.unlockInterrupt(interrupts_enabled);
 
     const prev_thread = popCurrentThreadLocked();
-    if (prev_thread.purpose == .soft_interrupt) {
-        prev_thread.purpose.soft_interrupt.queued = false;
-    } else {
-        appendRunningThreadLocked(prev_thread);
+    switch (prev_thread.purpose) {
+        .soft_interrupt => |*soft_int| {
+            if (soft_int.state == .queued) {
+                appendRunningThreadLocked(prev_thread);
+            } else {
+                soft_int.state = .unqueued;
+            }
+        },
+        .general => {
+            appendRunningThreadLocked(prev_thread);
+        },
     }
+}
+
+/// Sets
+pub fn forceScheduleNextThread() void {
+    // interrupts *SHOULD* already be disabled by the arch specific function that calls this
+    std.log.debug("force schedule", .{});
+
+    scheduleNextThread();
+    const next_thread = getCurrentThread();
+
+    if (next_thread.purpose == .general) {
+        const general_thread = &next_thread.purpose.general;
+        std.log.debug("previous states: {any}", .{
+            next_thread.purpose.general.previous_states.buffer[0..next_thread.purpose.general.previous_states.depth],
+        });
+        general_thread.current_state = general_thread.previous_states.pop();
+        std.log.debug("current state: {}", .{
+            next_thread.purpose.general.current_state,
+        });
+    }
+    arch.setTrapValues(next_thread, true);
 }
 
 pub fn destroyProcessThreads(process: *Process) void {

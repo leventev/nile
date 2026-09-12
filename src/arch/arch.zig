@@ -88,6 +88,10 @@ pub const printThreadState = switch (target) {
     Arch.riscv64 => riscv64.printThreadState,
 };
 
+pub const setTrapValues = switch (target) {
+    Arch.riscv64 => riscv64.setTrapValues,
+};
+
 // TODO: better way to abstract clocks
 pub const clock_source = switch (target) {
     Arch.riscv64 => riscv64.clock_source,

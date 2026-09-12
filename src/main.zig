@@ -55,6 +55,9 @@ pub fn panic(
     error_return_trace: ?*std.builtin.StackTrace,
     ret_addr: ?usize,
 ) noreturn {
+    // force unlock in case the panic happened while it was locked
+    kio.spinlock.unlock();
+
     _ = arch.disableInterrupts();
 
     _ = ret_addr;

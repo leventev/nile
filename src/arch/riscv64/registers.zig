@@ -105,7 +105,7 @@ pub const ThreadState = extern struct {
             .warn => log.warn,
         };
         logFn("pc: 0x{x:0>16}", .{self.pc});
-        logFn("status: {any}", .{self.status});
+        self.status.print(log_level);
     }
 };
 
@@ -153,6 +153,7 @@ pub const SUM = enum(u1) {
 };
 
 pub const XLength = enum(u2) {
+    invalid = 0,
     x32 = 1,
     x64 = 2,
     x128 = 3,

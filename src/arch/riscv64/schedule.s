@@ -81,6 +81,9 @@ trapHandlerSupervisor:
 .global riscv64ScheduleNextThread
 .align 4
 forceSchedule:
+    # disable interrupts
+    csrc sstatus, (1 << 1)
+
     # move *ThreadState from sscratch into t6 and t6 into sscratch
     csrrw t6, sscratch, t6
 

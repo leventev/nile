@@ -57,11 +57,10 @@ pub const Semaphore = struct {
         if (self.available_resources > 0) {
             self.available_resources -= 1;
         } else {
-            const current_thread = scheduler.getCurrentThread();
-
             var wait_list_ptr = &self.waitlist;
             while (wait_list_ptr.*) |waiter| : (wait_list_ptr = &waiter.next) {}
 
+            const current_thread = scheduler.getCurrentThread();
             var this_waiter: Waiter = .{
                 .next = null,
                 .thread = current_thread,

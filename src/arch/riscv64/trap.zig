@@ -203,23 +203,40 @@ fn handleInterrupt(code: InterruptCode, tval: u64, state: *ThreadState) void {
 
 export fn handleTrap(state: *ThreadState, cause: TrapCause, tval: u64) void {
     // TODO: handle before the scheduler has been initialized
-    const current_thread = scheduler.getCurrentThread();
+    {
+        const current_thread = scheduler.getCurrentThread();
 
-    if (current_thread.purpose == .general) {
-        const general_thread = &current_thread.purpose.general;
+        if (current_thread.purpose == .general) {
+            const general_thread = &current_thread.purpose.general;
 
-        if (general_thread.current_state == .exception) {
-            @panic("double exception");
+            if (general_thread.current_state == .exception) {
+                @panic("double exception");
+            }
+
+            general_thread.previous_states.push(general_thread.current_state);
+            general_thread.current_state = if (cause.asynchronous)
+                .interrupt
+            else if (cause.exception() == .ecall_u_mode)
+                .kernelspace
+            else
+                .exception;
         }
 
-        general_thread.previous_states.push(general_thread.current_state);
-        general_thread.current_state = if (cause.asynchronous)
-            .interrupt
-        else if (cause.exception() == .ecall_u_mode)
-            .kernelspace
-        else
-            .exception;
+        // const effective_thread_state = current_thread.effectiveThreadState();
+        // const trap_stack_bottom = current_thread.effectiveThreadStackBottom().int;
+        // const sscratch_value = @intFromPtr(effective_thread_state);
+
+        riscv64.setTrapValues(current_thread, false);
+
+        std.log.debug("trap begin TID: {}", .{@intFromEnum(current_thread.id)});
+        // current_trap_stack_bottom = trap_stack_bottom;
+        // CSR.sscratch.write(sscratch_value);
     }
+
+    // const core_trap_stack_bottom = @intFromPtr(&trap_stack) + trap_stack_size;
+    //
+    // CSR.sscratch.write(@intFromPtr(current_thread.kernel_state));
+    // trap.current_trap_stack_bottom = core_trap_stack_bottom;
 
     if (cause.asynchronous) {
         handleInterrupt(cause.interrupt(), tval, state);
@@ -227,56 +244,62 @@ export fn handleTrap(state: *ThreadState, cause: TrapCause, tval: u64) void {
         handleException(cause.exception(), tval, state);
     }
 
-    const next_thread = scheduler.getCurrentThread();
-    if (next_thread.purpose == .general) {
-        const general_thread = &next_thread.purpose.general;
-        std.log.debug("previous states: {any}", .{
-            next_thread.purpose.general.previous_states.buffer[0..next_thread.purpose.general.previous_states.depth],
-        });
-        general_thread.current_state = general_thread.previous_states.pop();
-        std.log.debug("current state: {}", .{
-            next_thread.purpose.general.current_state,
-        });
-
-        // TODO: don't switch if its the same address space
-        riscv64.switchAddressSpace(next_thread.purpose.general.owner_process.root_page_table);
-    }
-
-    const effective_thread_state = next_thread.effectiveThreadState();
-    const trap_stack_bottom = next_thread.effectiveThreadStackBottom().int;
-    const sscratch_value = @intFromPtr(effective_thread_state);
-
-    if (config.debug_scheduler) {
-        switch (next_thread.purpose) {
-            .general => |general| {
-                std.log.debug("next thread: ID: {} ({s}, state: {}) sscratch: 0x{x} trap stack bottom: 0x{x} ", .{
-                    @intFromEnum(next_thread.id),
-                    if (general.user != null) "user" else "kernel",
-                    general.current_state,
-                    sscratch_value,
-                    trap_stack_bottom,
-                });
-            },
-            .soft_interrupt => {
-                std.log.debug("next thread: ID: {} (soft_irq) sscratch: 0x{x} trap stack bottom: 0x{x} ", .{
-                    @intFromEnum(next_thread.id),
-                    sscratch_value,
-                    trap_stack_bottom,
-                });
-            },
+    {
+        const next_thread = scheduler.getCurrentThread();
+        std.log.debug("trap return {}", .{@intFromEnum(next_thread.id)});
+        if (next_thread.purpose == .general) {
+            const general_thread = &next_thread.purpose.general;
+            std.log.debug("previous states: {any}", .{
+                next_thread.purpose.general.previous_states.buffer[0..next_thread.purpose.general.previous_states.depth],
+            });
+            general_thread.current_state = general_thread.previous_states.pop();
+            std.log.debug("current state: {}", .{
+                next_thread.purpose.general.current_state,
+            });
         }
-        effective_thread_state.printRegs(.debug);
+
+        riscv64.setTrapValues(next_thread, true);
+
+        // const effective_thread_state = next_thread.effectiveThreadState();
+        // const trap_stack_bottom = next_thread.effectiveThreadStackBottom().int;
+        // const sscratch_value = @intFromPtr(effective_thread_state);
+        //
+        // current_trap_stack_bottom = trap_stack_bottom;
+        // CSR.sscratch.write(sscratch_value);
+        //
+        // if (config.debug_scheduler) {
+        //     switch (next_thread.purpose) {
+        //         .general => |general| {
+        //             std.log.debug("next thread: ID: {} ({s}, state: {}) sscratch: 0x{x} trap stack bottom: 0x{x} ", .{
+        //                 @intFromEnum(next_thread.id),
+        //                 if (general.user != null) "user" else "kernel",
+        //                 general.current_state,
+        //                 sscratch_value,
+        //                 trap_stack_bottom,
+        //             });
+        //         },
+        //         .soft_interrupt => {
+        //             std.log.debug("next thread: ID: {} (soft_irq) sscratch: 0x{x} trap stack bottom: 0x{x} ", .{
+        //                 @intFromEnum(next_thread.id),
+        //                 sscratch_value,
+        //                 trap_stack_bottom,
+        //             });
+        //         },
+        //     }
+        //     effective_thread_state.printRegs(.debug);
+        // }
     }
 
-    current_trap_stack_bottom = trap_stack_bottom;
-    CSR.sscratch.write(sscratch_value);
+    // TODO: ONLY RESET WHEN NECESSARY
     timer.resetTimer();
 }
 
 // // TODO: REPLACE THIS
 // AND PAGE GUARD !!!!!!!!!!!!!!!!!!!!!!!!!
-pub const trap_stack_size = 12 * 4096;
-pub var trap_stack: [trap_stack_size]u8 align(16) = undefined;
+pub const per_cpu_trap_stack_size = 12 * 4096;
+pub var per_cpu_trap_stack: [per_cpu_trap_stack_size]u8 align(16) = undefined;
+pub const double_exception_trap_stack_size = 4 * 4096;
+pub var double_exception_trap_stack: [double_exception_trap_stack_size]u8 align(16) = undefined;
 
 pub var trap_regs: ThreadState = undefined;
 
@@ -289,7 +312,7 @@ pub fn init() void {
     );
 
     CSR.sscratch.write(@intFromPtr(&trap_regs));
-    current_trap_stack_bottom = @intFromPtr(&trap_stack) + trap_stack_size;
+    current_trap_stack_bottom = @intFromPtr(&per_cpu_trap_stack) + per_cpu_trap_stack_size;
 
     CSR.stvec.write(@bitCast(stvec));
 }

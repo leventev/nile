@@ -5,59 +5,70 @@ const trap = @import("trap.zig");
 const log = std.log.scoped(.riscv64);
 
 pub const ThreadState = extern struct {
+    /// The number of general purpose registers.
     pub const gpr_count = 32;
 
-    gprs: [gpr_count]u64,
+    /// The number of general purpose registers excluding x0, which is always 0.
+    pub const saved_gpr_count = gpr_count - 1;
+
+    /// General purpose registers excluding x0, which is always 0.
+    gprs: [saved_gpr_count]u64,
+
+    /// Current program counter.
     pc: u64,
+
+    /// Supervisor status.
     status: SStatus,
 
-    const Self = @This();
+    pub const return_addr = 0;
+    pub const stack_ptr = 1;
+    pub const global_data_ptr = 2;
+    pub const thread_ptr = 3;
+    pub const temporary_0 = 4;
+    pub const temporary_1 = 5;
+    pub const temporary_2 = 6;
+    pub const saved_0 = 7;
+    pub const frame_ptr = 7;
+    pub const saved_1 = 8;
+    pub const argument_0 = 9;
+    pub const argument_1 = 10;
+    pub const argument_2 = 11;
+    pub const argument_3 = 12;
+    pub const argument_4 = 13;
+    pub const argument_5 = 14;
+    pub const argument_6 = 15;
+    pub const argument_7 = 16;
+    pub const saved_2 = 17;
+    pub const saved_3 = 18;
+    pub const saved_4 = 19;
+    pub const saved_5 = 20;
+    pub const saved_6 = 21;
+    pub const saved_7 = 22;
+    pub const saved_8 = 23;
+    pub const saved_9 = 24;
+    pub const saved_10 = 25;
+    pub const saved_11 = 26;
+    pub const temporary_3 = 27;
+    pub const temporary_4 = 28;
+    pub const temporary_5 = 29;
+    pub const temporary_6 = 30;
 
-    pub const zero = 0;
-    pub const return_addr = 1;
-    pub const stack_ptr = 2;
-    pub const global_data_ptr = 3;
-    pub const thread_ptr = 4;
-    pub const temporary_0 = 5;
-    pub const temporary_1 = 6;
-    pub const temporary_2 = 7;
-    pub const saved_0 = 8;
-    pub const frame_ptr = 8;
-    pub const saved_1 = 9;
-    pub const argument_0 = 10;
-    pub const argument_1 = 11;
-    pub const argument_2 = 12;
-    pub const argument_3 = 13;
-    pub const argument_4 = 14;
-    pub const argument_5 = 15;
-    pub const argument_6 = 16;
-    pub const argument_7 = 17;
-    pub const saved_2 = 18;
-    pub const saved_3 = 19;
-    pub const saved_4 = 20;
-    pub const saved_5 = 21;
-    pub const saved_6 = 22;
-    pub const saved_7 = 23;
-    pub const saved_8 = 24;
-    pub const saved_9 = 25;
-    pub const saved_10 = 26;
-    pub const saved_11 = 27;
-    pub const temporary_3 = 28;
-    pub const temporary_4 = 29;
-    pub const temporary_5 = 30;
-    pub const temporary_6 = 31;
+    /// Alternative names of the registers excluding x0.
+    const saved_alternative_names = [_][]const u8{
+        "ra",  "sp",  "gp", "tp", "t0",
+        "t1",  "t2",  "s0", "s1", "a0",
+        "a1",  "a2",  "a3", "a4", "a5",
+        "a6",  "a7",  "s2", "s3", "s4",
+        "s5",  "s6",  "s7", "s8", "s9",
+        "s10", "s11", "t3", "t4", "t5",
+        "t6",
+    };
 
-    pub fn printGPR(self: Self, writer: *std.Io.Writer, idx: usize) !void {
+    /// Alternative names of the registers.
+    const alternative_names = [_][]const u8{"zr"} ++ saved_alternative_names;
+
+    pub fn printGPR(writer: *std.Io.Writer, idx: usize, value: usize) !void {
         std.debug.assert(idx < gpr_count);
-
-        const alternative_names = [_][]const u8{
-            "zr", "ra", "sp",  "gp",  "tp", "t0",
-            "t1", "t2", "s0",  "s1",  "a0", "a1",
-            "a2", "a3", "a4",  "a5",  "a6", "a7",
-            "s2", "s3", "s4",  "s5",  "s6", "s7",
-            "s8", "s9", "s10", "s11", "t3", "t4",
-            "t5", "t6",
-        };
 
         const name = alternative_names[idx];
         var name_total_len = 2 + name.len;
@@ -68,10 +79,10 @@ pub const ThreadState = extern struct {
 
         try writer.print("x{}/{s}", .{ idx, name });
         try writer.splatByteAll(' ', rem);
-        try writer.print("0x{x:0>16}", .{self.gprs[idx]});
+        try writer.print("0x{x:0>16}", .{value});
     }
 
-    pub fn printGPRs(self: Self, comptime log_level: std.log.Level) void {
+    pub fn printGPRs(self: ThreadState, comptime log_level: std.log.Level) void {
         const logFn = switch (log_level) {
             .debug => log.debug,
             .info => log.info,
@@ -86,9 +97,11 @@ pub const ThreadState = extern struct {
         var buff: [128]u8 = undefined;
         var writer = std.Io.Writer.fixed(&buff);
 
-        for (0..lines) |i| {
-            for (0..regs_per_line) |j| {
-                self.printGPR(&writer, i * regs_per_line + j) catch unreachable;
+        for (0..lines) |row| {
+            for (0..regs_per_line) |col| {
+                const idx = row * regs_per_line + col;
+                const value = if (idx == 0) 0 else self.gprs[idx - 1];
+                printGPR(&writer, idx, value) catch unreachable;
                 writer.writeByte(' ') catch unreachable;
             }
             logFn("{s}", .{writer.buffered()});
@@ -96,7 +109,7 @@ pub const ThreadState = extern struct {
         }
     }
 
-    pub fn printRegs(self: Self, comptime log_level: std.log.Level) void {
+    pub fn printRegs(self: ThreadState, comptime log_level: std.log.Level) void {
         self.printGPRs(log_level);
         const logFn = switch (log_level) {
             .debug => log.debug,

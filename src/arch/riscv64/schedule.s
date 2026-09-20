@@ -3,7 +3,13 @@
 .option norvc
 
 .altmacro
+
 .set REGISTER_BYTES, 8
+
+; 32 GPR + PC + SStatus
+.set THREAD_STATE_SIZE, 34 * REGISTER_BYTES
+
+.set THREAD_STATE_
 
 .macro writeGPR base_reg, i
     sd x\i, ((\i) * REGISTER_BYTES)(\base_reg)
@@ -18,8 +24,22 @@
 .global current_trap_stack_bottom
 .align 4
 trapHandlerSupervisor:
-    # move *ThreadState from sscratch into t6 and t6 into sscratch
-    csrrw t6, sscratch, t6
+    # move stack pointer from sscratch into tp and tp into sscratch
+    csrrw tp, sscratch, tp
+
+    # if SPP == supervisor
+    #   tp = kernel's tp
+    #   sscratch = 0
+    # else (SPP == user)
+    #   tp = user's tp
+    #   sscratch = kernel's tp
+
+    beqz tp, .save_registers
+.set_stack:
+    ld sp,
+    sub t6, t6, THREAD_STATE_SIZE
+
+.save_registers:
 
     # save GPRs
     .set i, 1

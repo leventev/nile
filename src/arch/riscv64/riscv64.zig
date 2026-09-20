@@ -120,15 +120,24 @@ pub fn setupNewGeneralThread(
 ) void {
     const kernel_stack_bottom = thread.kernel_stack_top.add(thread.kernel_stack_size);
 
+    const thread_state = kernel_stack_bottom.sub(@sizeOf(ThreadState)).asPtr(ThreadState);
+
     std.log.debug("setup general thread: {}", .{@intFromEnum(thread.id)});
 
     // TODO: maybe separate kernel vs user thread
     if (thread.purpose.general.user) |*user| {
-        setupThreadState(thread.kernel_state, kernel_stack_bottom, .fromInt(0), false, true);
-        setupThreadState(user.thread_state, user_stack_bottom_addr.?, entry_point_addr, true, true);
+        user.thread_state = thread_state;
+        // setupThreadState(thread.kernel_state, kernel_stack_bottom, .fromInt(0), false, true);
+        setupThreadState(
+            user.thread_state,
+            user_stack_bottom_addr orelse unreachable,
+            entry_point_addr,
+            true,
+            true,
+        );
     } else {
+        thread.kernel_state = thread_state;
         setupThreadState(thread.kernel_state, kernel_stack_bottom, entry_point_addr, false, true);
-        thread.kernel_state.status.print(.debug);
     }
 }
 

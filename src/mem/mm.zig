@@ -45,6 +45,10 @@ pub const VirtualAddress = packed struct(usize) {
         return .{ .int = self.int +% offset };
     }
 
+    pub fn sub(self: VirtualAddress, offset: usize) VirtualAddress {
+        return .{ .int = self.int -% offset };
+    }
+
     pub fn asPtr(self: VirtualAddress, comptime T: type) T {
         if (@typeInfo(T) != .pointer) @compileError("not a pointer");
         return @ptrFromInt(self.int);
@@ -68,6 +72,10 @@ pub const PhysicalAddress = packed struct(usize) {
 
     pub fn add(self: PhysicalAddress, offset: usize) PhysicalAddress {
         return fromInt(self.int +% offset);
+    }
+
+    pub fn sub(self: PhysicalAddress, offset: usize) PhysicalAddress {
+        return fromInt(self.int -% offset);
     }
 
     pub fn isPageAligned(self: PhysicalAddress) bool {
@@ -105,6 +113,10 @@ pub const UserAddress = struct {
 
     pub fn add(self: UserAddress, offset: usize) ?UserAddress {
         return fromInt(self.int +% offset);
+    }
+
+    pub fn sub(self: UserAddress, offset: usize) ?UserAddress {
+        return fromInt(self.int -% offset);
     }
 
     pub fn slice(self: UserAddress, size: usize) ?[]u8 {

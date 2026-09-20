@@ -1,6 +1,5 @@
 const std = @import("std");
 const config = @import("config.zig");
-const Thread = @import("Thread.zig");
 const slab_allocator = @import("mem/slab_allocator.zig");
 const buddy_allocator = @import("mem/buddy_allocator.zig");
 const arch = @import("arch/arch.zig");
@@ -9,9 +8,10 @@ const Process = @import("Process.zig");
 const device = @import("device.zig");
 const sync = @import("sync.zig");
 
-const log = std.log.scoped(.scheduler);
-
 const Device = device.Device;
+const ThreadState = arch.ThreadState;
+
+const log = std.log.scoped(.scheduler);
 
 const stack_size_order = 4;
 const stack_size = @shlExact(1, stack_size_order) * 4096;
@@ -21,11 +21,71 @@ pub var running_threads: ?*Thread = null;
 pub var threads_available = std.bit_set.ArrayBitSet(usize, Thread.Id.max).initFull();
 
 var thread_cache: slab_allocator.ObjectCache(Thread) = .{};
-var thread_state_cache: slab_allocator.ObjectCache(arch.ThreadState) = .{};
 
 pub const Error = error{
     no_available_threads,
     out_of_memory,
+};
+
+pub const Thread = extern struct {
+    /// Start of the kernel stack.
+    kernel_stack_top: mm.VirtualAddress,
+
+    kernel_stack_size: usize,
+
+    /// ID of the thread. Every thread regardless of purpose has a unique ID.
+    id: Id,
+
+    ///
+    scheduler_list_next: ?*Thread,
+
+    kernel_state: ?*arch.ThreadState,
+
+    /// The type/purpose of the thread.
+    purpose: Purpose,
+
+    pub const Id = enum(usize) {
+        _,
+        pub const max = 8192;
+    };
+
+    pub const Purpose = union(enum) {
+        /// General purpose thread.
+        general: General,
+
+        /// A soft interrupt handler is scheduled by the actual interrupt handler.
+        soft_interrupt: SoftInterruptHandler,
+    };
+
+    pub const General = struct {
+        /// Whether the thread is a user or kernel thread.
+        user: ?UserThread,
+
+        process_list_next: ?*Thread,
+
+        /// Which process the thread belongs to.
+        owner_process: *Process,
+
+        pub const UserThread = struct {
+            thread_state: ?*arch.ThreadState,
+        };
+    };
+
+    pub const SoftInterruptHandler = struct {
+        dev: *device.Device,
+        callback: *const fn (dev: *device.Device) void,
+
+        // TODO: run again?
+
+        /// Whether the thread is already queued. Since a driver or drivers could try to queue
+        /// the soft interrupt handler multiple times we would need to traverse the running threads
+        /// to avoid adding it to the list again.
+        state: enum(u2) {
+            unqueued,
+            queued,
+            done,
+        },
+    };
 };
 
 pub fn queueSoftInterruptHandler(thread: *Thread) void {
@@ -94,7 +154,7 @@ pub fn newSoftInterruptHandler(
     const stack_top = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
     thread.kernel_stack_top = mm.physicalToVirtual(stack_top.physical());
     thread.kernel_stack_size = std.math.shl(usize, 1, 12 + stack_size_order);
-    thread.kernel_state = thread_state_cache.alloc() catch return error.out_of_memory;
+    thread.kernel_state = null;
 
     const callback_addr = @intFromPtr(callback);
 
@@ -145,7 +205,7 @@ pub fn newKernelThread(entry_point_fn: *const fn () void, owner_process: *Proces
         return error.out_of_memory;
     thread.kernel_stack_top = mm.physicalToVirtual(kernel_stack_top.physical());
     thread.kernel_stack_size = std.math.shl(usize, 1, 12 + stack_size_order);
-    thread.kernel_state = thread_state_cache.alloc() catch return error.out_of_memory;
+    thread.kernel_state = null;
 
     const entry_point: mm.VirtualAddress = .fromInt(@intFromPtr(entry_point_fn));
     arch.setupNewGeneralThread(thread, null, entry_point);
@@ -183,13 +243,12 @@ pub fn newUserThread(
 
     const stack_top = buddy_allocator.allocBlock(stack_size_order) catch return error.out_of_memory;
     thread.kernel_stack_top = mm.physicalToVirtual(stack_top.physical());
-    thread.kernel_state = thread_state_cache.alloc() catch return error.out_of_memory;
 
     thread.purpose = .{
         .general = .{
             .owner_process = owner_process,
             .user = .{
-                .thread_state = thread_state_cache.alloc() catch return error.out_of_memory,
+                .thread_state = null,
             },
             .process_list_next = null,
             .current_state = .userspace,
@@ -199,9 +258,6 @@ pub fn newUserThread(
             },
         },
     };
-
-    // entering the thread for the first time
-    thread.purpose.general.previous_states.push(.userspace);
 
     // TODO: process lock
     var next_ptr = &owner_process.associated_threads;
@@ -277,6 +333,11 @@ pub fn scheduleNextThread() void {
             appendRunningThreadLocked(prev_thread);
         },
     }
+
+    if (config.debug_scheduler) {
+        const next_thread = getCurrentThread();
+        log.debug("schedule next thread: TID {}", .{@intFromEnum(next_thread.id)});
+    }
 }
 
 /// Sets
@@ -327,5 +388,4 @@ pub fn tick() void {
 /// Initialize the scheduler.
 pub fn init() void {
     thread_cache = slab_allocator.createObjectCache(Thread);
-    thread_state_cache = slab_allocator.createObjectCache(arch.ThreadState);
 }

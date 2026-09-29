@@ -28,6 +28,12 @@ pub const Error = error{
 };
 
 pub const Thread = extern struct {
+    /// Used by trap entry code.
+    kernel_stack_pointer: mm.VirtualAddress,
+
+    /// Used by trap entry code.
+    user_stack_pointer: mm.VirtualAddress,
+
     /// Start of the kernel stack.
     kernel_stack_top: mm.VirtualAddress,
 

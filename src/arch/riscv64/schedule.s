@@ -6,17 +6,26 @@
 
 .set REGISTER_BYTES, 8
 
-; 32 GPR + PC + SStatus
-.set THREAD_STATE_SIZE, 34 * REGISTER_BYTES
+# 32 GPR + sscratch + pc + sstatus 
+.set THREAD_STATE_SSCRATCH_OFF, 32 * REGISTER_BYTES
+.set THREAD_STATE_PC_OFF, 33 * REGISTER_BYTES
+.set THREAD_STATE_SSTATUS_OFF, 34 * REGISTER_BYTES
+.set THREAD_STATE_TRAP_VALUE_OFF, 35 * REGISTER_BYTES
+.set THREAD_STATE_TRAP_CAUSE_OFF, 36 * REGISTER_BYTES
+.set THREAD_STATE_SIZE, 37 * REGISTER_BYTES
 
-.set THREAD_STATE_
+.set THREAD_STATE_USER_SP_OFF, 0 * REGISTER_BYTES
+.set THREAD_STATE_KERNEL_SP_OFF, 1 * REGISTER_BYTES
 
-.macro writeGPR base_reg, i
-    sd x\i, ((\i) * REGISTER_BYTES)(\base_reg)
+# 1 << 8
+.set SSTATUS_SPP_MASK, 0b100000000
+
+.macro writeGPR base, idx
+        sd x\idx, ((\idx - 1) * REGISTER_BYTES)(\base)
 .endm
 
-.macro readGPR base_reg, i
-    ld x\i, ((\i) * REGISTER_BYTES)(\base_reg)
+.macro readGPR base, idx
+        ld x\idx, ((\idx - 1) * REGISTER_BYTES)(\base)
 .endm
 
 .type trapHandlerSupervisor, @function
@@ -34,66 +43,82 @@ trapHandlerSupervisor:
     #   tp = user's tp
     #   sscratch = kernel's tp
 
-    beqz tp, .save_registers
+    bnez tp, .set_stack
+
+    # if tp == 0 then we must set it to the kernel's tp which was swapped to sscratch
+    csrr tp, sscratch
+
 .set_stack:
-    ld sp,
-    sub t6, t6, THREAD_STATE_SIZE
+    # save user sp in the struct Thread
+    sd sp, THREAD_STATE_USER_SP_OFF(tp)
+    # load kernel sp from the struct Thread
+    ld sp, THREAD_STATE_KERNEL_SP_OFF(tp)
+    # allocate space for struct ThreadState
+    addi sp, sp, -THREAD_STATE_SIZE
 
 .save_registers:
+    # since x2 is sp and x4 is tp we unroll the first few stores before the main loop
+    writeGPR sp, 1
+    writeGPR sp, 3
 
-    # save GPRs
-    .set i, 1
-    .rept 30
-        writeGPR t6, %i
+    # save registers from x5 to x32
+    .set i, 5
+    .rept (32-5)
+        writeGPR sp, %i
         .set i, i+1
     .endr
 
+    # save user SP from thread struct to thread state struct
+    ld t0, THREAD_STATE_USER_SP_OFF(tp)
+    sd t0, (1 * REGISTER_BYTES)(sp)
+
+    # 
+    csrr t0, sscratch
+    sd t0, (THREAD_STATE_SSTATUS_OFF)(sp)
+
+    csrr t0, sepc
+    sd t0, (THREAD_STATE_PC_OFF)(sp)
+    csrr t0, sstatus 
+    sd t0, (THREAD_STATE_SSTATUS_OFF)(sp)
+    csrr t0, stval 
+    sd t0, (THREAD_STATE_TRAP_VALUE_OFF)(sp)
+    csrr t0, scause
+    sd t0, (THREAD_STATE_TRAP_CAUSE_OFF)(sp)
+
     # since a0 is already saved we can move *ThreadState into it
-    mv a0, t6
+    mv a0, sp
 
-    # move the original t6 value back into t6
-    csrr t6, sscratch
-    writeGPR a0, 31
-
-    # move *ThreadState back into sscratch
-    csrw sscratch, a0
-
-    # save exception PC into *ThreadState
-    csrr t0, sepc 
-    sd t0, (32 * REGISTER_BYTES)(a0)
-
-    # save previous sstatus
-    csrr t0, sstatus
-    sd t0, (33 * REGISTER_BYTES)(a0)
-
-    # set trap stack
-    ld sp, current_trap_stack_bottom
-
-    # *ThreadState is already in a0
-    # pass scause and stval to zig trap handler
-    csrr a1, scause
-    csrr a2, stval
+    # write 0 to sscratch so if another trap occurs it uses the kernel tp
+    csrw sscratch, x0
 
     call handleTrap
 
-    # load *ThreadState into t6
-    csrr t6, sscratch
+    ld t0, (THREAD_STATE_SSTATUS_OFF)(sp)
+    and t0, t0, SSTATUS_SPP_MASK
+    bnez t0, .load_registers
+.set_sscratch:
+    # if we are returning to userspace (user mode) then sscratch must contain kernel's tp
+    # otherwise 0 which is the current value
 
-    ld t0, (32 * REGISTER_BYTES)(t6)
+    csrrw tp, sscratch, tp
+.load_registers:
+    ld t0, (THREAD_STATE_PC_OFF)(sp)
     csrw sepc, t0
-
-    ld t0, (33 * REGISTER_BYTES)(t6)
+    ld t0, (THREAD_STATE_SSTATUS_OFF)(sp)
     csrw sstatus, t0
 
-    # load GPRs
-    # NOTE: it can seem that we are rewriting t6 here but t6 is the last register thus writing all 30
-    # registers before it is fine
-    .set i, 1
-    .rept 31
-        readGPR t6, %i
-        .set i, i + 1
+    # since x2 is sp we unroll the first few stores before the main loop
+    readGPR sp, 1
+    readGPR sp, 3
+
+    # load registers from x4 to x32
+    .set i, 4
+    .rept (32-5)
+        readGPR sp, %i
+        .set i, i+1
     .endr
 
+    readGPR sp, 2
     sret
 
 .type forceSchedule, @function
@@ -101,61 +126,3 @@ trapHandlerSupervisor:
 .global riscv64ScheduleNextThread
 .align 4
 forceSchedule:
-    # disable interrupts
-    csrc sstatus, (1 << 1)
-
-    # move *ThreadState from sscratch into t6 and t6 into sscratch
-    csrrw t6, sscratch, t6
-
-    # save GPRs
-    .set i, 1
-    .rept 30
-        writeGPR t6, %i
-        .set i, i+1
-    .endr
-
-    # since a0 is already saved we can move *ThreadState into it
-    mv a0, t6
-
-    # move the original t6 value back into t6
-    csrr t6, sscratch
-    writeGPR a0, 31
-
-    # move *ThreadState back into sscratch
-    csrw sscratch, a0
-
-    # save return address (where forceSchedule was called from) into *ThreadState
-    sd ra, (32 * REGISTER_BYTES)(a0)
-
-    # save sstatus
-    csrr t0, sstatus
-    # set SPP=supervsior (1 << 8) to imitate a trap from kernelspace
-    ori t0, t0, 0b100000000
-    sd t0, (33 * REGISTER_BYTES)(a0)
-
-    # set trap stack
-    ld sp, current_trap_stack_bottom
-
-    # *ThreadState is already in a0
-    call riscv64ScheduleNextThread
-
-    # load *ThreadState into t6
-    csrr t6, sscratch
-
-    ld t0, (32 * REGISTER_BYTES)(t6)
-    csrw sepc, t0
-
-    ld t0, (33 * REGISTER_BYTES)(t6)
-    csrw sstatus, t0
-
-    # load GPRs
-    # NOTE: it can seem that we are rewriting t6 here but t6 is the last register thus writing all 30
-    # registers before it is fine
-    .set i, 1
-    .rept 31
-        readGPR t6, %i
-        .set i, i + 1
-    .endr
-
-    sret
-

@@ -14,11 +14,19 @@ pub const ThreadState = extern struct {
     /// General purpose registers excluding x0, which is always 0.
     gprs: [saved_gpr_count]u64,
 
+    sscratch: u64,
+
     /// Current program counter.
     pc: u64,
 
     /// Supervisor status.
     status: SStatus,
+
+    /// Trap value
+    trap_value: u64,
+
+    /// Trap cause
+    trap_cause: u64,
 
     pub const return_addr = 0;
     pub const stack_ptr = 1;

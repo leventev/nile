@@ -5,7 +5,6 @@ const SyscallError = core.SyscallError;
 const slab_allocator = @import("mem/slab_allocator.zig");
 const scheduler = @import("scheduler.zig");
 const Process = @import("Process.zig");
-const Thread = @import("Thread.zig");
 const arch = @import("arch/arch.zig");
 const mm = @import("mem/mm.zig");
 const vfs = @import("vfs.zig");
